@@ -5,9 +5,16 @@ import { getSettings } from "./settings";
 import { DEFAULT_SLOTS, type SlotSpec } from "./conversation/brain";
 import { config } from "./config";
 
+// Work-rate questions from the TBT express recruiter handbook, asked by the live agent after the standard ones.
+export const WORK_RATE_QUESTIONS = [
+  { key: "recent_miles", prompt: "What were your best three weeks of miles last year?" },
+  { key: "weeks_out", prompt: "How many weeks do you usually stay out before going home?" },
+  { key: "med_card_expiry", prompt: "When does your DOT medical card expire?" },
+] as const;
+
 export const AGENT_TOOLS = [
   { name: "lookup_approved_answer", description: "Look up the approved answer to a driver question. Speak ONLY the returned text. If it says no approved answer exists, tell the driver Molly will confirm.", parameters: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
-  { name: "record_screening_answer", description: "Save one driver-reported screening answer.", parameters: { type: "object", properties: { key: { type: "string", enum: DEFAULT_SLOTS.map((s) => s.key).concat(["offer_interest", "concerns", "first_name"]) }, value: { type: "string" }, raw: { type: "string" }, status: { type: "string", enum: ["CAPTURED", "CORRECTED", "UNCLEAR"] } }, required: ["key", "value", "raw", "status"] } },
+  { name: "record_screening_answer", description: "Save one driver-reported screening answer.", parameters: { type: "object", properties: { key: { type: "string", enum: [...DEFAULT_SLOTS.map((s) => s.key), ...WORK_RATE_QUESTIONS.map((q) => q.key), "offer_interest", "concerns", "first_name"] }, value: { type: "string" }, raw: { type: "string" }, status: { type: "string", enum: ["CAPTURED", "CORRECTED", "UNCLEAR"] } }, required: ["key", "value", "raw", "status"] } },
   { name: "opt_out", description: "The driver asked not to be contacted. Call immediately, confirm politely, then end the call.", parameters: { type: "object", properties: { raw: { type: "string" } }, required: ["raw"] } },
   { name: "request_human", description: "Driver wants a human, or you cannot help. Returns whether a transfer may be attempted.", parameters: { type: "object", properties: { reason: { type: "string", enum: ["HUMAN_REQUESTED", "UNKNOWN_QUESTION", "ELIGIBILITY_EXCEPTION", "TECHNICAL"] } }, required: ["reason"] } },
   { name: "flag_for_recruiter", description: "Flag something Molly must review personally (e.g. accident, violation, exception). Do not judge eligibility.", parameters: { type: "object", properties: { reason: { type: "string", enum: ["ELIGIBILITY_EXCEPTION", "UNKNOWN_QUESTION", "TECHNICAL"] }, note: { type: "string" } }, required: ["reason", "note"] } },
@@ -42,7 +49,7 @@ Non-negotiable rules:
 Driver first name: {{driver_first_name}}. Offer version: {{offer_version_id}}.
 
 Interview topics, in order, skipping what is known:
-${slots.map((x, i) => `${i + 1}. ${x.key.replace(/_/g, " ")}: "${x.prompt}"`).join("\n")}
+${[...slots, ...WORK_RATE_QUESTIONS].map((x, i) => `${i + 1}. ${x.key.replace(/_/g, " ")}: "${x.prompt}"`).join("\n")}
 
 Then share at most two approved benefits that match what the driver said they need, ask about interest, and ${s.cdlBySms ? "if interested ask permission to text a secure CDL upload link (send_cdl_upload_link)" : "if interested say Molly will reach out to go over next steps and collect a copy of their CDL. Do not offer to text anything"}. Before ending, call set_call_outcome.`;
 }
