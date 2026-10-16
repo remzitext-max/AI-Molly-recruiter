@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   if (!key || !verifyRetellSignature(raw, req.headers.get("x-retell-signature"), key)) return NextResponse.json({ error: "invalid signature" }, { status: 401 });
   const body = JSON.parse(raw) as { name?: string; call?: { call_id?: string; metadata?: { attempt_id?: string } }; args?: Record<string, unknown> };
   const attempt = await db.callAttempt.findFirst({ where: { OR: [{ providerCallId: body.call?.call_id ?? "-" }, { id: body.call?.metadata?.attempt_id ?? "-" }] }, include: { lead: { include: { campaign: true } } } });
-  if (!attempt) return NextResponse.json({ result: "Unknown call. End politely and say Molly will follow up." });
+  if (!attempt) return NextResponse.json({ result: "Unknown call. End politely and say my manager will follow up." });
   const a = body.args ?? {};
   switch (body.name) {
     case "lookup_approved_answer": {
@@ -25,7 +25,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ result: `APPROVED ANSWER (say exactly): ${r.facts.map((f) => f.content).join(" ")}` });
       }
       await applyAgentAction(attempt.id, { type: "unanswered_question", question: q, reason: r.kind });
-      return NextResponse.json({ result: "NO APPROVED ANSWER. Say you don't want to give wrong information, you've noted the question, and Molly will confirm it." });
+      return NextResponse.json({ result: 'NO APPROVED ANSWER. Say: "About that, my manager will contact you with the details." Then offer: "If you want, I can have my manager contact you."' });
     }
     case "record_screening_answer":
       return NextResponse.json(await applyAgentAction(attempt.id, { type: "record_slot", ...a }));
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     case "request_human": {
       const r = await applyAgentAction(attempt.id, { type: "request_transfer", reason: a.reason ?? "HUMAN_REQUESTED" });
       const s = await db.user.findFirst({ where: { orgId: attempt.lead.orgId, availableForTransfer: true, transferPhoneE164: { not: null } } });
-      return NextResponse.json({ ...r, transfer_number: r.transfer === "pending" ? s?.transferPhoneE164 : undefined, say: r.transfer === "pending" ? "Tell the driver you're connecting them to Molly, a person on the recruiting team." : "Molly isn't available right now; ask for a good callback time." });
+      return NextResponse.json({ ...r, transfer_number: r.transfer === "pending" ? s?.transferPhoneE164 : undefined, say: r.transfer === "pending" ? "Tell the driver you're connecting them to your manager." : "Say your manager isn't available right now and will contact them; ask for a good time." });
     }
     case "flag_for_recruiter":
       return NextResponse.json(await applyAgentAction(attempt.id, { type: "flag_handoff", reason: a.reason, note: String(a.note ?? "") }));

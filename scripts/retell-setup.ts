@@ -42,8 +42,8 @@ async function main() {
         url: toolEndpoint(), speak_during_execution: false, speak_after_execution: true, timeout_ms: 10_000,
       })),
       {
-        type: "transfer_call", name: "transfer_to_molly",
-        description: "Transfer the call to Molly. Use only after request_human returned transfer \"pending\".",
+        type: "transfer_call", name: "transfer_to_manager",
+        description: "Transfer the call to the human recruiter (\"my manager\"). Use only after request_human returned transfer \"pending\".",
         transfer_destination: { type: "predefined", number: "{{transfer_number}}" },
         transfer_option: { type: "cold_transfer" },
       },
