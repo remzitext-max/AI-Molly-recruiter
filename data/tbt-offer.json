@@ -1,0 +1,26 @@
+{
+  "offerName": "TBT express driver offer",
+  "notes": "From recruiter-handbook.netlify.app and the owner's messages, 2026-10-16. Review, then tick the approval box and publish.",
+  "facts": [
+    { "key": "company.identity", "category": "company", "title": "Who we are", "content": "TBT express is the carrier, and Molly is the recruiter you'd work with.", "keywords": ["company", "who"], "confirmed": true },
+    { "key": "equipment.type", "category": "equipment", "title": "Equipment", "content": "We run dry van only, so no endorsements are needed.", "keywords": ["dry van", "trailer", "endorsement", "hazmat", "reefer", "flatbed"], "confirmed": true },
+    { "key": "equipment.truck", "category": "equipment", "title": "Truck assignment", "content": "I can't promise a specific truck, year, or a new unit. Molly can go over what's available.", "keywords": ["truck", "new truck", "year", "model"], "confirmed": true },
+    { "key": "requirements.experience", "category": "requirements", "title": "Experience", "content": "We need at least 2 years of solo experience, or at least 1 year as a team driver.", "keywords": ["experience", "years", "qualify"], "confirmed": true },
+    { "key": "requirements.record", "category": "requirements", "title": "Driving record", "content": "Your MVR and PSP can each show no more than 2 moving violations.", "keywords": ["mvr", "psp", "tickets", "violations", "record"], "confirmed": true },
+    { "key": "requirements.clearinghouse", "category": "requirements", "title": "Clearinghouse", "content": "Your Clearinghouse needs to be clear, and we can't move forward with a SAP history.", "keywords": ["clearinghouse", "sap", "drug"], "confirmed": true },
+    { "key": "orientation.process", "category": "orientation", "title": "Orientation", "content": "You're hired after you pass a pre-trip inspection and a road test at orientation.", "keywords": ["orientation", "road test", "pre-trip", "hired"], "confirmed": true },
+    { "key": "orientation.start", "category": "orientation", "title": "Start date", "content": "We're looking to start as soon as possible, and there's some flexibility on the date.", "keywords": ["start", "when"], "confirmed": true },
+    { "key": "orientation.truck_ready", "category": "orientation", "title": "Before the truck is ready", "content": "Plan for about two unpaid days before your truck is available.", "keywords": ["first day", "unpaid", "waiting"], "confirmed": true },
+    { "key": "pay.rate", "category": "pay", "title": "Pay rate (solo)", "content": "Solo pay is 75 to 85 cents per mile, depending on your driving record and whether you agree to a driver-facing camera. Molly will confirm your exact rate.", "keywords": ["solo", "cpm", "per mile", "pay", "camera"], "confirmed": true },
+    { "key": "pay.team", "category": "pay", "title": "Pay rate (team)", "content": "Team pay is up to $1.10 per mile, depending on your records and experience. Molly will confirm your exact rate.", "keywords": ["team", "team pay", "per mile"], "confirmed": true },
+    { "key": "pay.timing", "category": "pay", "title": "When you get paid", "content": "Your first week is paid in your second week.", "keywords": ["when paid", "first check", "payday", "hold"], "confirmed": true },
+    { "key": "pay.tax", "category": "pay", "title": "Tax status", "content": "You'd be a 1099 contractor, so no taxes are withheld. For tax questions, please talk to a tax professional.", "keywords": ["1099", "w2", "w-2", "tax", "taxes"], "confirmed": true },
+    { "key": "deductions.escrow", "category": "deductions", "title": "Escrow", "content": "Escrow is returned after 45 days, less any claims, damage, or violations.", "keywords": ["escrow", "deposit"], "confirmed": true },
+    { "key": "home_time.policy", "category": "home_time", "title": "Home time", "content": "Home time depends on how long you stay out: 3 weeks out gets 3 days home, 4 weeks out gets 4 days home, and 5 weeks out gets 6 days home.", "keywords": ["home time", "days off", "home"], "confirmed": true },
+    { "key": "operating_area.lanes", "category": "operating_area", "title": "Where we run", "content": "We don't run to the West Coast or into New York City. We run the rest of the states.", "keywords": ["west coast", "california", "new york", "nyc", "lanes", "otr"], "confirmed": true },
+    { "key": "bonus.sign_on", "category": "bonus", "title": "Sign-on bonus (solo)", "content": "Solo drivers get a $3,000 sign-on bonus, paid out as $1,000 a month.", "keywords": ["sign on", "sign-on", "signing", "solo"], "confirmed": true },
+    { "key": "bonus.team_sign_on", "category": "bonus", "title": "Sign-on bonus (team)", "content": "Teams get a $20,000 sign-on bonus, $10,000 for each driver. It's paid out as $4,000 every 3 months, and $8,000 at month 12.", "keywords": ["team bonus", "team sign on", "team"], "confirmed": true },
+    { "key": "bonus.referral", "category": "bonus", "title": "Referral bonus", "content": "You get a $500 referral bonus when a driver you refer has worked with us for 2 weeks.", "keywords": ["referral", "refer"], "confirmed": true },
+    { "key": "benefits.policy", "category": "benefits", "title": "Benefits", "content": "", "keywords": ["benefits", "insurance", "health"], "confirmed": false }
+  ]
+}
