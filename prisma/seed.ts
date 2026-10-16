@@ -12,7 +12,7 @@ async function main() {
 
   await db.systemSetting.upsert({ where: { id: "global" }, create: { id: "global", cdlBySms: process.env.CDL_BY_SMS !== "false" }, update: {} });
   let org = await db.organization.findFirst();
-  if (!org) org = await db.organization.create({ data: { name: live ? (process.env.ORG_NAME ?? "Your Company") : DEMO_ORG_NAME } });
+  if (!org) org = await db.organization.create({ data: { name: process.env.ORG_NAME ?? (live ? "Your Company" : DEMO_ORG_NAME) } });
 
   const admin = await db.user.upsert({
     where: { email: process.env.SEED_ADMIN_EMAIL ?? "admin@demo.local" },
