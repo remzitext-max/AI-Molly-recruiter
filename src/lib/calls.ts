@@ -96,6 +96,7 @@ export async function attemptCallJob(job: Job) {
       dynamicVariables: {
         driver_first_name: lead.firstName ?? "", company_name: (await db.organization.findUnique({ where: { id: lead.orgId } }))?.name ?? "",
         offer_version_id: offer?.id ?? "", attempt_id: attempt.id,
+        driver_timezone: lead.timezone ?? "unknown", ...(await transferVariables(lead.orgId)),
       },
     });
     await db.callAttempt.update({ where: { id: attempt.id }, data: { providerCallId, status: "DIALING", statusRank: STATUS_RANK.DIALING } });
@@ -569,4 +570,11 @@ export async function syncSourceJob(job: Job) {
     if (r.sourceSystem !== SHEETS_SOURCE) await db.leadSourceRecord.update({ where: { id: r.id }, data: { syncStatus: "NOT_APPLICABLE" } });
   }
   if (recs.some((r) => r.sourceSystem === SHEETS_SOURCE)) await writeBackLeadStatus(leadId);
+}
+
+// Molly's direct line for the Retell transfer tool and the voicemail callback number.
+async function transferVariables(orgId: string): Promise<Record<string, string>> {
+  const r = await db.user.findFirst({ where: { orgId, availableForTransfer: true, transferPhoneE164: { not: null } } });
+  const phone = r?.transferPhoneE164 ?? "";
+  return { transfer_number: phone, recruiter_phone: phone };
 }
