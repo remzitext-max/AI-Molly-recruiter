@@ -97,6 +97,7 @@ export async function attemptCallJob(job: Job) {
         driver_first_name: lead.firstName ?? "", company_name: (await db.organization.findUnique({ where: { id: lead.orgId } }))?.name ?? "",
         offer_version_id: offer?.id ?? "", attempt_id: attempt.id,
         driver_timezone: lead.timezone ?? "unknown", ...(await transferVariables(lead.orgId)),
+        applied_when: appliedWhen(lead.permissions.find((p) => p.scope === "AI_CALL" && !p.revokedAt)?.grantedAt ?? null, new Date()),
       },
     });
     await db.callAttempt.update({ where: { id: attempt.id }, data: { providerCallId, status: "DIALING", statusRank: STATUS_RANK.DIALING } });
@@ -577,4 +578,17 @@ async function transferVariables(orgId: string): Promise<Record<string, string>>
   const r = await db.user.findFirst({ where: { orgId, availableForTransfer: true, transferPhoneE164: { not: null } } });
   const phone = r?.transferPhoneE164 ?? "";
   return { transfer_number: phone, recruiter_phone: phone };
+}
+
+// Rounded, truthful phrase for when the driver applied, from the recorded call permission date.
+export function appliedWhen(appliedAt: Date | null, now: Date): string {
+  if (!appliedAt) return "a while back";
+  const days = Math.floor((now.getTime() - appliedAt.getTime()) / 86_400_000);
+  if (days < 2) return "recently";
+  if (days < 7) return "a few days ago";
+  if (days < 14) return "about a week ago";
+  if (days < 25) return `about ${Math.round(days / 7)} weeks ago`;
+  if (days < 45) return "about a month ago";
+  if (days < 365) return `about ${Math.round(days / 30)} months ago`;
+  return "over a year ago";
 }

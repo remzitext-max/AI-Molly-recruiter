@@ -11,6 +11,7 @@ import { parseLeadFile, guessMapping, createImportPreview, previewBatch, commitB
 import { verifyRetellSignature } from "@/adapters/live/retell";
 import crypto from "node:crypto";
 import { db } from "@/lib/db";
+import { appliedWhen } from "@/lib/calls";
 import { resetDb, seedBase } from "./helpers";
 
 describe("knowledge answers", () => {
@@ -164,5 +165,18 @@ describe("running without CDL texts", () => {
     expect(said.join(" ")).toMatch(/get a copy of your CDL/);
     expect(said.join(" ")).not.toMatch(/upload link/i);
     expect(all).not.toContain("send_cdl_link");
+  });
+});
+
+describe("appliedWhen", () => {
+  const now = new Date("2026-10-16T12:00:00Z");
+  const ago = (d: number) => new Date(now.getTime() - d * 86_400_000);
+  it("rounds the real application date and never invents one", () => {
+    expect(appliedWhen(null, now)).toBe("a while back");
+    expect(appliedWhen(ago(10), now)).toBe("about a week ago");
+    expect(appliedWhen(ago(21), now)).toBe("about 3 weeks ago");
+    expect(appliedWhen(ago(30), now)).toBe("about a month ago");
+    expect(appliedWhen(ago(70), now)).toBe("about 2 months ago");
+    expect(appliedWhen(ago(400), now)).toBe("over a year ago");
   });
 });
