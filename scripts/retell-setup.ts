@@ -25,7 +25,7 @@ async function main() {
   if (!config.retell.apiKey) throw new Error("RETELL_API_KEY is empty in .env");
   const voiceArg = process.argv[2];
 
-  await retell<unknown[]>("GET", "/list-agents"); // fails fast on a wrong key
+  const agents = await retell<{ agent_id: string; agent_name?: string }[]>("GET", "/list-agents"); // fails fast on a wrong key
   console.log("Retell API key OK");
 
   const org = await db.organization.findFirst();
@@ -60,7 +60,9 @@ async function main() {
     max_call_duration_ms: 15 * 60_000,
   };
 
-  const existing = config.retell.agentId;
+  // Reuse an agent this script made earlier, so a re-run never creates a duplicate.
+  const existing = config.retell.agentId ?? agents.find((a) => a.agent_name === agentBody.agent_name)?.agent_id;
+  if (existing && !config.retell.agentId) console.log(`Found existing agent. Put this line in .env:\nRETELL_AGENT_ID=${existing}`);
   if (existing) {
     const agent = await retell<{ response_engine: { llm_id?: string }; voice_id: string }>("GET", `/get-agent/${existing}`);
     if (!agent.response_engine.llm_id) throw new Error("Existing agent does not use a Retell LLM; clear RETELL_AGENT_ID to create a new one");
@@ -78,6 +80,10 @@ async function main() {
   if (!voiceArg) console.log(`Using test voice ${DEFAULT_VOICE}. Re-run with Molly's voice ID to switch.`);
 }
 
+let completed = false;
+process.on("exit", (code) => console.log(completed ? "Setup finished" : `Setup stopped before finishing (exit code ${code})`));
+
 main()
-  .catch((e) => { console.error(e instanceof Error ? e.message : e); process.exitCode = 1; })
+  .then(() => { completed = true; })
+  .catch((e) => { console.error("SETUP FAILED:", e instanceof Error ? e.stack ?? e.message : e); process.exitCode = 1; })
   .finally(() => db.$disconnect());
