@@ -1,0 +1,51 @@
+# Local demo / single-server deployment: Postgres + migrations + web + worker.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: molly
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-molly-local-only}
+      POSTGRES_DB: molly
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U molly"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://molly:${POSTGRES_PASSWORD:-molly-local-only}@db:5432/molly
+    command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts"
+    depends_on:
+      db: { condition: service_healthy }
+
+  web:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://molly:${POSTGRES_PASSWORD:-molly-local-only}@db:5432/molly
+      STORAGE_DIR: /data/storage
+    ports: ["127.0.0.1:3000:3000"]
+    volumes: [storage:/data/storage]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  worker:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://molly:${POSTGRES_PASSWORD:-molly-local-only}@db:5432/molly
+      STORAGE_DIR: /data/storage
+    command: ["npx", "tsx", "worker/index.ts"]
+    volumes: [storage:/data/storage]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  storage:

@@ -1,0 +1,7 @@
+node_modules
+.next
+.env
+storage/
+*.tsbuildinfo
+next-env.d.ts
+storage-test/

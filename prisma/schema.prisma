@@ -1,0 +1,566 @@
+// Molly AI recruiting assistant - data model.
+// Pipeline status, call-attempt status, document status and contact permission
+// are deliberately separate so a failed call never erases application progress.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  RECRUITER
+}
+
+enum PipelineStatus {
+  NEW
+  NEEDS_PERMISSION
+  NEEDS_TIMEZONE
+  QUEUED
+  CONTACTING
+  CALLBACK_SCHEDULED
+  INTERESTED
+  NOT_INTERESTED
+  DOCS_REQUESTED
+  DOCS_RECEIVED
+  HANDOFF_READY
+  HANDED_OFF
+  OPTED_OUT
+  CLOSED
+}
+
+enum DocumentStatus {
+  NONE
+  REQUESTED
+  RECEIVED
+  EXPIRED
+  DELETED
+}
+
+enum CallStatus {
+  SCHEDULED
+  DIALING
+  RINGING
+  IN_PROGRESS
+  COMPLETED
+  NO_ANSWER
+  BUSY
+  VOICEMAIL
+  FAILED
+  UNKNOWN
+  CANCELED
+}
+
+enum CallOutcome {
+  INTERESTED
+  NOT_INTERESTED
+  CALLBACK
+  OPT_OUT
+  HUMAN_REQUESTED
+  VOICEMAIL_LEFT
+  NO_CONTACT
+  WRONG_NUMBER
+  INCOMPLETE
+  TECHNICAL_FAILURE
+}
+
+enum PermissionScope {
+  AI_CALL
+  SMS
+  MANUAL_CALL
+}
+
+enum TaskType {
+  CALLBACK
+  HANDOFF
+  TRANSFER_FAILED
+  UNANSWERED_QUESTION
+  REVIEW_UNCLEAR
+  RESOLVE_TIMEZONE
+  RECORD_PERMISSION
+  TECHNICAL_ISSUE
+}
+
+enum TaskStatus {
+  OPEN
+  DONE
+  CANCELED
+}
+
+enum HandoffReason {
+  READY
+  HUMAN_REQUESTED
+  UNKNOWN_QUESTION
+  ELIGIBILITY_EXCEPTION
+  TECHNICAL
+}
+
+enum TransferStatus {
+  NOT_ATTEMPTED
+  ATTEMPTING
+  CONFIRMED
+  FAILED
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+  DEAD
+  CANCELED
+}
+
+enum OfferVersionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AssignmentMode {
+  MANUAL
+  ROUND_ROBIN
+}
+
+model Organization {
+  id        String     @id @default(cuid())
+  name      String
+  createdAt DateTime   @default(now())
+  users     User[]
+  campaigns Campaign[]
+  leads     Lead[]
+  offers    Offer[]
+}
+
+model User {
+  id                     String   @id @default(cuid())
+  orgId                  String
+  org                    Organization @relation(fields: [orgId], references: [id])
+  email                  String   @unique
+  name                   String
+  passwordHash           String
+  role                   Role     @default(RECRUITER)
+  active                 Boolean  @default(true)
+  inRoundRobin           Boolean  @default(true)
+  availableForTransfer   Boolean  @default(false)
+  transferPhoneE164      String?
+  createdAt              DateTime @default(now())
+  sessions               Session[]
+  assignedLeads          Lead[]   @relation("AssignedLeads")
+  tasks                  Task[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+// Singleton row (id = "global") holding org-wide operating controls.
+model SystemSetting {
+  id                         String    @id @default("global")
+  globalPause                Boolean   @default(false)
+  liveContactEnabled         Boolean   @default(false)
+  contactPolicyConfirmedAt   DateTime?
+  contactPolicyConfirmedById String?
+  contactPolicyNotes         String?
+  requireCallPermission      Boolean   @default(true)
+  requireSmsPermission       Boolean   @default(true)
+  allowVerbalSmsConsent      Boolean   @default(true)
+  recordingEnabled           Boolean   @default(false)
+  recordingNotice            String    @default("This call may be recorded for quality and recruiting records.")
+  documentRetentionDays      Int       @default(30)
+  uploadLinkTtlMinutes       Int       @default(60)
+  /// Off = the AI does not text a CDL upload link; the recruiter collects the CDL.
+  cdlBySms                   Boolean   @default(true)
+  maxUploadBytes             Int       @default(10485760)
+  screeningConfig            Json?
+  aiDisclosure               String    @default("Hi, this is the AI recruiting assistant for {company}, calling on behalf of Molly, one of our recruiters.")
+  voicemailMessage           String    @default("Hi, this is the AI recruiting assistant for {company}, calling for Molly about a truck driving position you applied for. You can reach Molly at {recruiterPhone}. Thanks!")
+  updatedAt                  DateTime  @updatedAt
+}
+
+model Campaign {
+  id                  String         @id @default(cuid())
+  orgId               String
+  org                 Organization   @relation(fields: [orgId], references: [id])
+  name                String
+  isDemo              Boolean        @default(false)
+  paused              Boolean        @default(false)
+  offerId             String?
+  offer               Offer?         @relation(fields: [offerId], references: [id])
+  assignmentMode      AssignmentMode @default(ROUND_ROBIN)
+  rrCursor            Int            @default(0)
+  maxAttempts         Int            @default(3)
+  retryDelayMinutes   Int            @default(240)
+  contactWindowStart  String         @default("09:00")
+  contactWindowEnd    String         @default("19:00")
+  contactDays         String         @default("1,2,3,4,5,6") // ISO weekdays
+  createdAt           DateTime       @default(now())
+  leads               Lead[]
+}
+
+model Lead {
+  id                 String          @id @default(cuid())
+  orgId              String
+  org                Organization    @relation(fields: [orgId], references: [id])
+  campaignId         String
+  campaign           Campaign        @relation(fields: [campaignId], references: [id])
+  isDemo             Boolean         @default(false)
+  firstName          String?
+  lastName           String?
+  phoneE164          String
+  phoneRaw           String?
+  email              String?
+  state              String?
+  zip                String?
+  timezone           String?
+  timezoneSource     String?
+  pipelineStatus     PipelineStatus  @default(NEW)
+  documentStatus     DocumentStatus  @default(NONE)
+  optedOutAt         DateTime?
+  assignedToId       String?
+  assignedTo         User?           @relation("AssignedLeads", fields: [assignedToId], references: [id])
+  attemptCount       Int             @default(0)
+  activeAttemptId    String?         @unique
+  nextContactAt      DateTime?
+  callbackAt         DateTime?
+  queueReason        String?
+  lastOfferVersionId String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  sourceRecords      LeadSourceRecord[]
+  permissions        ContactPermission[]
+  screening          ScreeningField[]
+  calls              CallAttempt[]
+  messages           Message[]
+  documents          Document[]
+  uploadTokens       UploadToken[]
+  tasks              Task[]
+  handoffs           Handoff[]
+  questions          UnansweredQuestion[]
+  events             ActivityEvent[]
+  assignments        AssignmentHistory[]
+
+  @@unique([orgId, phoneE164])
+  @@index([pipelineStatus])
+  @@index([assignedToId])
+}
+
+model LeadSourceRecord {
+  id             String   @id @default(cuid())
+  leadId         String
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  sourceSystem   String   // CSV, XLSX, MANUAL, WEBHOOK, GOOGLE_BOARD...
+  sourceRecordId String
+  importBatchId  String?
+  raw            Json?
+  syncStatus     String?
+  lastSyncedAt   DateTime?
+  createdAt      DateTime @default(now())
+
+  @@unique([sourceSystem, sourceRecordId])
+}
+
+model AssignmentHistory {
+  id          String   @id @default(cuid())
+  leadId      String
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  fromUserId  String?
+  toUserId    String?
+  method      String   // MANUAL | ROUND_ROBIN
+  byUserId    String?
+  createdAt   DateTime @default(now())
+}
+
+model Suppression {
+  id        String   @id @default(cuid())
+  phoneE164 String   @unique
+  reason    String
+  source    String
+  createdAt DateTime @default(now())
+}
+
+model ContactPermission {
+  id        String          @id @default(cuid())
+  leadId    String
+  lead      Lead            @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  scope     PermissionScope
+  source    String          // e.g. "Job application form", "Verbal on call <id>"
+  grantedAt DateTime
+  evidence  String?
+  isDemo    Boolean         @default(false)
+  revokedAt DateTime?
+  createdById String?
+  createdAt DateTime        @default(now())
+}
+
+// Screening data. reportedValue is what the driver said; verifiedValue is only
+// ever set by a human recruiter/safety team.
+model ScreeningField {
+  id             String    @id @default(cuid())
+  leadId         String
+  lead           Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  key            String
+  reportedValue  String?
+  rawUtterance   String?
+  status         String    @default("CAPTURED") // CAPTURED | UNCLEAR | CORRECTED
+  callAttemptId  String?
+  verifiedValue  String?
+  verifiedById   String?
+  verifiedAt     DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([leadId, key])
+}
+
+model CallAttempt {
+  id              String       @id @default(cuid())
+  leadId          String
+  lead            Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  isDemo          Boolean      @default(false)
+  provider        String
+  providerCallId  String?      @unique
+  idempotencyKey  String       @unique
+  direction       String       @default("OUTBOUND")
+  status          CallStatus   @default(SCHEDULED)
+  statusRank      Int          @default(0)
+  outcome         CallOutcome?
+  offerVersionId  String?
+  startedAt       DateTime?
+  endedAt         DateTime?
+  summary         String?
+  transcript      Json?
+  recordingKey    String?
+  recordingNoticeGiven Boolean @default(false)
+  metrics         Json?
+  personaKey      String?
+  lastEventAt     DateTime?
+  errorMessage    String?
+  createdAt       DateTime     @default(now())
+
+  @@index([leadId, status])
+}
+
+model Message {
+  id                String   @id @default(cuid())
+  leadId            String
+  lead              Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  isDemo            Boolean  @default(false)
+  direction         String   // OUTBOUND | INBOUND
+  purpose           String   // CDL_LINK | REPLY | GENERAL
+  body              String
+  provider          String
+  providerMessageId String?  @unique
+  idempotencyKey    String?  @unique
+  status            String   @default("QUEUED")
+  createdAt         DateTime @default(now())
+}
+
+model UploadToken {
+  id          String    @id @default(cuid())
+  leadId      String
+  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  maxFiles    Int       @default(4)
+  filesUsed   Int       @default(0)
+  completedAt DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model Document {
+  id           String    @id @default(cuid())
+  leadId       String
+  lead         Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  isDemo       Boolean   @default(false)
+  kind         String    @default("CDL")
+  storageKey   String    @unique
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  uploadedAt   DateTime  @default(now())
+  deleteAfter  DateTime
+  deletedAt    DateTime?
+  extraction   Json?
+  extractionReviewedById String?
+}
+
+model Task {
+  id           String     @id @default(cuid())
+  leadId       String
+  lead         Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type         TaskType
+  status       TaskStatus @default(OPEN)
+  assignedToId String?
+  assignedTo   User?      @relation(fields: [assignedToId], references: [id])
+  dueAt        DateTime?
+  title        String
+  notes        String?
+  dedupeKey    String?    @unique
+  createdAt    DateTime   @default(now())
+  completedAt  DateTime?
+}
+
+model Handoff {
+  id              String         @id @default(cuid())
+  leadId          String
+  lead            Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  recruiterId     String?
+  reason          HandoffReason
+  transferStatus  TransferStatus @default(NOT_ATTEMPTED)
+  callAttemptId   String?
+  payload         Json
+  createdAt       DateTime       @default(now())
+}
+
+model UnansweredQuestion {
+  id            String   @id @default(cuid())
+  leadId        String
+  lead          Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  callAttemptId String?
+  question      String
+  status        String   @default("OPEN")
+  answer        String?
+  createdAt     DateTime @default(now())
+}
+
+model Offer {
+  id              String         @id @default(cuid())
+  orgId           String
+  org             Organization   @relation(fields: [orgId], references: [id])
+  name            String
+  activeVersionId String?
+  createdAt       DateTime       @default(now())
+  versions        OfferVersion[]
+  campaigns       Campaign[]
+}
+
+// Approved facts. Facts are JSON: [{key, category, title, content, keywords[], confirmed}]
+model OfferVersion {
+  id          String             @id @default(cuid())
+  offerId     String
+  offer       Offer              @relation(fields: [offerId], references: [id])
+  version     Int
+  status      OfferVersionStatus @default(DRAFT)
+  synthetic   Boolean            @default(false)
+  facts       Json
+  notes       String?
+  createdById String?
+  publishedAt DateTime?
+  createdAt   DateTime           @default(now())
+
+  @@unique([offerId, version])
+}
+
+model VoiceProfile {
+  id                 String    @id @default(cuid())
+  name               String    @unique
+  provider           String
+  providerVoiceId    String?
+  status             String    @default("NOT_CREATED") // NOT_CREATED | PENDING_VERIFICATION | READY | FAILED | MOCK
+  isMock             Boolean   @default(false)
+  consentScope       String?
+  consentDate        DateTime?
+  consentRecordedById String?
+  consentNotes       String?
+  verificationStatus String?
+  notes              String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  previews           VoicePreview[]
+}
+
+model VoicePreview {
+  id             String       @id @default(cuid())
+  voiceProfileId String
+  voiceProfile   VoiceProfile @relation(fields: [voiceProfileId], references: [id], onDelete: Cascade)
+  kind           String
+  text           String
+  audioKey       String?
+  synthetic      Boolean      @default(true)
+  latencyMs      Int?
+  error          String?
+  createdAt      DateTime     @default(now())
+}
+
+model ImportBatch {
+  id           String   @id @default(cuid())
+  fileName     String
+  fileSha256   String
+  sourceSystem String
+  status       String   @default("PREVIEW") // PREVIEW | COMMITTED | DISCARDED
+  mapping      Json
+  rows         Json
+  summary      Json?
+  campaignId   String
+  isDemo       Boolean  @default(false)
+  createdById  String
+  createdAt    DateTime @default(now())
+  committedAt  DateTime?
+}
+
+model ActivityEvent {
+  id        String   @id @default(cuid())
+  orgId     String?
+  leadId    String?
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  actorType String   // USER | AI | SYSTEM | PROVIDER | DRIVER
+  actorId   String?
+  type      String
+  message   String
+  data      Json?
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+model Job {
+  id             String    @id @default(cuid())
+  type           String
+  payload        Json
+  status         JobStatus @default(PENDING)
+  runAt          DateTime  @default(now())
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(5)
+  lockedAt       DateTime?
+  lockedBy       String?
+  lastError      String?
+  idempotencyKey String?   @unique
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, runAt])
+}
+
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String
+  eventId     String
+  receivedAt  DateTime @default(now())
+  processedAt DateTime?
+
+  @@unique([provider, eventId])
+}
+
+/// Saved settings for a polled lead source (one row per connector, e.g. "google-sheets").
+model SourceConnection {
+  id          String    @id
+  orgId       String
+  campaignId  String?
+  mapping     Json?
+  autoSync    Boolean   @default(false)
+  pollMinutes Int       @default(5)
+  lastSyncAt  DateTime?
+  lastSummary Json?
+  lastError   String?
+  updatedAt   DateTime  @updatedAt
+}
