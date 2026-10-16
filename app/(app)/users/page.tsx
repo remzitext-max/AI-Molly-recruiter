@@ -59,8 +59,8 @@ export default async function Users({ searchParams }: { searchParams: Promise<{ 
                   <input type="checkbox" name="active" defaultChecked={x.active} title="active" />
                   <input type="checkbox" name="rr" defaultChecked={x.inRoundRobin} title="round-robin" />
                   <input type="checkbox" name="avail" defaultChecked={x.availableForTransfer} title="available" />
-                  <input name="transferPhone" defaultValue={x.transferPhoneE164 ?? ""} placeholder="+1…" size={14} />
-                  <input name="password" type="password" placeholder="leave blank" size={12} />
+                  <input name="transferPhone" type="tel" autoComplete="off" defaultValue={x.transferPhoneE164 ?? ""} placeholder="+1…" size={14} />
+                  <input name="password" type="password" autoComplete="new-password" placeholder="leave blank" size={12} />
                   <button className="secondary">Save</button> {!x.active && <Badge v="INACTIVE" tone="bad" />}
                 </form>
               </td>
