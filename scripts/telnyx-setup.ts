@@ -76,7 +76,7 @@ async function main() {
   const body = {
     name: `${company} - Molly AI recruiter`,
     instructions: await buildAgentPrompt(company, "the transfer tool", facts),
-    greeting: "<assistant-speaks-first-with-model-generated-message>",
+    greeting: "{{time_greeting}}! Is this {{driver_first_name}}?",
     enabled_features: ["telephony"],
     ...(process.env.TELNYX_MODEL ? { model: process.env.TELNYX_MODEL } : {}),
     tools,

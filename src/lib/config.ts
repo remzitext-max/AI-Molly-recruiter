@@ -37,6 +37,11 @@ export const config = {
   get voiceProvider(): "retell" | "telnyx" {
     return env("VOICE_PROVIDER") === "telnyx" ? "telnyx" : "retell";
   },
+  /** How the live agent introduces itself, e.g. "Crystal, Molly's assistant". */
+  agentPersona: {
+    get name() { return env("AGENT_NAME") ?? "Crystal"; },
+    get role() { return env("AGENT_ROLE") ?? "Molly's assistant"; },
+  },
   telnyx: {
     get apiKey() { return env("TELNYX_API_KEY"); },
     get assistantId() { return env("TELNYX_ASSISTANT_ID"); },
