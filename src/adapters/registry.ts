@@ -4,6 +4,7 @@ import path from "node:path";
 import { config } from "../lib/config";
 import { MockExtractor, MockGoogleSheet, MockSms, MockSynth, MockTelephony, MockVoiceAgent } from "./mock";
 import { RetellVoiceAgent } from "./live/retell";
+import { TelnyxVoiceAgent } from "./live/telnyx";
 import { RingCentralSms, RingCentralTelephony } from "./live/ringcentral";
 import { HeyGenSynth } from "./live/heygen";
 import { NoExtraction } from "./live/unconfigured";
@@ -28,7 +29,7 @@ export function getAdapters(): Adapters {
   if (cache && cache.mode === config.mode && !override) return cache.a;
   const live = config.mode === "live";
   const a: Adapters = {
-    voice: live ? new RetellVoiceAgent() : new MockVoiceAgent(),
+    voice: !live ? new MockVoiceAgent() : config.voiceProvider === "telnyx" ? new TelnyxVoiceAgent() : new RetellVoiceAgent(),
     sms: live ? new RingCentralSms() : new MockSms(),
     telephony: live ? new RingCentralTelephony() : new MockTelephony(),
     storage: new LocalPrivateStorage(path.resolve(config.storageDir, "private")),

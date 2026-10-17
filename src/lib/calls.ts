@@ -282,7 +282,7 @@ const ActionSchema: z.ZodType<AgentAction> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("wrong_number") }),
   z.object({ type: z.literal("request_transfer"), reason: z.enum(["HUMAN_REQUESTED", "UNKNOWN_QUESTION", "ELIGIBILITY_EXCEPTION", "TECHNICAL"]) }),
   z.object({ type: z.literal("flag_handoff"), reason: z.enum(["HUMAN_REQUESTED", "UNKNOWN_QUESTION", "ELIGIBILITY_EXCEPTION", "TECHNICAL"]), note: z.string().max(1000) }),
-  z.object({ type: z.literal("schedule_callback"), at: z.string().datetime().nullable(), raw: z.string().max(1000) }),
+  z.object({ type: z.literal("schedule_callback"), at: z.string().datetime({ offset: true }).nullable(), raw: z.string().max(1000) }),
   z.object({ type: z.literal("send_cdl_link") }),
   z.object({ type: z.literal("sensitive_data_warning") }),
   z.object({ type: z.literal("injection_attempt"), raw: z.string().max(2000) }),

@@ -33,6 +33,21 @@ export const config = {
     get agentId() { return env("RETELL_AGENT_ID"); },
     get fromNumber() { return env("RETELL_FROM_NUMBER"); },
   },
+  /** Which live voice-agent provider places AI calls: "retell" (default) or "telnyx". */
+  get voiceProvider(): "retell" | "telnyx" {
+    return env("VOICE_PROVIDER") === "telnyx" ? "telnyx" : "retell";
+  },
+  telnyx: {
+    get apiKey() { return env("TELNYX_API_KEY"); },
+    get assistantId() { return env("TELNYX_ASSISTANT_ID"); },
+    /** TeXML application ID the AI call is placed through (the assistant's default_texml_app_id). */
+    get texmlAppId() { return env("TELNYX_TEXML_APP_ID"); },
+    get fromNumber() { return env("TELNYX_FROM_NUMBER"); },
+    /** Optional: enables call-status lookups for reconciliation. */
+    get accountSid() { return env("TELNYX_ACCOUNT_SID"); },
+    /** Shared secret Telnyx sends back on tool and status requests (set in the assistant by scripts/telnyx-setup.ts). */
+    get webhookToken() { return env("TELNYX_WEBHOOK_TOKEN"); },
+  },
   ringcentral: {
     get serverUrl() { return env("RINGCENTRAL_SERVER_URL") ?? "https://platform.ringcentral.com"; },
     get clientId() { return env("RINGCENTRAL_CLIENT_ID"); },

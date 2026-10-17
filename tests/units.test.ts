@@ -12,6 +12,7 @@ import { verifyRetellSignature } from "@/adapters/live/retell";
 import crypto from "node:crypto";
 import { db } from "@/lib/db";
 import { appliedWhen } from "@/lib/calls";
+import { mapTelnyxCallback, parseTelnyxBody } from "@/lib/telnyx-mapping";
 import { resetDb, seedBase } from "./helpers";
 
 describe("knowledge answers", () => {
@@ -178,5 +179,17 @@ describe("appliedWhen", () => {
     expect(appliedWhen(ago(30), now)).toBe("about a month ago");
     expect(appliedWhen(ago(70), now)).toBe("about 2 months ago");
     expect(appliedWhen(ago(400), now)).toBe("over a year ago");
+  });
+});
+
+describe("Telnyx callbacks", () => {
+  it("maps TeXML status callbacks and AI conversation transcripts", () => {
+    const form = parseTelnyxBody("CallSid=v3%3Aabc&CallStatus=completed&AnsweredBy=machine_end_beep", "application/x-www-form-urlencoded");
+    expect(mapTelnyxCallback(form, "att1")).toMatchObject({ provider: "telnyx", providerCallId: "v3:abc", attemptId: "att1", type: "call_ended", status: "VOICEMAIL" });
+    expect(mapTelnyxCallback({ CallSid: "v3:abc", CallStatus: "no-answer" }, "att1")).toMatchObject({ status: "NO_ANSWER" });
+    expect(mapTelnyxCallback({ CallSid: "v3:abc", CallStatus: "answered" }, "att1")).toMatchObject({ type: "call_answered" });
+    const conv = { data: { event_type: "call.conversation.ended", payload: { conversation_id: "c1", messages: [{ role: "assistant", content: "Hi, is this Sam?" }, { role: "user", content: "Yes" }, { role: "tool", content: "{}" }] } } };
+    expect(mapTelnyxCallback(conv, "att1")).toMatchObject({ type: "call_ended", eventId: "conversation_ended:c1", transcript: [{ speaker: "agent", text: "Hi, is this Sam?" }, { speaker: "driver", text: "Yes" }] });
+    expect(mapTelnyxCallback({ CallSid: "x", CallStatus: "weird" }, undefined)).toBeNull();
   });
 });

@@ -71,3 +71,14 @@ Confirmed by the owner on 2026-10-15 that leads arrive in a Google Sheet.
 **Endpoints used** (from Google's documentation): token `POST https://oauth2.googleapis.com/token` (JWT bearer grant, RS256, 1-hour assertion); read `GET https://sheets.googleapis.com/v4/spreadsheets/{id}/values/{range}`; write `PUT .../values/{cell}?valueInputOption=RAW`. Scope `spreadsheets.readonly`, or `spreadsheets` when write-back is on. Google Sheets API use is free within Google's quotas.
 
 **Not yet verified:** reading your actual sheet (no credentials supplied). Tested here against a local demo sheet and with a simulated Google API.
+
+
+## Telnyx AI Assistant (alternative voice agent)
+
+Use this when Retell outbound calling is not available. Set `VOICE_PROVIDER=telnyx`.
+
+1. In the Telnyx portal create an API key and put it in `TELNYX_API_KEY`. Put the Telnyx number in `TELNYX_FROM_NUMBER` and a long random string in `TELNYX_WEBHOOK_TOKEN`.
+2. Run `docker compose exec web npx tsx scripts/telnyx-setup.ts`. It creates the assistant with the same prompt and tools as the Retell agent (webhook tools call `/api/agent/telnyx-tools`, plus transfer to the available recruiter and hangup) and prints `TELNYX_ASSISTANT_ID` and `TELNYX_TEXML_APP_ID`.
+3. In the portal, give the assistant's TeXML application the outbound voice profile, then restart the app.
+
+Calls are placed with `POST /v2/texml/ai_calls/{TELNYX_TEXML_APP_ID}`. Status callbacks and the conversation-ended callback go to `/api/webhooks/telnyx` with the token in the URL. Transfers are not confirmed by an event, so a transfer always ends with the callback task from the transfer timeout unless the recruiter updates it.
