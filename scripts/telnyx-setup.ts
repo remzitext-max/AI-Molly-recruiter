@@ -7,6 +7,7 @@ import { config } from "../src/lib/config";
 import { db } from "../src/lib/db";
 import { getSettings } from "../src/lib/settings";
 import { AGENT_TOOLS, buildAgentPrompt, voicemailText } from "../src/lib/agent-config";
+import { getActiveOfferVersion } from "../src/lib/knowledge";
 
 const BASE = "https://api.telnyx.com/v2";
 const DEFAULT_VOICE = "Telnyx.KokoroTTS.af_heart"; // test voice until Molly's voice is set up
@@ -50,6 +51,15 @@ async function main() {
   const managerPhone = manager?.transferPhoneE164 ?? "";
   if (!managerPhone) console.log("No user is marked available for transfer, so the assistant gets no transfer tool.");
 
+  // The published offer of the real campaign goes into the prompt. Re-run this script after publishing a new offer version.
+  const campaigns = await db.campaign.findMany({ where: { isDemo: false, offerId: { not: null } }, orderBy: { createdAt: "asc" } });
+  let facts: { title: string; content: string }[] = [];
+  for (const c of campaigns) {
+    const v = await getActiveOfferVersion(c.offerId);
+    if (v && !v.synthetic) { facts = v.factsParsed.filter((f) => f.confirmed && f.content).map((f) => ({ title: f.title, content: f.content })); console.log(`Using offer v${v.version} (${facts.length} approved facts) from campaign "${c.name}".`); break; }
+  }
+  if (!facts.length) console.log("No published real offer found, so the assistant will look up every answer.");
+
   const toolUrl = `${config.appUrl}/api/agent/telnyx-tools`;
   const tools: unknown[] = AGENT_TOOLS.map((t) => ({
     type: "webhook",
@@ -65,12 +75,12 @@ async function main() {
 
   const body = {
     name: `${company} - Molly AI recruiter`,
-    instructions: await buildAgentPrompt(company, "the transfer tool"),
+    instructions: await buildAgentPrompt(company, "the transfer tool", facts),
     greeting: "<assistant-speaks-first-with-model-generated-message>",
     enabled_features: ["telephony"],
     ...(process.env.TELNYX_MODEL ? { model: process.env.TELNYX_MODEL } : {}),
     tools,
-    dynamic_variables: { driver_first_name: "there", applied_when: "a while back", driver_timezone: "unknown", attempt_id: "", transfer_number: managerPhone, recruiter_phone: managerPhone, company_name: company },
+    dynamic_variables: { driver_first_name: "there", applied_when: "a while back", time_greeting: "Hi", position_applied: "a truck driving position", driver_timezone: "unknown", attempt_id: "", transfer_number: managerPhone, recruiter_phone: managerPhone, company_name: company },
     telephony_settings: {
       time_limit_secs: 15 * 60,
       voicemail_detection: {

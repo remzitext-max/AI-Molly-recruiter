@@ -93,12 +93,7 @@ export async function attemptCallJob(job: Job) {
   try {
     const { providerCallId } = await provider.startOutboundCall({
       attemptId: attempt.id, leadId, toE164: lead.phoneE164, isDemoRecord: lead.isDemo, personaKey,
-      dynamicVariables: {
-        driver_first_name: lead.firstName ?? "", company_name: (await db.organization.findUnique({ where: { id: lead.orgId } }))?.name ?? "",
-        offer_version_id: offer?.id ?? "", attempt_id: attempt.id,
-        driver_timezone: lead.timezone ?? "unknown", ...(await transferVariables(lead.orgId)),
-        applied_when: appliedWhen(lead.permissions.find((p) => p.scope === "AI_CALL" && !p.revokedAt)?.grantedAt ?? null, new Date()),
-      },
+      dynamicVariables: await callVariables(lead, attempt.id, offer?.id ?? ""),
     });
     await db.callAttempt.update({ where: { id: attempt.id }, data: { providerCallId, status: "DIALING", statusRank: STATUS_RANK.DIALING } });
   } catch (e) {
@@ -275,7 +270,7 @@ async function maybeRetry(leadId: string, delayMin: number, max: number, reason:
 // 4. Real-time agent actions (provider tool calls / simulator)
 // ---------------------------------------------------------------------------
 const ActionSchema: z.ZodType<AgentAction> = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("record_slot"), key: z.enum(["first_name", "home_location", "cdl_class", "endorsements", "restrictions", "experience_years", "equipment_experience", "driving_type", "route_preference", "home_time", "start_date", "recent_miles", "weeks_out", "med_card_expiry", "offer_interest", "concerns"]), value: z.string().max(500), raw: z.string().max(2000), status: z.enum(["CAPTURED", "CORRECTED", "UNCLEAR"]) }),
+  z.object({ type: z.literal("record_slot"), key: z.enum(["first_name", "home_location", "cdl_class", "endorsements", "restrictions", "experience_years", "equipment_experience", "driving_type", "route_preference", "home_time", "start_date", "recent_miles", "weeks_out", "weekly_miles", "sap_history", "accidents_at_fault", "med_card_expiry", "offer_interest", "concerns"]), value: z.string().max(500), raw: z.string().max(2000), status: z.enum(["CAPTURED", "CORRECTED", "UNCLEAR"]) }),
   z.object({ type: z.literal("unanswered_question"), question: z.string().max(1000), reason: z.string().max(300) }),
   z.object({ type: z.literal("offer_discussed"), factKeys: z.array(z.string().max(80)).max(20) }),
   z.object({ type: z.literal("opt_out"), raw: z.string().max(2000) }),
@@ -571,6 +566,47 @@ export async function syncSourceJob(job: Job) {
     if (r.sourceSystem !== SHEETS_SOURCE) await db.leadSourceRecord.update({ where: { id: r.id }, data: { syncStatus: "NOT_APPLICABLE" } });
   }
   if (recs.some((r) => r.sourceSystem === SHEETS_SOURCE)) await writeBackLeadStatus(leadId);
+}
+
+/** Per-call values the voice agent's prompt refers to as {{name}}. */
+export async function callVariables(
+  lead: { id: string; orgId: string; firstName: string | null; timezone: string | null; permissions: { scope: string; revokedAt: Date | null; grantedAt: Date }[] },
+  attemptId: string, offerVersionId: string, now = new Date(),
+): Promise<Record<string, string>> {
+  const sources = await db.leadSourceRecord.findMany({ where: { leadId: lead.id }, select: { raw: true } });
+  return {
+    driver_first_name: lead.firstName ?? "", company_name: (await db.organization.findUnique({ where: { id: lead.orgId } }))?.name ?? "",
+    offer_version_id: offerVersionId, attempt_id: attemptId,
+    driver_timezone: lead.timezone ?? "unknown", ...(await transferVariables(lead.orgId)),
+    applied_when: appliedWhen(lead.permissions.find((p) => p.scope === "AI_CALL" && !p.revokedAt)?.grantedAt ?? null, now),
+    time_greeting: timeGreeting(lead.timezone, now),
+    position_applied: appliedPosition(sources.map((r) => r.raw)),
+  };
+}
+
+// "Good morning/afternoon/evening" in the driver's local time; Central time when the timezone is unknown.
+export function timeGreeting(tz: string | null | undefined, now: Date): string {
+  let hour = 12;
+  try {
+    hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: tz || "America/Chicago", hour: "numeric", hourCycle: "h23" }).format(now));
+  } catch {
+    hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", hourCycle: "h23" }).format(now));
+  }
+  return hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+}
+
+// The position named on the driver's application (lead form or sheet column), if any.
+export function appliedPosition(raws: unknown[]): string {
+  for (const raw of raws) {
+    if (!raw || typeof raw !== "object") continue;
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (!/position|job|role|driver.?type|solo.?or.?team/i.test(k) || typeof v !== "string") continue;
+      const t = v.toLowerCase();
+      if (t.includes("team")) return "a team driver position";
+      if (t.includes("solo")) return "a solo driver position";
+    }
+  }
+  return "a truck driving position";
 }
 
 // Molly's direct line for the Retell transfer tool and the voicemail callback number.

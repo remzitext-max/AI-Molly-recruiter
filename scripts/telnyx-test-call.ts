@@ -5,7 +5,7 @@
 //   docker compose exec web npx tsx scripts/telnyx-test-call.ts +1XXXXXXXXXX [FirstName]
 import { config } from "../src/lib/config";
 import { db } from "../src/lib/db";
-import { appliedWhen, STATUS_RANK } from "../src/lib/calls";
+import { callVariables, STATUS_RANK } from "../src/lib/calls";
 import { getActiveOfferVersion } from "../src/lib/knowledge";
 import { TelnyxVoiceAgent } from "../src/adapters/live/telnyx";
 
@@ -43,15 +43,11 @@ async function main() {
   });
   await db.lead.update({ where: { id: lead.id }, data: { activeAttemptId: attempt.id, attemptCount: { increment: 1 } } });
 
-  const manager = await db.user.findFirst({ where: { orgId: org.id, availableForTransfer: true, transferPhoneE164: { not: null } } });
+  const withPermissions = await db.lead.findUniqueOrThrow({ where: { id: lead.id }, include: { permissions: true } });
   try {
     const { providerCallId } = await new TelnyxVoiceAgent().startOutboundCall({
       attemptId: attempt.id, leadId: lead.id, toE164: to, isDemoRecord: false, personaKey: null,
-      dynamicVariables: {
-        driver_first_name: lead.firstName ?? "", company_name: org.name, offer_version_id: offer.id, attempt_id: attempt.id,
-        driver_timezone: lead.timezone ?? "unknown", transfer_number: manager?.transferPhoneE164 ?? "", recruiter_phone: manager?.transferPhoneE164 ?? "",
-        applied_when: appliedWhen(permission?.grantedAt ?? null, new Date()),
-      },
+      dynamicVariables: await callVariables(withPermissions, attempt.id, offer.id),
     });
     await db.callAttempt.update({ where: { id: attempt.id }, data: { providerCallId, status: "DIALING", statusRank: STATUS_RANK.DIALING } });
     console.log(`Calling ${to} now. Telnyx call ${providerCallId}, attempt ${attempt.id}.`);

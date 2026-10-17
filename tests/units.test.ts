@@ -11,7 +11,7 @@ import { parseLeadFile, guessMapping, createImportPreview, previewBatch, commitB
 import { verifyRetellSignature } from "@/adapters/live/retell";
 import crypto from "node:crypto";
 import { db } from "@/lib/db";
-import { appliedWhen } from "@/lib/calls";
+import { appliedPosition, appliedWhen, timeGreeting } from "@/lib/calls";
 import { mapTelnyxCallback, parseTelnyxBody } from "@/lib/telnyx-mapping";
 import { resetDb, seedBase } from "./helpers";
 
@@ -179,6 +179,21 @@ describe("appliedWhen", () => {
     expect(appliedWhen(ago(30), now)).toBe("about a month ago");
     expect(appliedWhen(ago(70), now)).toBe("about 2 months ago");
     expect(appliedWhen(ago(400), now)).toBe("over a year ago");
+  });
+});
+
+describe("call opening variables", () => {
+  it("greets by the driver's local time, Central when unknown", () => {
+    const t = new Date("2026-10-17T15:00:00Z"); // 10:00 Chicago, 08:00 Los Angeles, 11:00 New York
+    expect(timeGreeting("America/Chicago", t)).toBe("Good morning");
+    expect(timeGreeting(null, new Date("2026-10-17T20:00:00Z"))).toBe("Good afternoon");
+    expect(timeGreeting("America/New_York", new Date("2026-10-17T23:30:00Z"))).toBe("Good evening");
+    expect(timeGreeting("Not/AZone", t)).toBe("Good morning");
+  });
+  it("names the applied position only when the application says it", () => {
+    expect(appliedPosition([{ "Position applied for": "Team driver" }])).toBe("a team driver position");
+    expect(appliedPosition([null, { job_type: "Solo OTR" }])).toBe("a solo driver position");
+    expect(appliedPosition([{ phone: "+1 team" }])).toBe("a truck driving position");
   });
 });
 

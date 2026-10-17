@@ -1,6 +1,6 @@
 {
   "offerName": "TBT express driver offer",
-  "notes": "From recruiter-handbook.netlify.app and the owner's messages, 2026-10-16. Review, then tick the approval box and publish.",
+  "notes": "From recruiter-handbook.netlify.app and the owner's messages (2026-10-16), plus weekly miles and earnings from the owner and Denis (2026-10-17). Review, then tick the approval box and publish.",
   "facts": [
     { "key": "company.identity", "category": "company", "title": "Who we are", "content": "TBT express is the carrier, and my manager on the recruiting team will work with you.", "keywords": ["company", "who"], "confirmed": true },
     { "key": "equipment.type", "category": "equipment", "title": "Equipment", "content": "We run dry van only, so no endorsements are needed.", "keywords": ["dry van", "trailer", "endorsement", "hazmat", "reefer", "flatbed"], "confirmed": true },
@@ -13,6 +13,8 @@
     { "key": "orientation.truck_ready", "category": "orientation", "title": "Before the truck is ready", "content": "Plan for about two unpaid days before your truck is available.", "keywords": ["first day", "unpaid", "waiting"], "confirmed": true },
     { "key": "pay.rate", "category": "pay", "title": "Pay rate (solo)", "content": "Solo pay is 75 to 85 cents per mile, depending on your driving record and whether you agree to a driver-facing camera. My manager will confirm your exact rate.", "keywords": ["solo", "cpm", "per mile", "pay", "camera"], "confirmed": true },
     { "key": "pay.team", "category": "pay", "title": "Pay rate (team)", "content": "Team pay is up to $1.10 per mile, depending on your records and experience. My manager will confirm your exact rate.", "keywords": ["team", "team pay", "per mile"], "confirmed": true },
+    { "key": "pay.weekly_miles", "category": "pay", "title": "Weekly miles", "content": "Our drivers usually run around 3,500 miles a week.", "keywords": ["miles", "weekly miles", "how many miles", "mileage"], "confirmed": true },
+    { "key": "pay.weekly_earnings", "category": "pay", "title": "Weekly earnings", "content": "Running 3,500 to 4,000 miles a week, our drivers usually make around $3,000 to $3,500 a week, depending on their rate.", "keywords": ["weekly pay", "per week", "how much", "make a week", "earn"], "confirmed": true },
     { "key": "pay.timing", "category": "pay", "title": "When you get paid", "content": "Your first week is paid in your second week.", "keywords": ["when paid", "first check", "payday", "hold"], "confirmed": true },
     { "key": "pay.tax", "category": "pay", "title": "Tax status", "content": "You'd be a 1099 contractor, so no taxes are withheld. For tax questions, please talk to a tax professional.", "keywords": ["1099", "w2", "w-2", "tax", "taxes"], "confirmed": true },
     { "key": "deductions.escrow", "category": "deductions", "title": "Escrow", "content": "Escrow is returned after 45 days, less any claims, damage, or violations.", "keywords": ["escrow", "deposit"], "confirmed": true },
