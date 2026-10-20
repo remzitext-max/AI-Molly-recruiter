@@ -1,4 +1,4 @@
-{$DOMAIN} {
+{$DOMAIN} {$EXTRA_DOMAINS} {
 	encode gzip
 	request_body {
 		max_size 15MB

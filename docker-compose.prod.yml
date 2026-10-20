@@ -5,6 +5,8 @@ services:
     image: caddy:2
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      # Optional: more hostnames for the same site, space-separated (e.g. the old sslip.io name while switching to a domain)
+      EXTRA_DOMAINS: ${EXTRA_DOMAINS:-}
     ports: ["80:80", "443:443", "443:443/udp"]
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
