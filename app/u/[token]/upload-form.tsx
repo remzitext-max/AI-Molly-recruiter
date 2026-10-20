@@ -15,7 +15,7 @@ export function UploadForm({ token, remaining }: { token: string; remaining: num
         const res = await fetch(`/api/upload/${token}`, { method: "POST", body: new FormData(e.currentTarget) });
         const j = await res.json().catch(() => ({ error: "Upload failed" }));
         setBusy(false);
-        if (res.ok) { setCount((c) => c + 1); setMsg({ ok: true, text: "Uploaded. You can add the back side, or finish." }); (e.target as HTMLFormElement).reset(); }
+        if (res.ok) { setCount((c) => c + 1); setMsg({ ok: true, text: "Uploaded. You can add the next photo (back side or medical card), or finish." }); (e.target as HTMLFormElement).reset(); }
         else setMsg({ ok: false, text: j.error });
       }}>
         <input type="file" name="file" accept="image/jpeg,image/png,image/heic,application/pdf" capture="environment" required />

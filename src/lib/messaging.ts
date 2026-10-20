@@ -33,7 +33,7 @@ export async function sendCdlLink(leadId: string, attemptId: string | null, opts
   }
   const link = await createUploadLink(leadId);
   const ttl = settings.uploadLinkTtlMinutes;
-  const body = `${lead.org.name} recruiting team: upload a photo of your CDL securely here: ${link.url} . Link expires in ${ttl >= 60 ? `${Math.round(ttl / 60)} hr` : `${ttl} min`}. Reply STOP to opt out.`;
+  const body = `${lead.org.name} recruiting team: can you send your CDL and medical card here please: ${link.url} . Link expires in ${ttl >= 60 ? `${Math.round(ttl / 60)} hr` : `${ttl} min`}. Reply STOP to opt out.`;
   const stored = body.replace(link.token, "[link-token]");
   const msg = await db.message.create({ data: { leadId, isDemo: lead.isDemo, direction: "OUTBOUND", purpose: "CDL_LINK", body: stored, provider: getAdapters().sms.key, idempotencyKey: idem, status: "SENDING" } });
   try {
