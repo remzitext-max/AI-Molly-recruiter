@@ -35,7 +35,7 @@ export async function createUploadLink(leadId: string) {
 
 export async function lookupUploadToken(token: string) {
   if (!/^[A-Za-z0-9_-]{30,64}$/.test(token)) return null;
-  const t = await db.uploadToken.findUnique({ where: { tokenHash: sha256(token) }, include: { lead: { select: { id: true, firstName: true, optedOutAt: true, isDemo: true } } } });
+  const t = await db.uploadToken.findUnique({ where: { tokenHash: sha256(token) }, include: { lead: { select: { id: true, firstName: true, optedOutAt: true, isDemo: true, org: { select: { name: true } } } } } });
   if (!t || t.revokedAt || t.completedAt || t.expiresAt < new Date() || t.filesUsed >= t.maxFiles) return null;
   return t;
 }
