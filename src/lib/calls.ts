@@ -575,7 +575,7 @@ export async function syncSourceJob(job: Job) {
 
 /** Per-call values the voice agent's prompt refers to as {{name}}. */
 export async function callVariables(
-  lead: { id: string; orgId: string; firstName: string | null; timezone: string | null; permissions: { scope: string; revokedAt: Date | null; grantedAt: Date }[] },
+  lead: { id: string; orgId: string; firstName: string | null; timezone: string | null; createdAt?: Date; permissions: { scope: string; revokedAt: Date | null; grantedAt: Date }[] },
   attemptId: string, offerVersionId: string, now = new Date(),
 ): Promise<Record<string, string>> {
   const sources = await db.leadSourceRecord.findMany({ where: { leadId: lead.id }, select: { raw: true } });
@@ -583,7 +583,8 @@ export async function callVariables(
     driver_first_name: lead.firstName ?? "", company_name: (await db.organization.findUnique({ where: { id: lead.orgId } }))?.name ?? "",
     offer_version_id: offerVersionId, attempt_id: attemptId,
     driver_timezone: lead.timezone ?? "unknown", ...(await transferVariables(lead.orgId)),
-    applied_when: appliedWhen(lead.permissions.find((p) => p.scope === "AI_CALL" && !p.revokedAt)?.grantedAt ?? null, now),
+    // Sheet leads arrive within a minute of applying, so the import time stands in when no permission date was recorded.
+    applied_when: appliedWhen(lead.permissions.find((p) => p.scope === "AI_CALL" && !p.revokedAt)?.grantedAt ?? lead.createdAt ?? null, now),
     time_greeting: timeGreeting(lead.timezone, now),
     position_applied: appliedPosition(sources.map((r) => r.raw)),
   };
@@ -624,7 +625,10 @@ async function transferVariables(orgId: string): Promise<Record<string, string>>
 // Rounded, truthful phrase for when the driver applied, from the recorded call permission date.
 export function appliedWhen(appliedAt: Date | null, now: Date): string {
   if (!appliedAt) return "a while back";
-  const days = Math.floor((now.getTime() - appliedAt.getTime()) / 86_400_000);
+  const mins = (now.getTime() - appliedAt.getTime()) / 60_000;
+  if (mins < 60) return "just a few minutes ago";
+  if (mins < 12 * 60) return "earlier today";
+  const days = Math.floor(mins / 1440);
   if (days < 2) return "recently";
   if (days < 7) return "a few days ago";
   if (days < 14) return "about a week ago";

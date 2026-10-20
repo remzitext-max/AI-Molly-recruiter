@@ -174,6 +174,8 @@ describe("appliedWhen", () => {
   const ago = (d: number) => new Date(now.getTime() - d * 86_400_000);
   it("rounds the real application date and never invents one", () => {
     expect(appliedWhen(null, now)).toBe("a while back");
+    expect(appliedWhen(new Date(now.getTime() - 3 * 60_000), now)).toBe("just a few minutes ago");
+    expect(appliedWhen(new Date(now.getTime() - 5 * 3600_000), now)).toBe("earlier today");
     expect(appliedWhen(ago(10), now)).toBe("about a week ago");
     expect(appliedWhen(ago(21), now)).toBe("about 3 weeks ago");
     expect(appliedWhen(ago(30), now)).toBe("about a month ago");
