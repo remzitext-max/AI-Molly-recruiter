@@ -516,15 +516,23 @@ describe("Telegram driver card", () => {
     const real = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Ray", lastName: "<Test>", phoneE164: "+12145550111" } });
     const started = new Date(Date.now() - 200_000);
     const a = await db.callAttempt.create({ data: { leadId: real.id, provider: "telnyx", idempotencyKey: "tg-1", status: "COMPLETED", outcome: "INTERESTED", startedAt: started, endedAt: new Date(started.getTime() + 185_000) } });
-    await db.screeningField.create({ data: { leadId: real.id, key: "weekly_miles", reportedValue: "3500", callAttemptId: a.id } });
-    await db.screeningField.create({ data: { leadId: real.id, key: "sap_history", reportedValue: "No", callAttemptId: a.id } });
-    await db.unansweredQuestion.create({ data: { leadId: real.id, callAttemptId: a.id, question: "Do you have pet policy?" } });
+    for (const [key, reportedValue] of [["home_time", "4 weeks out, 4 days home"], ["experience_years", "3 years OTR"], ["pay_expectation", "80 cents"], ["transmission", "Manual"], ["english_level", "Good"], ["start_date", "Next Monday"], ["home_location", "Dallas, TX"]]) {
+      await db.screeningField.create({ data: { leadId: real.id, key, reportedValue, callAttemptId: a.id } });
+    }
     const card = await buildCallReport(a.id);
-    expect(card).toContain("Ray &lt;Test&gt;");
-    expect(card).toContain("Outcome: <b>interested</b> · 3m 5s");
-    expect(card).toContain("• Miles/week: 3500");
-    expect(card!.indexOf("Miles/week")).toBeLessThan(card!.indexOf("SAP"));
-    expect(card).toContain("Do you have pet policy?");
+    expect(card).toBe([
+      "👔Recruiter: Crystal AI",
+      "🥸Driver type: Solo",
+      "🗒Driver name: Ray &lt;Test&gt;",
+      "🌍State: Dallas, TX",
+      "🏠Home time: 4 weeks out, 4 days home",
+      "📈Experience: 3 years OTR",
+      "💵Payment: asking: 80 cents",
+      "🚛can drive: Manual",
+      "🗣 English: Good",
+      "✅ Ready date: Next Monday",
+      "☎️Phone number : +12145550111",
+    ].join("\n"));
 
     const demo = await lead(base, "interested");
     await drain();
