@@ -39,6 +39,14 @@ export function parseRange(range: string) {
   return { sheet, startCol: m[1] ? colToIndex(m[1]) : 0, startRow: m[2] ? Number(m[2]) : 1 };
 }
 
+const quote = (title: string) => `'${title.replace(/'/g, "''")}'`;
+
+/** A bare tab name with spaces or symbols ("📥 Pool") becomes a quoted A1 range; "A:Z", "Tab!A1:Z" and "Pool" pass through. Exported for tests. */
+export function quoteTab(range: string) {
+  if (range.includes("!") || /^'.*'$/.test(range) || /^[A-Za-z0-9:]+$/.test(range)) return range;
+  return quote(range);
+}
+
 /** Row indexes matching a record: by ID, or by normalized phone for "phone:" identities. */
 export function matchRows(rows: string[][], idIdx: number, phoneIdx: number, sourceRecordId: string): number[] {
   const byPhone = sourceRecordId.startsWith("phone:") ? sourceRecordId.slice(6) : null;
@@ -87,9 +95,22 @@ export class GoogleSheetsSource implements SheetLeadSource {
     return j.access_token;
   }
 
+  /** GOOGLE_SHEETS_RANGE as A1 notation; "gid:<id>" picks the tab by the id in its URL, so emoji or renamed tabs still work. */
+  private async range() {
+    const g = config.googleSheets;
+    const gid = /^gid[:=](\d+)$/i.exec(g.range.trim());
+    if (!gid) return quoteTab(g.range);
+    const url = `${API}/${encodeURIComponent(g.spreadsheetId!)}?fields=sheets.properties(sheetId,title)`;
+    const res = await providerFetch(url, { headers: { authorization: `Bearer ${await this.token()}` } });
+    const j = (await res.json()) as { sheets?: { properties: { sheetId: number; title: string } }[] };
+    const title = j.sheets?.find((s) => String(s.properties.sheetId) === gid[1])?.properties.title;
+    if (title === undefined) throw new Error(`The spreadsheet has no tab with gid ${gid[1]}`);
+    return quote(title);
+  }
+
   private async getValues() {
     const g = config.googleSheets;
-    const url = `${API}/${encodeURIComponent(g.spreadsheetId!)}/values/${encodeURIComponent(g.range)}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`;
+    const url = `${API}/${encodeURIComponent(g.spreadsheetId!)}/values/${encodeURIComponent(await this.range())}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`;
     const res = await providerFetch(url, { headers: { authorization: `Bearer ${await this.token()}` } });
     return (await res.json()) as { range: string; values?: unknown[][] };
   }

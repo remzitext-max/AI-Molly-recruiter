@@ -70,7 +70,7 @@ export const config = {
   },
   googleSheets: {
     get spreadsheetId() { return env("GOOGLE_SHEETS_SPREADSHEET_ID"); },
-    /** A1 range or tab name, e.g. "Leads" or "Leads!A1:Z". Default "A:Z" = first tab. First row must be headers. */
+    /** A1 range or tab name, e.g. "Leads" or "Leads!A1:Z", or "gid:<id>" from the tab URL. Default "A:Z" = first tab. First row must be headers. */
     get range() { return env("GOOGLE_SHEETS_RANGE") ?? "A:Z"; },
     /** Header of the optional lead ID column. Rows with an empty ID are identified by phone number instead. */
     get idColumn() { return env("GOOGLE_SHEETS_ID_COLUMN"); },

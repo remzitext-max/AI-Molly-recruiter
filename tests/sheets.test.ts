@@ -8,7 +8,7 @@ import { commitBatch, previewBatch } from "@/lib/import";
 import { createSheetPreview, pollGoogleSheet, scheduleSheetPoll } from "@/lib/sheets-sync";
 import { advancePipeline, optOutLead } from "@/lib/leads";
 import { addDemoSheetRow, readDemoSheet, resetDemoSheet } from "@/adapters/mock";
-import { GoogleSheetsSource, matchRows, buildAssertion, parseRange, indexToCol, colToIndex, resetGoogleTokenCache } from "@/adapters/live/google-sheets";
+import { GoogleSheetsSource, matchRows, buildAssertion, parseRange, quoteTab, indexToCol, colToIndex, resetGoogleTokenCache } from "@/adapters/live/google-sheets";
 
 beforeEach(async () => { await resetDb(); await resetDemoSheet(); });
 
@@ -139,7 +139,7 @@ describe("Google Sheets live adapter (HTTP contract, no network)", () => {
     const claims = JSON.parse(Buffer.from(c, "base64url").toString());
     expect(claims).toMatchObject({ iss: "molly@proj.iam.gserviceaccount.com", aud: "https://oauth2.googleapis.com/token", scope: "https://www.googleapis.com/auth/spreadsheets" });
     expect(claims.exp - claims.iat).toBe(3600);
-    expect(calls[1].url).toBe("https://sheets.googleapis.com/v4/spreadsheets/sheet123/values/Driver%20Leads?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE");
+    expect(calls[1].url).toBe("https://sheets.googleapis.com/v4/spreadsheets/sheet123/values/'Driver%20Leads'?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE");
     expect((calls[1].init.headers as Record<string, string>).authorization).toBe("Bearer tok");
 
     expect(await src.writeStatus("A-2", "Interested")).toBe("written");
@@ -148,6 +148,30 @@ describe("Google Sheets live adapter (HTTP contract, no network)", () => {
     expect(JSON.parse(String(put.init.body)).values).toEqual([["Interested"]]);
     expect(await src.writeStatus("missing", "x")).toBe("row_not_found");
     expect(calls.filter((x) => x.url.includes("oauth2")).length).toBe(1); // token cached
+  });
+
+  it("finds a tab by gid (emoji tab names) and quotes bare tab names", async () => {
+    expect(quoteTab("A:Z")).toBe("A:Z");
+    expect(quoteTab("Pool")).toBe("Pool");
+    expect(quoteTab("Leads!A1:Z")).toBe("Leads!A1:Z");
+    expect(quoteTab("📥 Pool")).toBe("'📥 Pool'");
+    expect(quoteTab("Bob's leads")).toBe("'Bob''s leads'");
+    Object.assign(process.env, {
+      GOOGLE_SHEETS_SPREADSHEET_ID: "sheet123", GOOGLE_SHEETS_RANGE: "gid:2025676590", GOOGLE_SHEETS_ID_COLUMN: "LeadID",
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: "molly@proj.iam.gserviceaccount.com", GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: privateKey.replace(/\n/g, "\\n"),
+    });
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      urls.push(url);
+      if (url.startsWith("https://oauth2.googleapis.com/token")) return new Response(JSON.stringify({ access_token: "tok", expires_in: 3600 }));
+      if (url.includes("fields=sheets.properties")) return new Response(JSON.stringify({ sheets: [{ properties: { sheetId: 0, title: "Daniel" } }, { properties: { sheetId: 2025676590, title: "📥 Pool" } }] }));
+      return new Response(JSON.stringify({ range: "'📥 Pool'!A1:Z1000", values: [["LeadID", "Name", "Phone"], ["", "Ann", "(214) 555-0101"]] }));
+    }));
+    const snap = await new GoogleSheetsSource().readSheet();
+    expect(snap.headers).toEqual(["LeadID", "Name", "Phone"]);
+    expect(decodeURIComponent(urls[2])).toContain("/values/'📥 Pool'?");
+    process.env.GOOGLE_SHEETS_RANGE = "gid:42";
+    await expect(new GoogleSheetsSource().readSheet()).rejects.toThrow(/no tab with gid 42/);
   });
 
   it("uses the read-only scope when write-back is off", () => {
