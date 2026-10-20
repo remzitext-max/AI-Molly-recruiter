@@ -1,7 +1,7 @@
 import type { PipelineStatus, Prisma } from "@prisma/client";
 import { db, Tx } from "./db";
 import { normalizePhone } from "./phone";
-import { resolveTimezone } from "./timezone";
+import { resolveTimezoneWithPhone } from "./timezone";
 import { recordEvent } from "./activity";
 import { ensureAssigned } from "./assignment";
 import { enqueue } from "./jobs/queue";
@@ -71,7 +71,7 @@ export async function ingestLead(inc: IncomingLead, opts: IngestOpts): Promise<I
       return { result: "merged" as const, leadId: existing.id };
     }
 
-    const tz = resolveTimezone(inc.state, inc.zip);
+    const tz = resolveTimezoneWithPhone(inc.state, inc.zip, phone);
     const suppressed = await tx.suppression.findUnique({ where: { phoneE164: phone } });
     const lead = await tx.lead.create({
       data: {

@@ -197,10 +197,20 @@ describe("6. contact hours", () => {
 
   it("unknown timezone blocks automatic calling", async () => {
     const base = await seedBase();
-    const id = await lead(base, "interested", { state: "", zip: "" });
+    const id = await lead(base, "interested", { state: "", zip: "", phone: "(416) 555-0123" });
     await drain();
     expect(await db.callAttempt.count({ where: { leadId: id } })).toBe(0);
     expect((await db.lead.findUniqueOrThrow({ where: { id } })).pipelineStatus).toBe("NEEDS_TIMEZONE");
+  });
+
+  it("no state or ZIP: timezone comes from the phone's area code", async () => {
+    const base = await seedBase();
+    const id = await lead(base, "interested", { state: "", zip: "", phone: "(305) 555-0124" });
+    const l = await db.lead.findUniqueOrThrow({ where: { id } });
+    expect(l.timezone).toBe("America/New_York");
+    expect(l.timezoneSource).toBe("PHONE_AREA_CODE");
+    const pan = await lead(base, "interested", { state: "FL", zip: "", phone: "(850) 555-0125" });
+    expect((await db.lead.findUniqueOrThrow({ where: { id: pan } })).timezone).toBe("America/Chicago");
   });
 
   it("missing contact permission blocks AI calling", async () => {

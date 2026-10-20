@@ -1,4 +1,5 @@
 import { DateTime } from "luxon";
+import { timezoneFromPhone } from "./area-codes";
 
 // State -> IANA timezones. States spanning several zones are ambiguous and
 // need a ZIP-level or manual resolution before automatic calling.
@@ -52,6 +53,20 @@ export function resolveTimezone(state?: string | null, zip?: string | null): { t
   const split = SPLIT[st];
   if (!split || !z || split.ambiguous.includes(z)) return { timezone: null, source: null, ambiguous: true };
   return { timezone: split.exceptions[z] ?? split.major, source: "ZIP", ambiguous: false };
+}
+
+/** The zone most of a state is in. */
+export function mainZone(state: string): string | null {
+  const st = state.toUpperCase();
+  return SPLIT[st]?.major ?? STATE_TZ[st]?.[0] ?? null;
+}
+
+/** State/ZIP first; when they are missing or ambiguous, an approximate zone from the phone's area code. */
+export function resolveTimezoneWithPhone(state: string | null | undefined, zip: string | null | undefined, phoneE164: string) {
+  const r = resolveTimezone(state, zip);
+  if (r.timezone) return r;
+  const tz = timezoneFromPhone(phoneE164, mainZone);
+  return tz ? { timezone: tz, source: "PHONE_AREA_CODE", ambiguous: false } : r;
 }
 
 export function isValidTimezone(tz: string) {
