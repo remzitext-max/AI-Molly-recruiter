@@ -1,9 +1,10 @@
-// Posts a driver card to the owner's Telegram chat after each answered AI call.
-// Off unless TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set. Text only: never
-// documents or license images.
+// Posts a driver card to the owner's Telegram group after each answered AI call,
+// and forwards each CDL / medical card file a driver uploads.
+// Off unless TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set.
 import { config } from "./config";
 import { db } from "./db";
 import { providerFetch } from "../adapters/live/http";
+import { getAdapters } from "../adapters/registry";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -49,5 +50,22 @@ export async function sendCallReport(attemptId: string) {
   const text = await buildCallReport(attemptId);
   if (!text) return { sent: false, reason: "nothing to report" };
   await sendTelegram(text);
+  return { sent: true };
+}
+
+/** Sends one uploaded driver file (CDL / medical card) to the group with the driver's name and phone. */
+export async function sendDocumentToTelegram(documentId: string) {
+  const token = config.telegram.botToken;
+  const chatId = config.telegram.chatId;
+  if (!token || !chatId) return { sent: false, reason: "not configured" };
+  const d = await db.document.findUnique({ where: { id: documentId }, include: { lead: true } });
+  if (!d || d.deletedAt || d.lead.isDemo) return { sent: false, reason: "nothing to send" };
+  const data = await getAdapters().storage.get(d.storageKey);
+  const name = [d.lead.firstName, d.lead.lastName].filter(Boolean).join(" ");
+  const form = new FormData();
+  form.set("chat_id", chatId);
+  form.set("caption", `📎 CDL / medical card\n🗒 ${name}\n☎️ ${d.lead.phoneE164}`);
+  form.set("document", new Blob([new Uint8Array(data)], { type: d.mimeType }), `${(name || "driver").replace(/[^A-Za-z0-9]+/g, "_")}.${d.storageKey.split(".").pop()}`);
+  await providerFetch(`https://api.telegram.org/bot${token}/sendDocument`, { method: "POST", body: form, timeoutMs: 60000 });
   return { sent: true };
 }

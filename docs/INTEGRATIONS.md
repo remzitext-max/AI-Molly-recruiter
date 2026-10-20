@@ -90,4 +90,6 @@ After each answered, non-demo AI call the worker posts the owner's driver card (
 1. In Telegram, talk to @BotFather, `/newbot`, copy the token into `.env` as `TELEGRAM_BOT_TOKEN`.
 2. Send any message to the new bot (or add it to a group and write there).
 3. `docker compose exec web npx tsx scripts/telegram-setup.ts` prints `TELEGRAM_CHAT_ID=...`; add it to `.env` and `docker compose up -d`.
+Each CDL / medical card file a driver uploads is also sent to the same group as a document with the driver's name and phone.
+
 4. `scripts/telegram-setup.ts test` sends a test message; `scripts/telegram-setup.ts last` sends the card for the latest answered call.

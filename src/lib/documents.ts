@@ -8,6 +8,7 @@ import { recordEvent } from "./activity";
 import { advancePipeline } from "./leads";
 import { getAdapters } from "../adapters/registry";
 import { enqueue } from "./jobs/queue";
+import { telegramConfigured } from "./telegram";
 import { assertLeadAccess, ForbiddenError } from "./rbac";
 
 export const ALLOWED_TYPES: Record<string, { ext: string; magic: (b: Buffer) => boolean }> = {
@@ -66,6 +67,7 @@ export async function handleUpload(token: string, file: { data: Buffer; declared
   await advancePipeline(t.leadId, "DOCS_RECEIVED");
   // Never log file contents or license numbers: only metadata.
   await recordEvent({ leadId: t.leadId, actorType: "DRIVER", type: "DOCUMENT_RECEIVED", message: `CDL document received (${mime}, ${Math.round(file.data.length / 1024)} KB)`, data: { documentId: doc.id } });
+  if (telegramConfigured() && !t.lead.isDemo) await enqueue("notify.telegram-document", { documentId: doc.id }, { idempotencyKey: `telegram-doc:${doc.id}`, maxAttempts: 3 });
 
   try {
     const ex = await getAdapters().extraction.extract(file.data, mime);

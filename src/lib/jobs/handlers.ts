@@ -4,7 +4,7 @@ import { sendCdlLink } from "../messaging";
 import { runRetentionSweep } from "../documents";
 import { pollGoogleSheet } from "../sheets-sync";
 import { db } from "../db";
-import { sendCallReport } from "../telegram";
+import { sendCallReport, sendDocumentToTelegram } from "../telegram";
 
 export const handlers: Record<string, JobHandler> = {
   "lead.attempt-call": attemptCallJob,
@@ -26,5 +26,9 @@ export const handlers: Record<string, JobHandler> = {
   "notify.telegram-call-report": async (job) => {
     const { attemptId } = job.payload as { attemptId: string };
     await sendCallReport(attemptId);
+  },
+  "notify.telegram-document": async (job) => {
+    const { documentId } = job.payload as { documentId: string };
+    await sendDocumentToTelegram(documentId);
   },
 };

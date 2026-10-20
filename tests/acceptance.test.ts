@@ -541,3 +541,33 @@ describe("Telegram driver card", () => {
     expect(await buildCallReport(unanswered.id)).toBeNull();
   });
 });
+
+describe("Telegram document forward", () => {
+  it("sends an uploaded CDL / medical card to the group for real leads only", async () => {
+    const base = await seedBase();
+    process.env.TELEGRAM_BOT_TOKEN = "123:abc";
+    process.env.TELEGRAM_CHAT_ID = "-100";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    try {
+      const real = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Ray", lastName: "Doe", phoneE164: "+12145550112" } });
+      const link = await createUploadLink(real.id);
+      await handleUpload(link.token, { data: JPEG });
+      await drain();
+      const sends = fetchSpy.mock.calls.filter(([u]) => String(u).includes("/sendDocument"));
+      expect(sends).toHaveLength(1);
+      const form = sends[0][1]!.body as FormData;
+      expect(form.get("chat_id")).toBe("-100");
+      expect(String(form.get("caption"))).toContain("Ray Doe");
+
+      const demo = await lead(base, "interested");
+      const demoLink = await createUploadLink(demo);
+      await handleUpload(demoLink.token, { data: JPEG });
+      await drain();
+      expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes("/sendDocument"))).toHaveLength(1);
+    } finally {
+      fetchSpy.mockRestore();
+      delete process.env.TELEGRAM_BOT_TOKEN;
+      delete process.env.TELEGRAM_CHAT_ID;
+    }
+  });
+});

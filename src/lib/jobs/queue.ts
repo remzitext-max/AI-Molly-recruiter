@@ -16,7 +16,8 @@ export type JobType =
   | "lead.sync-source"
   | "source.google-sheets.poll"
   | "maintenance.retention"
-  | "notify.telegram-call-report";
+  | "notify.telegram-call-report"
+  | "notify.telegram-document";
 
 export async function enqueue(
   type: JobType,
