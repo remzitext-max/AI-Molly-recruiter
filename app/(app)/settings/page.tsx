@@ -28,6 +28,7 @@ async function saveCampaign(fd: FormData) {
     where: { id, orgId: u.orgId } as never,
     data: {
       paused: fd.get("paused") === "on", contactWindowStart: time(fd.get("start")), contactWindowEnd: time(fd.get("end")), contactDays: days,
+      hotCallMinutes: Math.min(120, Math.max(0, Math.round(Number(fd.get("hotCallMinutes")) || 0))),
       maxAttempts: Math.min(10, Math.max(1, Number(fd.get("maxAttempts")) || 3)), retryDelayMinutes: Math.min(10080, Math.max(1, Number(fd.get("retryDelay")) || 240)),
       assignmentMode: fd.get("assignmentMode") === "MANUAL" ? "MANUAL" : "ROUND_ROBIN", offerId: String(fd.get("offerId") || "") || null,
     },
@@ -124,6 +125,9 @@ export default async function Settings({ searchParams }: { searchParams: Promise
             <div className="row">
               <span className="small">Driver-local hours</span><input type="time" name="start" defaultValue={c.contactWindowStart} /> – <input type="time" name="end" defaultValue={c.contactWindowEnd} />
               {[1, 2, 3, 4, 5, 6, 7].map((d) => <label key={d} style={{ margin: 0 }}><input type="checkbox" name="days" value={d} defaultChecked={c.contactDays.split(",").includes(String(d))} />{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d - 1]}</label>)}
+            </div>
+            <div className="row">
+              <span className="small">Call a new applicant right away at any hour if they applied within</span><input type="number" name="hotCallMinutes" defaultValue={c.hotCallMinutes} min={0} max={120} style={{ width: 60 }} /><span className="small">min (0 = off; retries keep to the hours above)</span>
             </div>
             <div className="row">
               <span className="small">Max AI attempts</span><input type="number" name="maxAttempts" defaultValue={c.maxAttempts} min={1} max={10} style={{ width: 60 }} />

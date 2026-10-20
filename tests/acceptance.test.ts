@@ -195,6 +195,23 @@ describe("6. contact hours", () => {
     expect(job.lastError).toBe("OUTSIDE_HOURS");
   });
 
+  it("hot-call minutes: a fresh applicant is called at once outside the hours; an older lead still waits", async () => {
+    const { DateTime } = await import("luxon");
+    const local = DateTime.now().setZone("America/Chicago").plus({ hours: 3 });
+    const start = local.toFormat("HH:mm");
+    const end = local.plus({ minutes: 1 }).toFormat("HH:mm");
+    const base = await seedBase({ window: start < end ? [start, end] : ["03:00", "03:01"] });
+    await db.campaign.updateMany({ data: { hotCallMinutes: 15 } });
+    const fresh = await lead(base, "interested");
+    await drain();
+    expect(await db.callAttempt.count({ where: { leadId: fresh } })).toBe(1);
+    const old = await lead(base, "interested", { phone: "(312) 555-0177" });
+    await db.lead.update({ where: { id: old }, data: { createdAt: new Date(Date.now() - 60 * 60_000) } });
+    await db.job.updateMany({ where: { status: "PENDING" }, data: { runAt: new Date() } });
+    await drain();
+    expect(await db.callAttempt.count({ where: { leadId: old } })).toBe(0);
+  });
+
   it("unknown timezone blocks automatic calling", async () => {
     const base = await seedBase();
     const id = await lead(base, "interested", { state: "", zip: "", phone: "(416) 555-0123" });

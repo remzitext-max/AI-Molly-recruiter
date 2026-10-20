@@ -22,6 +22,15 @@ export async function isSuppressed(phoneE164: string) {
   return !!(await db.suppression.findUnique({ where: { phoneE164 } }));
 }
 
+/** A driver who just applied is awake right now: the first call (and the CDL text they agree to on it) may skip the hours. Retries keep to the hours. */
+function isHotApplicant({ lead, channel, now, verbalSmsConsent }: GateInput) {
+  const mins = lead.campaign.hotCallMinutes;
+  if (!mins) return false;
+  const age = now.getTime() - lead.createdAt.getTime();
+  if (channel === "CALL") return lead.attemptCount === 0 && age <= mins * 60_000;
+  return !!verbalSmsConsent && age <= (mins + 60) * 60_000;
+}
+
 export async function evaluateContactGate(g: GateInput): Promise<GateResult> {
   const { lead, settings, channel, now } = g;
   if (lead.optedOutAt || (await isSuppressed(lead.phoneE164))) {
@@ -46,7 +55,7 @@ export async function evaluateContactGate(g: GateInput): Promise<GateResult> {
   if (!lead.timezone) return { ok: false, code: "NO_TIMEZONE", message: "Driver timezone unknown; resolve before automatic contact", pipeline: "NEEDS_TIMEZONE" };
 
   const w = parseWindow(lead.campaign.contactWindowStart, lead.campaign.contactWindowEnd, lead.campaign.contactDays);
-  if (!isWithinWindow(now, lead.timezone, w)) {
+  if (!isWithinWindow(now, lead.timezone, w) && !isHotApplicant(g)) {
     return { ok: false, code: "OUTSIDE_HOURS", message: "Outside permitted driver-local contact hours", retryAt: nextWindowStart(now, lead.timezone, w) };
   }
   if (channel === "CALL" && lead.attemptCount >= lead.campaign.maxAttempts) {

@@ -203,6 +203,7 @@ model Campaign {
   contactWindowStart  String         @default("09:00")
   contactWindowEnd    String         @default("19:00")
   contactDays         String         @default("1,2,3,4,5,6") // ISO weekdays
+  hotCallMinutes      Int            @default(0) // >0: first call to a new applicant ignores the hours if it starts within this many minutes of import
   createdAt           DateTime       @default(now())
   leads               Lead[]
 }
