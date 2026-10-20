@@ -85,7 +85,7 @@ Calls are placed with `POST /v2/texml/ai_calls/{TELNYX_TEXML_APP_ID}`. Status ca
 
 ## Telegram driver cards (optional)
 
-After each answered, non-demo AI call the worker posts the owner's driver card (recruiter, driver type, name, state, home time, experience, pay asked, can drive, English rated by the agent, ready date, phone) to one Telegram chat or group. Off unless both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set.
+After each answered, non-demo AI call the worker posts the owner's driver card (recruiter, driver type, name, state, home time, experience, pay left blank, can drive (miles the driver says), English rated by the agent, ready date, phone) to one Telegram chat or group. Off unless both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set.
 
 1. In Telegram, talk to @BotFather, `/newbot`, copy the token into `.env` as `TELEGRAM_BOT_TOKEN`.
 2. Send any message to the new bot (or add it to a group and write there).
