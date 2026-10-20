@@ -9,6 +9,7 @@ import { recordEvent } from "./activity";
 import { advancePipeline, optOutLead, scheduleLeadCall } from "./leads";
 import { createHandoff, evaluateHandoffReadiness } from "./handoff";
 import { sendCdlLink } from "./messaging";
+import { telegramConfigured } from "./telegram";
 import { enqueue } from "./jobs/queue";
 import { getActiveOfferVersion } from "./knowledge";
 import { redactText } from "./redact";
@@ -253,6 +254,10 @@ async function postCallWorkflow(attemptId: string) {
   }
   // Sync results back to the source system when a connector supports it.
   await enqueue("lead.sync-source", { leadId: lead.id, attemptId }, { idempotencyKey: `sync:${attemptId}` });
+  // Driver card to the owner's Telegram; a short delay lets the late summary arrive first.
+  if (telegramConfigured() && a.startedAt && !lead.isDemo) {
+    await enqueue("notify.telegram-call-report", { attemptId }, { runAt: new Date(Date.now() + 45_000), idempotencyKey: `telegram:${attemptId}`, maxAttempts: 3 });
+  }
 }
 
 async function maybeRetry(leadId: string, delayMin: number, max: number, reason: string) {

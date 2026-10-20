@@ -82,3 +82,12 @@ Use this when Retell outbound calling is not available. Set `VOICE_PROVIDER=teln
 3. In the portal, give the assistant's TeXML application the outbound voice profile, then restart the app.
 
 Calls are placed with `POST /v2/texml/ai_calls/{TELNYX_TEXML_APP_ID}`. Status callbacks and the conversation-ended callback go to `/api/webhooks/telnyx` with the token in the URL. Transfers are not confirmed by an event, so a transfer always ends with the callback task from the transfer timeout unless the recruiter updates it.
+
+## Telegram driver cards (optional)
+
+After each answered, non-demo AI call the worker posts a text card (name, phone, outcome, length, screening answers, questions for the recruiter, summary, link to the lead) to one Telegram chat. Off unless both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set.
+
+1. In Telegram, talk to @BotFather, `/newbot`, copy the token into `.env` as `TELEGRAM_BOT_TOKEN`.
+2. Send any message to the new bot (or add it to a group and write there).
+3. `docker compose exec web npx tsx scripts/telegram-setup.ts` prints `TELEGRAM_CHAT_ID=...`; add it to `.env` and `docker compose up -d`.
+4. `scripts/telegram-setup.ts test` sends a test message; `scripts/telegram-setup.ts last` sends the card for the latest answered call.

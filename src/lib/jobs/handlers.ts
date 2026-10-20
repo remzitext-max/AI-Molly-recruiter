@@ -4,6 +4,7 @@ import { sendCdlLink } from "../messaging";
 import { runRetentionSweep } from "../documents";
 import { pollGoogleSheet } from "../sheets-sync";
 import { db } from "../db";
+import { sendCallReport } from "../telegram";
 
 export const handlers: Record<string, JobHandler> = {
   "lead.attempt-call": attemptCallJob,
@@ -22,4 +23,8 @@ export const handlers: Record<string, JobHandler> = {
     await db.job.deleteMany({ where: { type: "source.google-sheets.poll", status: "DONE", updatedAt: { lt: new Date(Date.now() - 2 * 86400_000) } } });
   },
   "maintenance.retention": async () => { await runRetentionSweep(); },
+  "notify.telegram-call-report": async (job) => {
+    const { attemptId } = job.payload as { attemptId: string };
+    await sendCallReport(attemptId);
+  },
 };

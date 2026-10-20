@@ -12,6 +12,7 @@ import { integrationStatuses, setAdapterOverride } from "@/adapters/registry";
 import { mockSmsOutbox } from "@/adapters/mock";
 import { handleInboundSms, sendCdlLink } from "@/lib/messaging";
 import { verifySignature, signPayload } from "@/lib/webhook-auth";
+import { buildCallReport } from "@/lib/telegram";
 
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(2000, 7)]);
 
@@ -506,5 +507,29 @@ describe("other workflow behaviour", () => {
     expect(r.ok).toBe(false);
     const r2 = await applyAgentAction(c.id, { type: "record_slot", key: "ssn", value: "x", raw: "x", status: "CAPTURED" });
     expect(r2.ok).toBe(false);
+  });
+});
+
+describe("Telegram driver card", () => {
+  it("builds a card for an answered real call and skips demo records", async () => {
+    const base = await seedBase();
+    const real = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Ray", lastName: "<Test>", phoneE164: "+12145550111" } });
+    const started = new Date(Date.now() - 200_000);
+    const a = await db.callAttempt.create({ data: { leadId: real.id, provider: "telnyx", idempotencyKey: "tg-1", status: "COMPLETED", outcome: "INTERESTED", startedAt: started, endedAt: new Date(started.getTime() + 185_000) } });
+    await db.screeningField.create({ data: { leadId: real.id, key: "weekly_miles", reportedValue: "3500", callAttemptId: a.id } });
+    await db.screeningField.create({ data: { leadId: real.id, key: "sap_history", reportedValue: "No", callAttemptId: a.id } });
+    await db.unansweredQuestion.create({ data: { leadId: real.id, callAttemptId: a.id, question: "Do you have pet policy?" } });
+    const card = await buildCallReport(a.id);
+    expect(card).toContain("Ray &lt;Test&gt;");
+    expect(card).toContain("Outcome: <b>interested</b> · 3m 5s");
+    expect(card).toContain("• Miles/week: 3500");
+    expect(card!.indexOf("Miles/week")).toBeLessThan(card!.indexOf("SAP"));
+    expect(card).toContain("Do you have pet policy?");
+
+    const demo = await lead(base, "interested");
+    await drain();
+    expect(await buildCallReport((await lastCall(demo)).id)).toBeNull();
+    const unanswered = await db.callAttempt.create({ data: { leadId: real.id, provider: "telnyx", idempotencyKey: "tg-2", status: "NO_ANSWER" } });
+    expect(await buildCallReport(unanswered.id)).toBeNull();
   });
 });

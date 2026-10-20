@@ -15,7 +15,8 @@ export type JobType =
   | "transfer.timeout"
   | "lead.sync-source"
   | "source.google-sheets.poll"
-  | "maintenance.retention";
+  | "maintenance.retention"
+  | "notify.telegram-call-report";
 
 export async function enqueue(
   type: JobType,

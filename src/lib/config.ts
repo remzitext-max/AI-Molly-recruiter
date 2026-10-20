@@ -60,6 +60,11 @@ export const config = {
     get jwt() { return env("RINGCENTRAL_JWT"); },
     get smsFromNumber() { return env("RINGCENTRAL_SMS_FROM"); },
   },
+  /** Optional Telegram bot that posts a driver card after each answered AI call. */
+  telegram: {
+    get botToken() { return env("TELEGRAM_BOT_TOKEN"); },
+    get chatId() { return env("TELEGRAM_CHAT_ID"); },
+  },
   heygen: {
     get apiKey() { return env("HEYGEN_API_KEY"); },
   },
