@@ -180,7 +180,7 @@ model SystemSetting {
   uploadLinkTtlMinutes       Int       @default(60)
   /// Off = the AI does not text a CDL upload link; the recruiter collects the CDL.
   cdlBySms                   Boolean   @default(true)
-  recordConsentEnabled       Boolean   @default(true)
+  recordConsentEnabled       Boolean   @default(false)
   recordConsentText          String    @default("I authorize {company} and its agents to obtain and review my motor vehicle record (MVR), my FMCSA Pre-Employment Screening Program (PSP) report, my previous employers' safety performance history, and a limited query of the FMCSA Drug and Alcohol Clearinghouse, for hiring purposes only. I understand this is not a job offer. Typing my full name below is my electronic signature.")
   maxUploadBytes             Int       @default(10485760)
   screeningConfig            Json?

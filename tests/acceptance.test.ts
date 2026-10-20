@@ -608,6 +608,8 @@ describe("Driving record check consent", () => {
     try {
       const real = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Ray", lastName: "Doe", phoneE164: "+12145550113" } });
       const link = await createUploadLink(real.id);
+      await expect(saveRecordCheckConsent(link.token, { fullName: "Ray Doe" })).rejects.toThrow(/Not available/); // off by default
+      await db.systemSetting.update({ where: { id: "global" }, data: { recordConsentEnabled: true } });
       await expect(saveRecordCheckConsent(link.token, { fullName: " R " })).rejects.toThrow(/full name/);
       const c = await saveRecordCheckConsent(link.token, { fullName: "  Ray   Doe ", ip: "203.0.113.5", userAgent: "test" });
       expect(c.fullName).toBe("Ray Doe");

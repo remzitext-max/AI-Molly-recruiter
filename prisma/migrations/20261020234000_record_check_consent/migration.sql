@@ -1,5 +1,5 @@
 -- AlterTable
-ALTER TABLE "SystemSetting" ADD COLUMN     "recordConsentEnabled" BOOLEAN NOT NULL DEFAULT true,
+ALTER TABLE "SystemSetting" ADD COLUMN     "recordConsentEnabled" BOOLEAN NOT NULL DEFAULT false,
 ADD COLUMN     "recordConsentText" TEXT NOT NULL DEFAULT 'I authorize {company} and its agents to obtain and review my motor vehicle record (MVR), my FMCSA Pre-Employment Screening Program (PSP) report, my previous employers'' safety performance history, and a limited query of the FMCSA Drug and Alcohol Clearinghouse, for hiring purposes only. I understand this is not a job offer. Typing my full name below is my electronic signature.';
 
 -- CreateTable
