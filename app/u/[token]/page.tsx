@@ -1,5 +1,9 @@
 import { lookupUploadToken } from "@/lib/documents";
 import { UploadForm } from "./upload-form";
+import { ConsentForm } from "./consent-form";
+import { db } from "@/lib/db";
+import { getSettings } from "@/lib/settings";
+import { recordConsentText } from "@/lib/documents";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Secure CDL and medical card upload", robots: { index: false, follow: false }, referrer: "no-referrer" };
@@ -7,6 +11,8 @@ export const metadata = { title: "Secure CDL and medical card upload", robots: {
 export default async function UploadPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const t = await lookupUploadToken(token);
+  const s = t ? await getSettings() : null;
+  const signed = t && s?.recordConsentEnabled ? await db.recordCheckConsent.findFirst({ where: { leadId: t.leadId }, orderBy: { createdAt: "desc" } }) : null;
   return (
     <div style={{ maxWidth: 460, margin: "6vh auto", padding: 16 }}>
       <div className="card">
@@ -23,6 +29,9 @@ export default async function UploadPage({ params }: { params: Promise<{ token: 
           </>
         )}
       </div>
+      {t && !t.lead.optedOutAt && s?.recordConsentEnabled && (
+        <ConsentForm token={token} text={recordConsentText(s.recordConsentText, t.lead.org.name)} signedAt={signed ? signed.createdAt.toLocaleDateString("en-US", { dateStyle: "medium" }) : null} />
+      )}
     </div>
   );
 }

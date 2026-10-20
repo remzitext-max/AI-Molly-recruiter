@@ -53,6 +53,22 @@ export async function sendCallReport(attemptId: string) {
   return { sent: true };
 }
 
+/** Tells the group a driver signed the record check authorization. */
+export async function sendConsentToTelegram(consentId: string) {
+  if (!telegramConfigured()) return { sent: false, reason: "not configured" };
+  const c = await db.recordCheckConsent.findUnique({ where: { id: consentId }, include: { lead: true } });
+  if (!c || c.lead.isDemo) return { sent: false, reason: "nothing to send" };
+  const name = [c.lead.firstName, c.lead.lastName].filter(Boolean).join(" ");
+  await sendTelegram([
+    `✅ Record check consent: AGREED`,
+    `🗒 ${esc(name)}`,
+    `☎️ ${esc(c.lead.phoneE164)}`,
+    `✍️ Signed as: ${esc(c.fullName)}`,
+    `🕒 ${c.createdAt.toISOString().replace("T", " ").slice(0, 16)} UTC`,
+  ].join("\n"));
+  return { sent: true };
+}
+
 /** Sends one uploaded driver file (CDL / medical card) to the group with the driver's name and phone. */
 export async function sendDocumentToTelegram(documentId: string) {
   const token = config.telegram.botToken;

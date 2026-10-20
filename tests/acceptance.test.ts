@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { addLead, drain, resetDb, seedBase, setPersona } from "./helpers";
 import { ingestLead, scheduleLeadCall } from "@/lib/leads";
 import { ingestVoiceEvent, applyAgentAction } from "@/lib/calls";
-import { createUploadLink, handleUpload, readDocumentForUser } from "@/lib/documents";
+import { createUploadLink, handleUpload, readDocumentForUser, saveRecordCheckConsent } from "@/lib/documents";
 import { leadScope, canAccessLead } from "@/lib/rbac";
 import { claimJobs, enqueue, LOCK_TIMEOUT_MS } from "@/lib/jobs/queue";
 import { SpeechPlayback } from "@/lib/conversation/playback";
@@ -591,6 +591,35 @@ describe("Telegram document forward", () => {
       await handleUpload(demoLink.token, { data: JPEG });
       await drain();
       expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes("/sendDocument"))).toHaveLength(1);
+    } finally {
+      fetchSpy.mockRestore();
+      delete process.env.TELEGRAM_BOT_TOKEN;
+      delete process.env.TELEGRAM_CHAT_ID;
+    }
+  });
+});
+
+describe("Driving record check consent", () => {
+  it("saves the typed-name signature with the exact text and tells the Telegram group", async () => {
+    const base = await seedBase();
+    process.env.TELEGRAM_BOT_TOKEN = "123:abc";
+    process.env.TELEGRAM_CHAT_ID = "-100";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    try {
+      const real = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Ray", lastName: "Doe", phoneE164: "+12145550113" } });
+      const link = await createUploadLink(real.id);
+      await expect(saveRecordCheckConsent(link.token, { fullName: " R " })).rejects.toThrow(/full name/);
+      const c = await saveRecordCheckConsent(link.token, { fullName: "  Ray   Doe ", ip: "203.0.113.5", userAgent: "test" });
+      expect(c.fullName).toBe("Ray Doe");
+      expect(c.text).toContain(base.org.name);
+      expect(c.text).not.toContain("{company}");
+      await drain();
+      const sends = fetchSpy.mock.calls.filter(([u]) => String(u).includes("/sendMessage"));
+      expect(sends).toHaveLength(1);
+      const body = JSON.parse(String(sends[0][1]!.body));
+      expect(body.text).toContain("Record check consent: AGREED");
+      expect(body.text).toContain("Signed as: Ray Doe");
+      await expect(saveRecordCheckConsent("x".repeat(40), { fullName: "Ray Doe" })).rejects.toThrow(/expired/);
     } finally {
       fetchSpy.mockRestore();
       delete process.env.TELEGRAM_BOT_TOKEN;

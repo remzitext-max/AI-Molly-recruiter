@@ -180,6 +180,8 @@ model SystemSetting {
   uploadLinkTtlMinutes       Int       @default(60)
   /// Off = the AI does not text a CDL upload link; the recruiter collects the CDL.
   cdlBySms                   Boolean   @default(true)
+  recordConsentEnabled       Boolean   @default(true)
+  recordConsentText          String    @default("I authorize {company} and its agents to obtain and review my motor vehicle record (MVR), my FMCSA Pre-Employment Screening Program (PSP) report, my previous employers' safety performance history, and a limited query of the FMCSA Drug and Alcohol Clearinghouse, for hiring purposes only. I understand this is not a job offer. Typing my full name below is my electronic signature.")
   maxUploadBytes             Int       @default(10485760)
   screeningConfig            Json?
   aiDisclosure               String    @default("Hi, this is the AI recruiting assistant for {company}, calling on behalf of Molly, one of our recruiters.")
@@ -243,6 +245,7 @@ model Lead {
   calls              CallAttempt[]
   messages           Message[]
   documents          Document[]
+  recordConsents     RecordCheckConsent[]
   uploadTokens       UploadToken[]
   tasks              Task[]
   handoffs           Handoff[]
@@ -564,4 +567,18 @@ model SourceConnection {
   lastSummary Json?
   lastError   String?
   updatedAt   DateTime  @updatedAt
+}
+
+/// A driver's typed-name authorization, given on the upload page, for the company to check their driving record. The exact text they agreed to is kept.
+model RecordCheckConsent {
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id])
+  fullName  String
+  text      String
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([leadId])
 }

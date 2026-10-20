@@ -79,6 +79,23 @@ export async function handleUpload(token: string, file: { data: Buffer; declared
   return { documentId: doc.id };
 }
 
+/** The driver's typed-name authorization to check their driving record, saved with the exact text shown. */
+export async function saveRecordCheckConsent(token: string, input: { fullName: string; ip?: string | null; userAgent?: string | null }) {
+  const t = await lookupUploadToken(token);
+  if (!t) throw new UploadError("This link has expired. Please contact your recruiter for a new one.");
+  const s = await getSettings();
+  if (!s.recordConsentEnabled) throw new UploadError("Not available.");
+  const fullName = input.fullName.replace(/\s+/g, " ").trim();
+  if (fullName.length < 3 || fullName.length > 100) throw new UploadError("Type your full name to sign.");
+  const text = recordConsentText(s.recordConsentText, t.lead.org.name);
+  const c = await db.recordCheckConsent.create({ data: { leadId: t.leadId, fullName, text, ip: input.ip?.slice(0, 64) ?? null, userAgent: input.userAgent?.slice(0, 300) ?? null } });
+  await recordEvent({ leadId: t.leadId, actorType: "DRIVER", type: "RECORD_CHECK_CONSENT", message: `Driver signed the driving record check authorization as "${fullName}"`, data: { consentId: c.id } });
+  if (telegramConfigured() && !t.lead.isDemo) await enqueue("notify.telegram-consent", { consentId: c.id }, { idempotencyKey: `telegram-consent:${c.id}`, maxAttempts: 3 });
+  return c;
+}
+
+export const recordConsentText = (template: string, company: string) => template.replaceAll("{company}", company);
+
 export async function finishUpload(token: string) {
   const t = await lookupUploadToken(token);
   if (t) await db.uploadToken.update({ where: { id: t.id }, data: { completedAt: new Date() } });

@@ -47,7 +47,8 @@ async function savePolicy(fd: FormData) {
     where: { id: "global" },
     data: {
       requireCallPermission: fd.get("requireCallPermission") === "on", requireSmsPermission: fd.get("requireSmsPermission") === "on",
-      allowVerbalSmsConsent: fd.get("allowVerbalSmsConsent") === "on", cdlBySms: fd.get("cdlBySms") === "on", recordingEnabled: fd.get("recordingEnabled") === "on",
+      allowVerbalSmsConsent: fd.get("allowVerbalSmsConsent") === "on", cdlBySms: fd.get("cdlBySms") === "on", recordConsentEnabled: fd.get("recordConsentEnabled") === "on",
+      recordConsentText: String(fd.get("recordConsentText") || "").trim().slice(0, 2000) || undefined, recordingEnabled: fd.get("recordingEnabled") === "on",
       recordingNotice: String(fd.get("recordingNotice") || "").slice(0, 300), aiDisclosure: String(fd.get("aiDisclosure") || "").slice(0, 400),
       voicemailMessage: String(fd.get("voicemailMessage") || "").slice(0, 400), documentRetentionDays: n("retention", 30, 1, 3650),
       uploadLinkTtlMinutes: n("ttl", 60, 5, 1440), maxUploadBytes: n("maxMb", 10, 1, 25) * 1048576,
@@ -146,6 +147,8 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <label><input type="checkbox" name="requireSmsPermission" defaultChecked={s.requireSmsPermission} /> Require recorded permission before texts</label>
           <label><input type="checkbox" name="allowVerbalSmsConsent" defaultChecked={s.allowVerbalSmsConsent} /> Accept the driver’s verbal “yes” on the call for the CDL-link text (recorded with call ID)</label>
           <label><input type="checkbox" name="cdlBySms" defaultChecked={s.cdlBySms} /> AI texts interested drivers a CDL upload link (needs a registered SMS number). Off: the recruiter collects the CDL.</label>
+          <label><input type="checkbox" name="recordConsentEnabled" defaultChecked={s.recordConsentEnabled} /> Upload page asks the driver to sign a driving record check authorization (typed name)</label>
+          <label>Record check authorization text ({"{company}"} = company name; best to paste your company’s own wording)</label><textarea name="recordConsentText" rows={3} defaultValue={s.recordConsentText} />
           <label><input type="checkbox" name="recordingEnabled" defaultChecked={s.recordingEnabled} /> Calls are recorded (the notice below is spoken at the start)</label>
           <label>Recording notice</label><input name="recordingNotice" defaultValue={s.recordingNotice} style={{ width: "100%" }} />
           <label>Call opening (spoken first; must include {"{company}"}; may not claim to be a person. If a driver asks, the AI always says it is an AI.)</label><textarea name="aiDisclosure" rows={2} defaultValue={s.aiDisclosure} />

@@ -17,7 +17,8 @@ export type JobType =
   | "source.google-sheets.poll"
   | "maintenance.retention"
   | "notify.telegram-call-report"
-  | "notify.telegram-document";
+  | "notify.telegram-document"
+  | "notify.telegram-consent";
 
 export async function enqueue(
   type: JobType,
