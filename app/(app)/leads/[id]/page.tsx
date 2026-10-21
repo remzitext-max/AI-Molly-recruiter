@@ -287,7 +287,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                 </div>
               </details>
             )}
-            {c.recordingKey ? <p className="small">Recording available</p> : <p className="small muted">No recording.</p>}
+            {c.recordingKey ? <audio controls preload="none" src={`/api/recordings/${c.id}`} style={{ width: "100%" }} /> : <p className="small muted">No recording.</p>}
           </div>
         ))}
         {!lead.calls.length && <p className="muted">No calls yet.</p>}

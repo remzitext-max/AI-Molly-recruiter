@@ -45,6 +45,7 @@ export class TelnyxVoiceAgent implements VoiceAgentProvider {
         StatusCallbackEvent: "initiated ringing answered completed no-answer busy canceled failed",
         StatusCallbackMethod: "POST",
         ConversationCallback: callback,
+        ...(req.record ? { Record: true, RecordingChannels: "mono", RecordingStatusCallback: `${callback}&recording=1`, RecordingStatusCallbackEvent: "completed", RecordingStatusCallbackMethod: "POST" } : {}),
         TimeLimit: 15 * 60,
       }),
     });

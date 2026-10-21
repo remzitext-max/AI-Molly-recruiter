@@ -8,6 +8,8 @@ import { sendCallReport, sendConsentToTelegram, sendDocumentToTelegram } from ".
 import { fetchTelnyxTranscript } from "../telnyx-transcript";
 import { fillScreeningFromTranscript } from "../transcript-extract";
 import { log } from "../redact";
+import { fetchRecording } from "../recordings";
+import { getSettings } from "../settings";
 
 export const handlers: Record<string, JobHandler> = {
   "lead.attempt-call": attemptCallJob,
@@ -28,7 +30,17 @@ export const handlers: Record<string, JobHandler> = {
   "maintenance.retention": async () => { await runRetentionSweep(); },
   "notify.telegram-call-report": async (job) => {
     const { attemptId } = job.payload as { attemptId: string };
+    // When calls are recorded, give the recording up to 3 min after the call so it goes with the card.
+    const a = await db.callAttempt.findUnique({ where: { id: attemptId }, select: { recordingKey: true, endedAt: true, provider: true } });
+    const s = await getSettings();
+    if (a && s.recordingEnabled && a.provider === "telnyx" && !a.recordingKey && a.endedAt && Date.now() - a.endedAt.getTime() < 3 * 60_000) {
+      return { rescheduleAt: new Date(Date.now() + 30_000), reason: "WAITING_FOR_RECORDING" };
+    }
     await sendCallReport(attemptId);
+  },
+  "call.fetch-recording": async (job) => {
+    const { attemptId, url } = job.payload as { attemptId: string; url: string };
+    await fetchRecording(attemptId, url);
   },
   "notify.telegram-document": async (job) => {
     const { documentId } = job.payload as { documentId: string };

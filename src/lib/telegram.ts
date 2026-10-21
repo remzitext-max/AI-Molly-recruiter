@@ -5,6 +5,7 @@ import { config } from "./config";
 import { db } from "./db";
 import { providerFetch } from "../adapters/live/http";
 import { getAdapters } from "../adapters/registry";
+import { recordingMime } from "./recordings";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -77,6 +78,19 @@ export async function sendCallReport(attemptId: string) {
   if (!telegramConfigured()) return { sent: false, reason: "not configured" };
   const text = await buildCallReport(attemptId);
   if (!text) return { sent: false, reason: "nothing to report" };
+  const a = await db.callAttempt.findUnique({ where: { id: attemptId }, include: { lead: true } });
+  if (a?.recordingKey) {
+    // The card goes as the caption of the call recording.
+    const data = await getAdapters().storage.get(a.recordingKey);
+    const form = new FormData();
+    form.set("chat_id", config.telegram.chatId!);
+    form.set("caption", text.slice(0, 1024));
+    form.set("parse_mode", "HTML");
+    const who = [a.lead.firstName, a.lead.lastName].filter(Boolean).join(" ") || "driver";
+    form.set("audio", new Blob([new Uint8Array(data)], { type: recordingMime(a.recordingKey) }), `${who.replace(/[^A-Za-z0-9]+/g, "_")}_call.${a.recordingKey.split(".").pop()}`);
+    await providerFetch(`https://api.telegram.org/bot${config.telegram.botToken}/sendAudio`, { method: "POST", body: form, timeoutMs: 120_000 });
+    return { sent: true, withRecording: true };
+  }
   await sendTelegram(text);
   return { sent: true };
 }

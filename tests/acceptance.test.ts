@@ -1,4 +1,5 @@
 // Acceptance checks 1-14 from the specification, run against a real Postgres.
+import { fetchRecording } from "../src/lib/recordings";
 import { stopAiCalls } from "../src/lib/leads";
 import { pollRingCentralInbound } from "../src/lib/messaging";
 import { fillScreeningFromTranscript } from "../src/lib/transcript-extract";
@@ -17,7 +18,7 @@ import { integrationStatuses, setAdapterOverride } from "@/adapters/registry";
 import { mockSmsOutbox } from "@/adapters/mock";
 import { handleInboundSms, sendCdlLink } from "@/lib/messaging";
 import { verifySignature, signPayload } from "@/lib/webhook-auth";
-import { buildCallReport } from "@/lib/telegram";
+import { sendCallReport, buildCallReport } from "@/lib/telegram";
 
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(2000, 7)]);
 
@@ -675,6 +676,42 @@ describe("Stop AI calls", () => {
     expect(after.pipelineStatus).toBe("CLOSED");
     expect(after.optedOutAt).toBeNull();
     expect(await db.suppression.count()).toBe(0);
+  });
+});
+
+describe("Call recordings", () => {
+  it("saves the Telnyx recording once and sends the driver card as its caption", async () => {
+    const base = await seedBase();
+    process.env.TELEGRAM_BOT_TOKEN = "123:abc";
+    process.env.TELEGRAM_CHAT_ID = "-100";
+    const MP3 = Buffer.concat([Buffer.from("ID3"), Buffer.alloc(3000, 1)]);
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (u, init) => {
+      calls.push({ url: String(u), init });
+      if (String(u).startsWith("https://s3.example.com/")) return new Response(new Uint8Array(MP3), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    try {
+      const l = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Alquan", lastName: "W", phoneE164: "+16108091216", attemptCount: 1 } });
+      const t0 = new Date("2026-10-21T17:00:00Z");
+      const a = await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "rec-1", status: "COMPLETED", outcome: "INTERESTED", startedAt: t0, endedAt: new Date(t0.getTime() + 209_000) } });
+      await db.screeningField.create({ data: { leadId: l.id, key: "cdl_class", reportedValue: "Class A", rawUtterance: "a", status: "CAPTURED", callAttemptId: a.id } });
+      expect(await fetchRecording(a.id, "https://s3.example.com/rec.mp3?sig=x")).toEqual({ saved: true });
+      expect(new Headers(calls[0].init?.headers).get("authorization")).toBeNull();
+      expect(await fetchRecording(a.id, "https://s3.example.com/rec.mp3?sig=x")).toEqual({ saved: false });
+      const saved = await db.callAttempt.findUniqueOrThrow({ where: { id: a.id } });
+      expect(saved.recordingKey).toBe(`rec/${l.id}/${a.id}.mp3`);
+      expect(await sendCallReport(a.id)).toEqual({ sent: true, withRecording: true });
+      const tg = calls.find((c) => c.url.endsWith("/sendAudio"))!;
+      const form = tg.init!.body as FormData;
+      expect(String(form.get("caption"))).toContain("Alquan W");
+      expect((form.get("audio") as File).size).toBe(MP3.length);
+      await expect(fetchRecording(a.id.replace(/.$/, "x"), "http://insecure.example.com/x")).resolves.toEqual({ saved: false });
+    } finally {
+      fetchSpy.mockRestore();
+      delete process.env.TELEGRAM_BOT_TOKEN;
+      delete process.env.TELEGRAM_CHAT_ID;
+    }
   });
 });
 

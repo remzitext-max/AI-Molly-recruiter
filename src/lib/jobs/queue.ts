@@ -20,7 +20,8 @@ export type JobType =
   | "notify.telegram-document"
   | "notify.telegram-consent"
   | "call.fetch-transcript"
-  | "sms.poll-inbound";
+  | "sms.poll-inbound"
+  | "call.fetch-recording";
 
 export async function enqueue(
   type: JobType,

@@ -100,7 +100,7 @@ export async function attemptCallJob(job: Job) {
   await recordEvent({ leadId, actorType: "SYSTEM", type: "CALL_STARTING", message: `Outbound AI call #${lead.attemptCount + 1} starting${provider.isMock ? " (SIMULATED)" : ""}`, data: { attemptId: attempt.id } });
   try {
     const { providerCallId } = await provider.startOutboundCall({
-      attemptId: attempt.id, leadId, toE164: lead.phoneE164, isDemoRecord: lead.isDemo, personaKey,
+      attemptId: attempt.id, leadId, toE164: lead.phoneE164, isDemoRecord: lead.isDemo, personaKey, record: settings.recordingEnabled,
       dynamicVariables: await callVariables(lead, attempt.id, offer?.id ?? ""),
     });
     await db.callAttempt.update({ where: { id: attempt.id }, data: { providerCallId, status: "DIALING", statusRank: STATUS_RANK.DIALING } });
