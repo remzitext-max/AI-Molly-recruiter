@@ -78,6 +78,14 @@ export const config = {
     get idColumn() { return env("GOOGLE_SHEETS_ID_COLUMN"); },
     /** Optional header of a column the app may write the candidate's progress into. */
     get statusColumn() { return env("GOOGLE_SHEETS_STATUS_COLUMN"); },
+    /**
+     * More tabs of the same spreadsheet to call leads from, each with the Telegram
+     * user to tag on its driver cards: "1759604612=@tonyhope7,123=@someone" (tab gid=@username).
+     */
+    get extraTabs(): { gid: string; tag: string }[] {
+      return (env("GOOGLE_SHEETS_EXTRA_TABS") ?? "").split(",").map((p) => p.trim().match(/^(\d+)\s*=\s*(@?[A-Za-z0-9_]{3,64})?$/)).filter((m): m is RegExpMatchArray => !!m)
+        .map((m) => ({ gid: m[1], tag: m[2] ? (m[2].startsWith("@") ? m[2] : `@${m[2]}`) : "" }));
+    },
     get serviceAccountEmail() { return env("GOOGLE_SERVICE_ACCOUNT_EMAIL"); },
     get privateKey() { return env("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY")?.replace(/\\n/g, "\n"); },
   },

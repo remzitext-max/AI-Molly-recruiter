@@ -34,9 +34,9 @@ export function sheetMapping(headers: string[], saved?: Mapping | null): Mapping
   return base;
 }
 
-async function readChecked(): Promise<SheetSnapshot> {
+async function readChecked(range?: string): Promise<SheetSnapshot> {
   const src = getAdapters().sheets;
-  const snap = await src.readSheet();
+  const snap = await src.readSheet(range);
   if (!src.idColumn) throw new Error("No ID column configured (GOOGLE_SHEETS_ID_COLUMN)");
   if (!snap.headers.includes(src.idColumn)) throw new Error(`The sheet has no "${src.idColumn}" column in its first row. Found: ${snap.headers.filter(Boolean).join(", ") || "(empty)"}`);
   if (snap.rows.length > 5000) throw new Error(`The sheet has ${snap.rows.length} rows; the limit per sync is 5000`);
@@ -91,7 +91,53 @@ export async function pollGoogleSheet(opts: { manual?: boolean } = {}): Promise<
     result = { error: redactText((e as Error).message).slice(0, 500) };
     await db.sourceConnection.update({ where: { id: SHEETS_CONN_ID }, data: { lastSyncAt: new Date(), lastError: result.error } });
   }
+  for (const t of config.googleSheets.extraTabs) await pollExtraTab(conn, t.gid);
   return result;
+}
+
+/** Lead source name for an extra tab, so a phone seen in both tabs keeps a record of each. */
+export const tabSource = (gid: string) => `${SHEETS_SOURCE}:${gid}`;
+
+/**
+ * An extra tab (e.g. one recruiter's own leads) uses the main tab's reviewed
+ * mapping and campaign. Its first read only remembers the rows already there,
+ * so older leads in it are never called; rows added after that are imported.
+ * A phone already known (e.g. from the main tab) is merged, not called again.
+ */
+async function pollExtraTab(main: { orgId: string; campaignId: string | null; mapping: Prisma.JsonValue }, gid: string) {
+  const id = `${SHEETS_CONN_ID}:${gid}`;
+  try {
+    const snap = await readChecked(`gid:${gid}`);
+    const mapping = sheetMapping(snap.headers, main.mapping as Mapping);
+    const sheet: ParsedSheet = { headers: snap.headers, rows: snap.rows, warnings: snap.warnings };
+    const preview = await buildPreview(sheet, mapping, tabSource(gid), main.orgId);
+    const existing = await db.sourceConnection.findUnique({ where: { id } });
+    const baseline = new Set(((existing?.mapping as { baseline?: string[] } | null)?.baseline) ?? []);
+    if (!existing) {
+      // First look at this tab: remember what is already there and import nothing.
+      const ids = preview.map((r) => r.sourceRecordId).filter(Boolean);
+      await db.sourceConnection.create({ data: { id, orgId: main.orgId, campaignId: main.campaignId, mapping: { baseline: ids }, lastSyncAt: new Date(), lastSummary: { baselineRows: ids.length } } });
+      return;
+    }
+    const fresh = preview.filter((r) => !baseline.has(r.sourceRecordId) && (r.disposition === "new" || r.disposition === "merge_existing_phone" || r.disposition === "suppressed"));
+    let imported: Record<string, number> | null = null;
+    if (fresh.length) {
+      const rows = fresh.map((r) => snap.rows[r.rowNumber - 2]);
+      const campaign = await db.campaign.findUniqueOrThrow({ where: { id: main.campaignId! } });
+      const batch = await db.importBatch.create({
+        data: {
+          fileName: `Google Sheet sync: ${snap.title}`.slice(0, 200), fileSha256: sha256(JSON.stringify([snap.headers, rows])), sourceSystem: tabSource(gid),
+          mapping: mapping as Prisma.InputJsonValue, rows: { headers: snap.headers, rows, warnings: snap.warnings } as Prisma.InputJsonValue,
+          campaignId: campaign.id, isDemo: config.mode === "demo" || campaign.isDemo, createdById: "system",
+        },
+      });
+      imported = await commitBatch(batch.id, { id: null, orgId: main.orgId });
+    }
+    await db.sourceConnection.update({ where: { id }, data: { lastSyncAt: new Date(), lastSummary: { checkedRows: snap.rows.length, imported } as Prisma.InputJsonValue, lastError: null } });
+  } catch (e) {
+    const msg = redactText((e as Error).message).slice(0, 500);
+    await db.sourceConnection.updateMany({ where: { id }, data: { lastSyncAt: new Date(), lastError: msg } });
+  }
 }
 
 /** Called by the worker every minute; enqueues at most one poll per interval. */

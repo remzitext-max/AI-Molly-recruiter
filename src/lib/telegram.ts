@@ -14,6 +14,14 @@ function lastDriverLines(transcript: unknown): string[] {
   return (transcript as { speaker?: string; text?: string }[]).filter((t) => t.speaker === "driver" && t.text).slice(-2).map((t) => `🗣 Driver: "${esc(String(t.text).slice(0, 200))}"`);
 }
 
+/** "@user" lines for the recruiters whose sheet tab this lead came from (GOOGLE_SHEETS_EXTRA_TABS). */
+export async function recruiterTags(leadId: string): Promise<string[]> {
+  const tabs = config.googleSheets.extraTabs.filter((t) => t.tag);
+  if (!tabs.length) return [];
+  const recs = await db.leadSourceRecord.findMany({ where: { leadId, sourceSystem: { in: tabs.map((t) => `GOOGLE_SHEETS:${t.gid}`) } }, select: { sourceSystem: true } });
+  return [...new Set(tabs.filter((t) => recs.some((r) => r.sourceSystem === `GOOGLE_SHEETS:${t.gid}`)).map((t) => t.tag))];
+}
+
 export function telegramConfigured() {
   return !!(config.telegram.botToken && config.telegram.chatId);
 }
@@ -37,10 +45,12 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
   const v = (s: string | null | undefined) => esc((s ?? "").trim());
   const team = /team/i.test(slot("driving_type"));
   const name = v([l.firstName, l.lastName].filter(Boolean).join(" "));
+  const tags = await recruiterTags(l.id);
   if (!l.screening.some((f) => f.reportedValue)) {
     // Nothing was collected (driver hung up, short call): a one-line note instead of an empty card.
     const secs = a.startedAt && a.endedAt ? Math.round((a.endedAt.getTime() - a.startedAt.getTime()) / 1000) : null;
     return [
+      ...tags,
       `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}${secs !== null ? ` (${secs} sec)` : ""}: no answers collected`,
       `☎️ ${v(l.phoneE164)}`,
       ...lastDriverLines(a.transcript),
@@ -48,6 +58,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
     ].join("\n");
   }
   return [
+    ...tags,
     `👔Recruiter: ${v(config.agentPersona.name)} AI`,
     `🥸Driver type: ${team ? "Team" : "Solo"}`,
     `🗒Driver name: ${name}`,
@@ -77,6 +88,7 @@ export async function sendConsentToTelegram(consentId: string) {
   if (!c || c.lead.isDemo) return { sent: false, reason: "nothing to send" };
   const name = [c.lead.firstName, c.lead.lastName].filter(Boolean).join(" ");
   await sendTelegram([
+    ...(await recruiterTags(c.leadId)),
     `✅ Record check consent: AGREED`,
     `🗒 ${esc(name)}`,
     `☎️ ${esc(c.lead.phoneE164)}`,
@@ -97,7 +109,7 @@ export async function sendDocumentToTelegram(documentId: string) {
   const name = [d.lead.firstName, d.lead.lastName].filter(Boolean).join(" ");
   const form = new FormData();
   form.set("chat_id", chatId);
-  form.set("caption", `📎 CDL / medical card\n🗒 ${name}\n☎️ ${d.lead.phoneE164}`);
+  form.set("caption", [...(await recruiterTags(d.leadId)), `📎 CDL / medical card`, `🗒 ${name}`, `☎️ ${d.lead.phoneE164}`].join("\n"));
   form.set("document", new Blob([new Uint8Array(data)], { type: d.mimeType }), `${(name || "driver").replace(/[^A-Za-z0-9]+/g, "_")}.${d.storageKey.split(".").pop()}`);
   await providerFetch(`https://api.telegram.org/bot${token}/sendDocument`, { method: "POST", body: form, timeoutMs: 60000 });
   return { sent: true };

@@ -70,6 +70,29 @@ describe("Google Sheets sync (demo sheet)", () => {
     expect(await db.leadSourceRecord.count({ where: { sourceSystem: "GOOGLE_SHEETS" } })).toBe(4);
   });
 
+  it("an extra tab only takes rows added after its first read, and its leads tag that recruiter on Telegram", async () => {
+    process.env.GOOGLE_SHEETS_EXTRA_TABS = "555=@tonyhope7";
+    try {
+      const { base, b } = await firstImport();
+      await commitBatch(b.id, base.admin);
+      await pollGoogleSheet({ manual: true });
+      const tab = await db.sourceConnection.findUniqueOrThrow({ where: { id: "google-sheets:555" } });
+      expect((tab.mapping as { baseline: string[] }).baseline).toHaveLength(3);
+      expect(await db.leadSourceRecord.count({ where: { sourceSystem: "GOOGLE_SHEETS:555" } })).toBe(0);
+      const id = await addDemoSheetRow();
+      await pollGoogleSheet({ manual: true });
+      const recs = await db.leadSourceRecord.findMany({ where: { sourceRecordId: id } });
+      expect(recs.map((r) => r.sourceSystem).sort()).toEqual(["GOOGLE_SHEETS", "GOOGLE_SHEETS:555"]);
+      expect(await db.lead.count()).toBe(4); // same phone in both tabs: one lead, one call
+      const { recruiterTags } = await import("@/lib/telegram");
+      expect(await recruiterTags(recs[0].leadId)).toEqual(["@tonyhope7"]);
+      const old = await db.leadSourceRecord.findFirstOrThrow({ where: { sourceRecordId: "GS-1001" } });
+      expect(await recruiterTags(old.leadId)).toEqual([]);
+    } finally {
+      delete process.env.GOOGLE_SHEETS_EXTRA_TABS;
+    }
+  });
+
   it("writes progress back to the sheet without ever saying hired", async () => {
     const { base, b } = await firstImport();
     await commitBatch(b.id, base.admin);

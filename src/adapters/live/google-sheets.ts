@@ -96,10 +96,10 @@ export class GoogleSheetsSource implements SheetLeadSource {
   }
 
   /** GOOGLE_SHEETS_RANGE as A1 notation; "gid:<id>" picks the tab by the id in its URL, so emoji or renamed tabs still work. */
-  private async range() {
+  private async range(r = config.googleSheets.range) {
     const g = config.googleSheets;
-    const gid = /^gid[:=](\d+)$/i.exec(g.range.trim());
-    if (!gid) return quoteTab(g.range);
+    const gid = /^gid[:=](\d+)$/i.exec(r.trim());
+    if (!gid) return quoteTab(r);
     const url = `${API}/${encodeURIComponent(g.spreadsheetId!)}?fields=sheets.properties(sheetId,title)`;
     const res = await providerFetch(url, { headers: { authorization: `Bearer ${await this.token()}` } });
     const j = (await res.json()) as { sheets?: { properties: { sheetId: number; title: string } }[] };
@@ -108,15 +108,15 @@ export class GoogleSheetsSource implements SheetLeadSource {
     return quote(title);
   }
 
-  private async getValues() {
+  private async getValues(r?: string) {
     const g = config.googleSheets;
-    const url = `${API}/${encodeURIComponent(g.spreadsheetId!)}/values/${encodeURIComponent(await this.range())}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`;
+    const url = `${API}/${encodeURIComponent(g.spreadsheetId!)}/values/${encodeURIComponent(await this.range(r))}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`;
     const res = await providerFetch(url, { headers: { authorization: `Bearer ${await this.token()}` } });
     return (await res.json()) as { range: string; values?: unknown[][] };
   }
 
-  async readSheet(): Promise<SheetSnapshot> {
-    const v = await this.getValues();
+  async readSheet(r?: string): Promise<SheetSnapshot> {
+    const v = await this.getValues(r);
     const values = (v.values ?? []).map((r) => r.map((c) => (c === null || c === undefined ? "" : String(c))));
     const headers = (values[0] ?? []).map((h) => h.trim());
     const rows = values.slice(1).map((r) => headers.map((_, i) => r[i] ?? ""));

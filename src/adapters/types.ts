@@ -49,7 +49,8 @@ export interface SheetLeadSource {
   /** Header of the optional column the app writes progress into (write-back is off when unset). */
   statusColumn: string | undefined;
   status(): IntegrationStatus;
-  readSheet(): Promise<SheetSnapshot>;
+  /** range: another tab ("gid:<id>" or A1); defaults to the configured one. */
+  readSheet(range?: string): Promise<SheetSnapshot>;
   /** sourceRecordId "phone:+1..." matches the row by phone number in `phoneColumn`. */
   writeStatus(sourceRecordId: string, text: string, phoneColumn?: string): Promise<"written" | "row_not_found" | "ambiguous_id" | "not_enabled">;
 }
