@@ -566,6 +566,15 @@ describe("Telegram driver card", () => {
     expect(await buildCallReport((await lastCall(demo)).id)).toBeNull();
     const unanswered = await db.callAttempt.create({ data: { leadId: real.id, provider: "telnyx", idempotencyKey: "tg-2", status: "NO_ANSWER" } });
     expect(await buildCallReport(unanswered.id)).toBeNull();
+
+    // Answered but nothing collected: a short note, not an empty card.
+    const quiet = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Frank", lastName: "D", phoneE164: "+18124065861", attemptCount: 1 } });
+    const t0 = new Date("2026-10-21T00:36:00Z");
+    const short = await db.callAttempt.create({ data: { leadId: quiet.id, provider: "telnyx", idempotencyKey: "tg-3", status: "COMPLETED", startedAt: t0, endedAt: new Date(t0.getTime() + 26_000) } });
+    const note = await buildCallReport(short.id);
+    expect(note).toContain("called Frank D (26 sec): no answers collected");
+    expect(note).toContain("+18124065861");
+    expect(note).toMatch(/will try again \(attempt 1 of \d\)/);
   });
 });
 
