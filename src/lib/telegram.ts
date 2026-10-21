@@ -8,6 +8,12 @@ import { getAdapters } from "../adapters/registry";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+/** Up to two last things the driver said, for the short "nothing collected" note. */
+function lastDriverLines(transcript: unknown): string[] {
+  if (!Array.isArray(transcript)) return [];
+  return (transcript as { speaker?: string; text?: string }[]).filter((t) => t.speaker === "driver" && t.text).slice(-2).map((t) => `🗣 Driver: "${esc(String(t.text).slice(0, 200))}"`);
+}
+
 export function telegramConfigured() {
   return !!(config.telegram.botToken && config.telegram.chatId);
 }
@@ -37,6 +43,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
     return [
       `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}${secs !== null ? ` (${secs} sec)` : ""}: no answers collected`,
       `☎️ ${v(l.phoneE164)}`,
+      ...lastDriverLines(a.transcript),
       l.attemptCount < l.campaign.maxAttempts ? `🔁 ${v(config.agentPersona.name)} will try again (attempt ${l.attemptCount} of ${l.campaign.maxAttempts})` : `⛔ No more AI attempts; call manually`,
     ].join("\n");
   }

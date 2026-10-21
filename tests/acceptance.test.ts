@@ -1,4 +1,5 @@
 // Acceptance checks 1-14 from the specification, run against a real Postgres.
+import { fetchTelnyxTranscript } from "../src/lib/telnyx-transcript";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { addLead, drain, resetDb, seedBase, setPersona } from "./helpers";
@@ -575,6 +576,43 @@ describe("Telegram driver card", () => {
     expect(note).toContain("called Frank D (26 sec): no answers collected");
     expect(note).toContain("+18124065861");
     expect(note).toMatch(/will try again \(attempt 1 of \d\)/);
+  });
+});
+
+describe("Telnyx transcript fetch", () => {
+  it("reads the call text from the Conversations API and shows the driver's last words in the short note", async () => {
+    const base = await seedBase();
+    process.env.TELNYX_API_KEY = "KEY";
+    process.env.TELNYX_ASSISTANT_ID = "assistant-1";
+    const urls: string[] = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (u) => {
+      urls.push(String(u));
+      if (String(u).includes("/messages")) {
+        return new Response(JSON.stringify({ data: [
+          { role: "user", text: "I'm driving right now, call me later", created_at: "2026-10-21T00:36:12Z" },
+          { role: "assistant", text: "Hi Frank, this is Crystal from the recruiting team at TBT express.", created_at: "2026-10-21T00:36:03Z" },
+          { role: "tool", text: "{}", created_at: "2026-10-21T00:36:13Z" },
+        ] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ data: [{ id: "conv-1" }] }), { status: 200 });
+    });
+    try {
+      const l = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Frank", lastName: "D", phoneE164: "+18124065861", attemptCount: 1 } });
+      const t0 = new Date("2026-10-21T00:36:00Z");
+      const a = await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "tx-1", status: "COMPLETED", startedAt: t0, endedAt: new Date(t0.getTime() + 26_000) } });
+      expect(await fetchTelnyxTranscript(a.id)).toEqual({ saved: true, turns: 2 });
+      const q = decodeURIComponent(urls[0]);
+      expect(q).toContain("metadata->assistant_id=eq.assistant-1");
+      expect(q).toContain("metadata->telnyx_end_user_target=eq.+18124065861");
+      expect(urls[1]).toContain("/ai/conversations/conv-1/messages");
+      const saved = (await db.callAttempt.findUniqueOrThrow({ where: { id: a.id } })).transcript as { speaker: string }[];
+      expect(saved.map((t) => t.speaker)).toEqual(["agent", "driver"]);
+      expect(await buildCallReport(a.id)).toContain(`🗣 Driver: "I'm driving right now, call me later"`);
+    } finally {
+      fetchSpy.mockRestore();
+      delete process.env.TELNYX_API_KEY;
+      delete process.env.TELNYX_ASSISTANT_ID;
+    }
   });
 });
 

@@ -5,6 +5,7 @@ import { runRetentionSweep } from "../documents";
 import { pollGoogleSheet } from "../sheets-sync";
 import { db } from "../db";
 import { sendCallReport, sendConsentToTelegram, sendDocumentToTelegram } from "../telegram";
+import { fetchTelnyxTranscript } from "../telnyx-transcript";
 
 export const handlers: Record<string, JobHandler> = {
   "lead.attempt-call": attemptCallJob,
@@ -30,6 +31,10 @@ export const handlers: Record<string, JobHandler> = {
   "notify.telegram-document": async (job) => {
     const { documentId } = job.payload as { documentId: string };
     await sendDocumentToTelegram(documentId);
+  },
+  "call.fetch-transcript": async (job) => {
+    const { attemptId } = job.payload as { attemptId: string };
+    await fetchTelnyxTranscript(attemptId);
   },
   "notify.telegram-consent": async (job) => {
     const { consentId } = job.payload as { consentId: string };

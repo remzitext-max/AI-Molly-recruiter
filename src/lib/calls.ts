@@ -254,6 +254,10 @@ async function postCallWorkflow(attemptId: string) {
   }
   // Sync results back to the source system when a connector supports it.
   await enqueue("lead.sync-source", { leadId: lead.id, attemptId }, { idempotencyKey: `sync:${attemptId}` });
+  // Telnyx does not always post the transcript; read it from the Conversations API.
+  if (a.provider === "telnyx" && a.startedAt && !Array.isArray(a.transcript) && !lead.isDemo) {
+    await enqueue("call.fetch-transcript", { attemptId }, { runAt: new Date(Date.now() + 20_000), idempotencyKey: `transcript:${attemptId}`, maxAttempts: 4 });
+  }
   // Driver card to the owner's Telegram; a short delay lets the late summary arrive first.
   if (telegramConfigured() && a.startedAt && !lead.isDemo) {
     await enqueue("notify.telegram-call-report", { attemptId }, { runAt: new Date(Date.now() + 45_000), idempotencyKey: `telegram:${attemptId}`, maxAttempts: 3 });
