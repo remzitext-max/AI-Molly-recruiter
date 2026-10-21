@@ -6,6 +6,8 @@ import { pollGoogleSheet } from "../sheets-sync";
 import { db } from "../db";
 import { sendCallReport, sendConsentToTelegram, sendDocumentToTelegram } from "../telegram";
 import { fetchTelnyxTranscript } from "../telnyx-transcript";
+import { fillScreeningFromTranscript } from "../transcript-extract";
+import { log } from "../redact";
 
 export const handlers: Record<string, JobHandler> = {
   "lead.attempt-call": attemptCallJob,
@@ -34,7 +36,16 @@ export const handlers: Record<string, JobHandler> = {
   },
   "call.fetch-transcript": async (job) => {
     const { attemptId } = job.payload as { attemptId: string };
-    await fetchTelnyxTranscript(attemptId);
+    // The Telegram card waits for this job; send it now on success or on the last try.
+    const releaseCard = () => db.job.updateMany({ where: { idempotencyKey: `telegram:${attemptId}`, status: "PENDING" }, data: { runAt: new Date() } });
+    try {
+      await fetchTelnyxTranscript(attemptId);
+    } catch (e) {
+      if (job.attempts >= job.maxAttempts) await releaseCard();
+      throw e;
+    }
+    await fillScreeningFromTranscript(attemptId).catch((e) => log.error("screening from transcript failed", { attemptId, error: (e as Error).message }));
+    await releaseCard();
   },
   "notify.telegram-consent": async (job) => {
     const { consentId } = job.payload as { consentId: string };

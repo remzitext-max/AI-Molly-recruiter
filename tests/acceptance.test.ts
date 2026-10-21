@@ -1,4 +1,5 @@
 // Acceptance checks 1-14 from the specification, run against a real Postgres.
+import { fillScreeningFromTranscript } from "../src/lib/transcript-extract";
 import { realCallsInProgress } from "../src/lib/calls";
 import { fetchTelnyxTranscript } from "../src/lib/telnyx-transcript";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -591,6 +592,37 @@ describe("Telegram driver card", () => {
     expect(note).toContain("called Frank D (26 sec): no answers collected");
     expect(note).toContain("+18124065861");
     expect(note).toMatch(/will try again \(attempt 1 of \d\)/);
+  });
+});
+
+describe("Screening answers from the transcript", () => {
+  it("fills the answers the agent heard but did not save, without overwriting saved ones", async () => {
+    const base = await seedBase();
+    process.env.TELNYX_API_KEY = "KEY";
+    let sent = "";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_u, init) => {
+      sent = String(init?.body ?? "");
+      const content = JSON.stringify({ weekly_miles: "4,000 a week", experience_years: "3 years", cdl_class: "A", home_location: "Ohio", home_time: "5 weeks out, 6 days home", start_date: "ASAP", english_level: "Good", driving_type: "unknown", bogus: "x" });
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
+    });
+    try {
+      const l = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Melvin", lastName: "S", phoneE164: "+15108305523", attemptCount: 1 } });
+      const t0 = new Date("2026-10-21T08:18:00Z");
+      const a = await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "ex-1", status: "COMPLETED", outcome: "INTERESTED", startedAt: t0, endedAt: new Date(t0.getTime() + 164_000),
+        transcript: [{ speaker: "agent", text: "How many miles can you cover?" }, { speaker: "driver", text: "Four thousand." }, { speaker: "agent", text: "What class is your CDL?" }, { speaker: "driver", text: "I said a." }] } });
+      await db.screeningField.create({ data: { leadId: l.id, key: "cdl_class", reportedValue: "Class A", rawUtterance: "a", status: "CAPTURED", callAttemptId: a.id } });
+      const filled = await fillScreeningFromTranscript(a.id);
+      expect(filled.sort()).toEqual(["english_level", "experience_years", "home_location", "home_time", "start_date", "weekly_miles"]);
+      expect(sent).toContain("Driver: Four thousand.");
+      expect(sent).not.toContain("- cdl_class:");
+      const card = await buildCallReport(a.id);
+      expect(card).toContain("4,000 a week");
+      expect(card).toContain("3 years");
+      expect((await db.screeningField.findFirstOrThrow({ where: { leadId: l.id, key: "cdl_class" } })).reportedValue).toBe("Class A");
+    } finally {
+      fetchSpy.mockRestore();
+      delete process.env.TELNYX_API_KEY;
+    }
   });
 });
 

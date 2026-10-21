@@ -9,14 +9,19 @@ import type { Prisma } from "@prisma/client";
 
 const BASE = "https://api.telnyx.com/v2";
 
-type Msg = { role: string; text: string | null; created_at?: string; sent_at?: string };
+type Msg = { role: string; text: string | null; created_at?: string; sent_at?: string; tool_calls?: { function?: { name?: string } }[] };
 
 /** Conversation messages -> our transcript turns (driver/agent only, in time order). Exported for tests. */
 export function toTurns(msgs: Msg[]) {
+  // Tool calls are kept as a short note (e.g. "[hangup]") so it is clear who ended a call.
+  const text = (m: Msg) => {
+    const tools = m.role === "assistant" ? (m.tool_calls ?? []).map((t) => t.function?.name).filter(Boolean) : [];
+    return [m.text?.trim(), tools.length ? `[${tools.join(", ")}]` : ""].filter(Boolean).join(" ");
+  };
   return msgs
-    .filter((m) => (m.role === "user" || m.role === "assistant") && m.text && m.text.trim())
+    .filter((m) => (m.role === "user" || m.role === "assistant") && text(m))
     .sort((a, b) => Date.parse(a.sent_at ?? a.created_at ?? "") - Date.parse(b.sent_at ?? b.created_at ?? ""))
-    .map((m) => ({ speaker: m.role === "user" ? "driver" : "agent", text: redactText(m.text!.trim()), at: m.sent_at ?? m.created_at }));
+    .map((m) => ({ speaker: m.role === "user" ? "driver" : "agent", text: redactText(text(m)), at: m.sent_at ?? m.created_at }));
 }
 
 /** Saves the transcript on the call attempt. Throws when the conversation is not there yet, so the job retries. */
