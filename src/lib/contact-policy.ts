@@ -52,10 +52,11 @@ export async function evaluateContactGate(g: GateInput): Promise<GateResult> {
   if (channel === "SMS" && settings.requireSmsPermission && !active("SMS") && !(g.verbalSmsConsent && settings.allowVerbalSmsConsent)) {
     return { ok: false, code: "NO_SMS_PERMISSION", message: "No recorded permission for text messages" };
   }
-  if (!lead.timezone) return { ok: false, code: "NO_TIMEZONE", message: "Driver timezone unknown; resolve before automatic contact", pipeline: "NEEDS_TIMEZONE" };
+  // A hot applicant's first call ignores hours, so it does not need their timezone either.
+  if (!lead.timezone && !isHotApplicant(g)) return { ok: false, code: "NO_TIMEZONE", message: "Driver timezone unknown; resolve before automatic contact", pipeline: "NEEDS_TIMEZONE" };
 
   const w = parseWindow(lead.campaign.contactWindowStart, lead.campaign.contactWindowEnd, lead.campaign.contactDays);
-  if (!isWithinWindow(now, lead.timezone, w) && !isHotApplicant(g)) {
+  if (lead.timezone && !isWithinWindow(now, lead.timezone, w) && !isHotApplicant(g)) {
     return { ok: false, code: "OUTSIDE_HOURS", message: "Outside permitted driver-local contact hours", retryAt: nextWindowStart(now, lead.timezone, w) };
   }
   if (channel === "CALL" && lead.attemptCount >= lead.campaign.maxAttempts) {

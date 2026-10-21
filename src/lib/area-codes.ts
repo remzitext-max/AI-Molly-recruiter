@@ -67,6 +67,19 @@ const ZONE_OVERRIDE: Record<number, string> = {
   219: "America/Chicago", // northwest Indiana
 };
 
+// Canadian area codes share +1, so applicants from Canada would otherwise get no timezone.
+const CANADA: Record<string, number[]> = {
+  "America/Vancouver": [236, 250, 257, 604, 672, 778],
+  "America/Edmonton": [368, 403, 587, 780, 825],
+  "America/Regina": [306, 474, 639],
+  "America/Winnipeg": [204, 431, 584],
+  "America/Toronto": [226, 249, 263, 289, 343, 354, 365, 367, 382, 416, 418, 437, 438, 450, 468, 514, 519, 548, 579, 581, 613, 647, 683, 705, 742, 753, 807, 819, 873, 905],
+  "America/Moncton": [428, 506],
+  "America/Halifax": [782, 902],
+  "America/St_Johns": [709, 879],
+};
+for (const [tz, codes] of Object.entries(CANADA)) for (const c of codes) ZONE_OVERRIDE[c] = tz;
+
 const STATE_BY_CODE = new Map<number, string>();
 for (const [st, codes] of Object.entries(BY_STATE)) for (const c of codes) STATE_BY_CODE.set(c, st);
 

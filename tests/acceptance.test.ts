@@ -215,10 +215,24 @@ describe("6. contact hours", () => {
 
   it("unknown timezone blocks automatic calling", async () => {
     const base = await seedBase();
-    const id = await lead(base, "interested", { state: "", zip: "", phone: "(416) 555-0123" });
+    const id = await lead(base, "interested", { state: "", zip: "", phone: "(867) 555-0123" });
     await drain();
     expect(await db.callAttempt.count({ where: { leadId: id } })).toBe(0);
     expect((await db.lead.findUniqueOrThrow({ where: { id } })).pipelineStatus).toBe("NEEDS_TIMEZONE");
+  });
+
+  it("hot applicant with unknown timezone still gets the first call at once", async () => {
+    const base = await seedBase();
+    await db.campaign.updateMany({ data: { hotCallMinutes: 15 } });
+    const id = await lead(base, "interested", { state: "", zip: "", phone: "(867) 555-0126" });
+    await drain();
+    expect(await db.callAttempt.count({ where: { leadId: id } })).toBe(1);
+  });
+
+  it("Canadian area codes get a Canadian timezone", async () => {
+    const base = await seedBase();
+    const id = await lead(base, "interested", { state: "", zip: "", phone: "(250) 521-0475" });
+    expect((await db.lead.findUniqueOrThrow({ where: { id } })).timezone).toBe("America/Vancouver");
   });
 
   it("no state or ZIP: timezone comes from the phone's area code", async () => {
