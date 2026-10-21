@@ -30,7 +30,7 @@ export default async function Tasks({ searchParams }: { searchParams: Promise<{ 
       <h1>Follow-up tasks</h1>
       <Card>
         <table>
-          <thead><tr><th>Due</th><th>Task</th><th>Candidate</th><th>Assigned</th><th></th></tr></thead>
+          <thead><tr><th>Due</th><th>Task</th><th>Lead</th><th>Assigned</th><th></th></tr></thead>
           <tbody>
             {tasks.map((t) => (
               <tr key={t.id}>

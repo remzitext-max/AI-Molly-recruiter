@@ -7,7 +7,7 @@ import { config } from "@/lib/config";
 import { recordEvent } from "@/lib/activity";
 import { integrationStatuses } from "@/adapters/registry";
 import { DEFAULT_SLOTS, type SlotSpec } from "@/lib/conversation/brain";
-import { Badge, Card, fmt } from "@/components/ui";
+import { Badge, Card, PageHead, fmt } from "@/components/ui";
 
 async function togglePause(fd: FormData) {
   "use server";
@@ -102,7 +102,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const slots = (s.screeningConfig as SlotSpec[] | null) ?? DEFAULT_SLOTS;
   return (
     <>
-      <h1>Controls &amp; contact policy</h1>
+      <PageHead title="Settings" sub="Calling hours, campaigns, contact policy, Crystal’s screening questions and recording." />
       {sp.error && <div className="alert error">{sp.error}</div>}
       <div className="grid two">
         <Card title="Global pause">

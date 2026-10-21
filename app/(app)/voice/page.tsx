@@ -50,7 +50,7 @@ export default async function VoicePage() {
   const synth = getAdapters().synth;
   return (
     <>
-      <h1>Molly’s voice</h1>
+      <h1>Voice agent</h1>
       <div className="alert warn">
         Status: <strong>{profile?.status ?? "NOT_CREATED"}</strong>. No voice has been cloned yet. HeyGen voices cannot be used for live phone calls (they stay inside HeyGen and are not supported by phone voice-agent providers). The documented path is cloning inside the voice-agent provider (Retell with Cartesia or ElevenLabs) after Molly completes the provider’s own verification. See docs/VOICE.md.
       </div>

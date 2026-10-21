@@ -1,12 +1,22 @@
 import Link from "next/link";
-import type { Prisma } from "@prisma/client";
+import type { PipelineStatus, Prisma } from "@prisma/client";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { leadScope } from "@/lib/rbac";
-import { Badge, Card, fmt, name } from "@/components/ui";
+import { Badge, Card, PageHead, fmt, name, initials } from "@/components/ui";
+import { Icon } from "@/components/icons";
 
 const PIPE = ["NEW", "NEEDS_PERMISSION", "NEEDS_TIMEZONE", "QUEUED", "CALLBACK_SCHEDULED", "INTERESTED", "NOT_INTERESTED", "DOCS_REQUESTED", "DOCS_RECEIVED", "HANDOFF_READY", "HANDED_OFF", "OPTED_OUT", "CLOSED"];
 const DOCS = ["NONE", "REQUESTED", "RECEIVED", "EXPIRED", "DELETED"];
+// Quick views above the table; each is a set of pipeline statuses.
+const VIEWS: { key: string; label: string; statuses?: string[] }[] = [
+  { key: "", label: "All" },
+  { key: "waiting", label: "Waiting to call", statuses: ["NEW", "QUEUED", "CONTACTING", "NEEDS_PERMISSION", "NEEDS_TIMEZONE"] },
+  { key: "callback", label: "Callbacks", statuses: ["CALLBACK_SCHEDULED"] },
+  { key: "interested", label: "Interested", statuses: ["INTERESTED", "DOCS_REQUESTED"] },
+  { key: "docs", label: "CDL received", statuses: ["DOCS_RECEIVED", "HANDOFF_READY", "HANDED_OFF"] },
+  { key: "closed", label: "Closed", statuses: ["NOT_INTERESTED", "OPTED_OUT", "CLOSED"] },
+];
 
 export default async function Leads({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requireUser();
@@ -20,23 +30,32 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
       { email: { contains: q, mode: "insensitive" } }, ...(digits.length >= 3 ? [{ phoneE164: { contains: digits } }] : []),
     ];
   }
+  const view = VIEWS.find((v) => v.key === (sp.view ?? "")) ?? VIEWS[0];
   if (sp.pipeline) where.pipelineStatus = sp.pipeline as Prisma.LeadWhereInput["pipelineStatus"];
+  else if (view.statuses) where.pipelineStatus = { in: view.statuses as PipelineStatus[] };
   if (sp.docs) where.documentStatus = sp.docs as Prisma.LeadWhereInput["documentStatus"];
   if (sp.assigned === "me") where.assignedToId = user.id;
   else if (sp.assigned === "none") where.assignedToId = null;
   else if (sp.assigned && user.role === "ADMIN") where.assignedToId = sp.assigned;
   if (sp.data === "demo") where.isDemo = true;
   if (sp.data === "live") where.isDemo = false;
-  const [leads, recruiters] = await Promise.all([
+  const [leads, recruiters, counts] = await Promise.all([
     db.lead.findMany({ where, orderBy: { updatedAt: "desc" }, take: 200, include: { assignedTo: true, calls: { orderBy: { createdAt: "desc" }, take: 1 } } }),
     user.role === "ADMIN" ? db.user.findMany({ where: { orgId: user.orgId, active: true } }) : Promise.resolve([]),
+    db.lead.groupBy({ by: ["pipelineStatus"], where: leadScope(user), _count: true }),
   ]);
+  const countOf = (v: (typeof VIEWS)[number]) => counts.filter((c) => !v.statuses || v.statuses.includes(c.pipelineStatus)).reduce((n, c) => n + c._count, 0);
+  const keep = (v: string) => { const q = new URLSearchParams(Object.entries(sp).filter(([k, x]) => x && k !== "view" && k !== "pipeline") as [string, string][]); if (v) q.set("view", v); const t = q.toString(); return t ? `/leads?${t}` : "/leads"; };
   return (
     <>
-      <div className="spread"><h1>Candidates</h1>{user.role === "ADMIN" && <Link className="btn" href="/leads/new">Add lead manually</Link>}</div>
+      <PageHead title="Leads" sub="Every driver Crystal is working, newest activity first." right={user.role === "ADMIN" && <Link className="btn" href="/leads/new"><Icon name="plus" size={16} />Add lead</Link>} />
+      <div className="tabs">
+        {VIEWS.map((v) => <Link key={v.key} href={keep(v.key)} className={`tab ${!sp.pipeline && v.key === view.key ? "on" : ""}`}>{v.label}<span className="c">{countOf(v)}</span></Link>)}
+      </div>
       <Card>
         <form className="inline" method="get">
-          <input name="q" placeholder="Search name, phone, email" defaultValue={sp.q} />
+          {sp.view && <input type="hidden" name="view" value={sp.view} />}
+          <span className="search"><Icon name="search" size={15} /><input name="q" placeholder="Search name, phone, email" defaultValue={sp.q} /></span>
           <select name="pipeline" defaultValue={sp.pipeline ?? ""}><option value="">Any pipeline status</option>{PIPE.map((p) => <option key={p} value={p}>{p.replace(/_/g, " ").toLowerCase()}</option>)}</select>
           <select name="docs" defaultValue={sp.docs ?? ""}><option value="">Any document status</option>{DOCS.map((p) => <option key={p} value={p}>{p.toLowerCase()}</option>)}</select>
           <select name="assigned" defaultValue={sp.assigned ?? ""}>
@@ -48,13 +67,13 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
           <button type="submit">Filter</button>
         </form>
       </Card>
-      <Card>
+      <Card flush>
         <table>
-          <thead><tr><th>Candidate</th><th>Phone</th><th>Pipeline</th><th>Last call</th><th>Documents</th><th>Assigned</th><th>Next contact</th></tr></thead>
+          <thead><tr><th>Lead</th><th>Phone</th><th>Pipeline</th><th>Last call</th><th>Documents</th><th>Assigned</th><th>Next contact</th></tr></thead>
           <tbody>
             {leads.map((l) => (
               <tr key={l.id}>
-                <td><Link href={`/leads/${l.id}`}>{name(l)}</Link> {l.isDemo && <Badge v="DEMO" tone="demo" />}<div className="small muted">{[l.state, l.zip].filter(Boolean).join(" ")}</div></td>
+                <td><div className="person"><div className="avatar">{initials(l)}</div><div><Link href={`/leads/${l.id}`}>{name(l)}</Link> {l.isDemo && <Badge v="DEMO" tone="demo" />}<div className="small muted">{[l.state, l.zip].filter(Boolean).join(" ") || "—"}</div></div></div></td>
                 <td className="small">{l.phoneE164}</td>
                 <td><Badge v={l.pipelineStatus} />{l.queueReason && <div className="small muted">{l.queueReason}</div>}</td>
                 <td>{l.calls[0] ? <><Badge v={l.calls[0].status} /> <span className="small muted">{l.calls[0].outcome?.toLowerCase().replace(/_/g, " ")}</span></> : <span className="muted">—</span>}</td>
@@ -63,7 +82,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
                 <td className="small">{fmt(l.nextContactAt)}</td>
               </tr>
             ))}
-            {!leads.length && <tr><td colSpan={7} className="muted">No candidates match.</td></tr>}
+            {!leads.length && <tr><td colSpan={7} className="muted">No leads match.</td></tr>}
           </tbody>
         </table>
       </Card>

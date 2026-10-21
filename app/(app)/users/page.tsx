@@ -51,7 +51,7 @@ export default async function Users({ searchParams }: { searchParams: Promise<{ 
         <table><thead><tr><th>User</th><th>Role</th><th>Active</th><th>Round-robin</th><th>Available for live transfer</th><th>Transfer phone</th><th>New password</th><th></th></tr></thead><tbody>
           {users.map((x) => (
             <tr key={x.id}>
-              <td>{x.name}<div className="small muted">{x.email} · {x._count.assignedLeads} candidates</div></td>
+              <td>{x.name}<div className="small muted">{x.email} · {x._count.assignedLeads} leads</div></td>
               <td colSpan={7}>
                 <form action={updateUser} className="inline">
                   <input type="hidden" name="id" value={x.id} />

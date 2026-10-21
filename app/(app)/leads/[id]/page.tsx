@@ -14,7 +14,7 @@ import { config } from "@/lib/config";
 import { PERSONAS } from "@/lib/conversation/personas";
 import { getAdapters } from "@/adapters/registry";
 import { readDemoOutbox } from "@/adapters/mock";
-import { Badge, Card, fmt, name } from "@/components/ui";
+import { Badge, Card, fmt, name, initials } from "@/components/ui";
 
 type Turn = { speaker: string; text: string; latencyMs?: number };
 
@@ -176,8 +176,11 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
 
   return (
     <>
-      <div className="spread">
-        <h1>{name(lead)} {lead.isDemo && <Badge v="DEMO" tone="demo" />}</h1>
+      <div className="spread" style={{ marginBottom: 18 }}>
+        <div className="profile">
+          <div className="avatar">{initials(lead)}</div>
+          <div><h1 style={{ margin: 0 }}>{name(lead)} {lead.isDemo && <Badge v="DEMO" tone="demo" />}</h1><div className="muted">{lead.phoneE164}{lead.state ? ` · ${lead.state}` : ""} · added {fmt(lead.createdAt)}</div></div>
+        </div>
         <div className="row">
           <Badge v={lead.pipelineStatus} /> <span className="small muted">pipeline</span>
           <Badge v={lead.documentStatus} /> <span className="small muted">CDL</span>
@@ -187,7 +190,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
 
       <div className="grid two">
         <Card title="Driver">
-          <table><tbody>
+          <table className="kv"><tbody>
             <tr><th>Phone</th><td>{lead.phoneE164}</td></tr>
             <tr><th>Email</th><td>{lead.email ?? "—"}</td></tr>
             <tr><th>Location</th><td>{[lead.state, lead.zip].filter(Boolean).join(" ") || "—"}</td></tr>
@@ -361,7 +364,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
           {lead.events.map((e) => <li key={e.id}><span className="small muted">{fmt(e.createdAt)}</span> <Badge v={e.actorType} tone="info" /> {e.message}</li>)}
         </ul>
         {lead.assignments.length > 0 && <p className="small muted">Assignment history: {lead.assignments.map((a) => `${fmt(a.createdAt)} ${a.method.toLowerCase()}`).join(" · ")}</p>}
-        <p className="small"><Link href="/leads">Back to candidates</Link></p>
+        <p className="small"><Link href="/leads">Back to leads</Link></p>
       </Card>
     </>
   );

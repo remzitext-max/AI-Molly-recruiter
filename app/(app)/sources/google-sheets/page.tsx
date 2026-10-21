@@ -10,7 +10,7 @@ import { addDemoSheetRow, readDemoSheet } from "@/adapters/mock";
 import { Badge, Card, fmt } from "@/components/ui";
 
 const describe = (c: Record<string, number> | null | undefined) =>
-  !c ? "no new rows" : `${c.created ?? 0} new candidate(s), ${c.merged ?? 0} merged into existing candidates`;
+  !c ? "no new rows" : `${c.created ?? 0} new lead(s), ${c.merged ?? 0} merged into existing leads`;
 
 const back = (msg: string, kind: "ok" | "error" = "ok") => redirect(`/sources/google-sheets?${kind}=${encodeURIComponent(msg)}`);
 
@@ -65,7 +65,7 @@ export default async function GoogleSheetsPage({ searchParams }: { searchParams:
       {sp.error && <div className="alert error">{sp.error}</div>}
       <Card title="Connection" right={<Badge v={st.state} tone={st.state === "configured" ? "ok" : st.state === "mock" ? "demo" : "bad"} />}>
         <p>{st.detail}</p>
-        <p className="small muted">Rows are matched by the <strong>{src.idColumn ?? "(not set)"}</strong> column, (or by phone number when the ID is empty), so re-sorting or editing the sheet never calls a driver twice. Edits to rows that were already imported are not copied over; change those candidates in this app.
+        <p className="small muted">Rows are matched by the <strong>{src.idColumn ?? "(not set)"}</strong> column, (or by phone number when the ID is empty), so re-sorting or editing the sheet never calls a driver twice. Edits to rows that were already imported are not copied over; change those leads in this app.
           {src.statusColumn ? <> Progress is written to the <strong>{src.statusColumn}</strong> column (it never says &ldquo;hired&rdquo;).</> : " Progress write-back is off."}</p>
         {!ready && <p className="small">Setup steps are in docs/INTEGRATIONS.md (Google Sheets section).</p>}
       </Card>
@@ -99,7 +99,7 @@ export default async function GoogleSheetsPage({ searchParams }: { searchParams:
         <Card title="Demo sheet (synthetic)" right={<form action={addDemoRow}><button className="secondary">Add a synthetic row</button></form>}>
           <table><thead><tr>{demoSheet.headers.map((h) => <th key={h}>{h}</th>)}</tr></thead>
             <tbody>{demoSheet.rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j} className="small">{c || <span className="muted">—</span>}</td>)}</tr>)}</tbody></table>
-          <p className="small muted">This local file stands in for a Google Sheet in demo mode. <Link href="/leads">See candidates</Link></p>
+          <p className="small muted">This local file stands in for a Google Sheet in demo mode. <Link href="/leads">See leads</Link></p>
         </Card>
       )}
     </>
