@@ -100,7 +100,7 @@ export async function attemptCallJob(job: Job) {
   await recordEvent({ leadId, actorType: "SYSTEM", type: "CALL_STARTING", message: `Outbound AI call #${lead.attemptCount + 1} starting${provider.isMock ? " (SIMULATED)" : ""}`, data: { attemptId: attempt.id } });
   try {
     const { providerCallId } = await provider.startOutboundCall({
-      attemptId: attempt.id, leadId, toE164: lead.phoneE164, isDemoRecord: lead.isDemo, personaKey, record: settings.recordingEnabled,
+      attemptId: attempt.id, leadId, toE164: lead.phoneE164, isDemoRecord: lead.isDemo, personaKey,
       dynamicVariables: await callVariables(lead, attempt.id, offer?.id ?? ""),
     });
     await db.callAttempt.update({ where: { id: attempt.id }, data: { providerCallId, status: "DIALING", statusRank: STATUS_RANK.DIALING } });
@@ -271,6 +271,8 @@ async function postCallWorkflow(attemptId: string) {
   const fetchTranscript = a.provider === "telnyx" && !!a.startedAt && !Array.isArray(a.transcript) && !lead.isDemo;
   if (fetchTranscript) {
     await enqueue("call.fetch-transcript", { attemptId }, { runAt: new Date(Date.now() + 20_000), idempotencyKey: `transcript:${attemptId}`, maxAttempts: 4 });
+    // The Telnyx assistant records every answered call itself; keep our own copy.
+    await enqueue("call.fetch-recording", { attemptId }, { runAt: new Date(Date.now() + 60_000), idempotencyKey: `recording:${attemptId}`, maxAttempts: 5 });
   }
   // Driver card to the owner's Telegram; a short delay lets the late summary arrive first.
   if (telegramConfigured() && a.startedAt && !lead.isDemo) {

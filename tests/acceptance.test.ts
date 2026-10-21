@@ -707,8 +707,30 @@ describe("Call recordings", () => {
       expect(String(form.get("caption"))).toContain("Alquan W");
       expect((form.get("audio") as File).size).toBe(MP3.length);
       await expect(fetchRecording(a.id.replace(/.$/, "x"), "http://insecure.example.com/x")).resolves.toEqual({ saved: false });
+
+      // Without a link: find the assistant's own recording of this call on Telnyx.
+      process.env.TELNYX_API_KEY = "KEY";
+      const b = await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "rec-2", status: "COMPLETED", startedAt: t0, endedAt: new Date(t0.getTime() + 60_000) } });
+      let list: unknown[] = [];
+      fetchSpy.mockImplementation(async (u, init) => {
+        calls.push({ url: String(u), init });
+        if (String(u).startsWith("https://api.telnyx.com/v2/recordings")) return new Response(JSON.stringify({ data: list }), { status: 200 });
+        if (String(u).startsWith("https://s3.example.com/")) return new Response(new Uint8Array(MP3), { status: 200 });
+        return new Response("{}", { status: 200 });
+      });
+      await expect(fetchRecording(b.id)).rejects.toThrow("not found yet");
+      list = [
+        { to: "+13145550000", from: "+13146900777", download_urls: { mp3: "https://s3.example.com/other.mp3" } },
+        { to: "+16108091216", from: "+13146900777", download_urls: { mp3: "https://s3.example.com/b.mp3", wav: "https://s3.example.com/b.wav" } },
+      ];
+      expect(await fetchRecording(b.id)).toEqual({ saved: true });
+      const q = new URL(calls.filter((c) => c.url.includes("/v2/recordings")).pop()!.url);
+      expect(q.searchParams.get("filter[created_at][gte]")).toBe("2026-10-21T16:58:00.000Z");
+      expect(new Headers(calls.filter((c) => c.url.includes("/v2/recordings")).pop()!.init?.headers).get("authorization")).toBe("Bearer KEY");
+      expect(calls.at(-1)!.url).toBe("https://s3.example.com/b.mp3");
     } finally {
       fetchSpy.mockRestore();
+      delete process.env.TELNYX_API_KEY;
       delete process.env.TELEGRAM_BOT_TOKEN;
       delete process.env.TELEGRAM_CHAT_ID;
     }

@@ -63,8 +63,6 @@ export interface StartCallRequest {
   isDemoRecord: boolean;
   dynamicVariables: Record<string, string>;
   personaKey?: string | null; // mock only
-  /** Ask the provider to record the call (only when the agent announces recording). */
-  record?: boolean;
 }
 export interface ProviderCallStatus {
   status: "dialing" | "ringing" | "in_progress" | "completed" | "no_answer" | "busy" | "voicemail" | "failed" | "not_found";

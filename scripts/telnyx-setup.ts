@@ -84,6 +84,8 @@ async function main() {
       // A silent line (voicemail recording, phone in a pocket) is checked once, then the call ends.
       user_idle_reply_secs: 10,
       user_idle_timeout_secs: 25,
+      // Telnyx records every answered call; the app copies it to the lead page and the Telegram card.
+      recording_settings: { enabled: true, channels: "single", format: "mp3" },
       voicemail_detection: {
         // Owner's choice (2026-10-21): never leave a voicemail, hang up as soon as one is detected.
         on_voicemail_detected: { action: "stop_assistant" },
