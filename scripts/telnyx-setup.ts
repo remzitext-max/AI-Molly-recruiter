@@ -5,8 +5,7 @@
 // It never buys numbers and never places calls.
 import { config } from "../src/lib/config";
 import { db } from "../src/lib/db";
-import { getSettings } from "../src/lib/settings";
-import { AGENT_TOOLS, buildAgentPrompt, voicemailText } from "../src/lib/agent-config";
+import { AGENT_TOOLS, buildAgentPrompt } from "../src/lib/agent-config";
 import { getActiveOfferVersion } from "../src/lib/knowledge";
 
 const BASE = "https://api.telnyx.com/v2";
@@ -46,7 +45,6 @@ async function main() {
 
   const org = await db.organization.findFirst();
   const company = org?.name ?? process.env.ORG_NAME ?? "our company";
-  const s = await getSettings();
   const manager = await db.user.findFirst({ where: { availableForTransfer: true, active: true, transferPhoneE164: { not: null } } });
   const managerPhone = manager?.transferPhoneE164 ?? "";
   if (!managerPhone) console.log("No user is marked available for transfer, so the assistant gets no transfer tool.");
@@ -84,10 +82,8 @@ async function main() {
     telephony_settings: {
       time_limit_secs: 15 * 60,
       voicemail_detection: {
-        on_voicemail_detected: {
-          action: "leave_message_and_stop_assistant",
-          voicemail_message: { type: "message", message: voicemailText(s.voicemailMessage, company).replace("{{recruiter_phone}}", managerPhone || "this number") },
-        },
+        // Owner's choice (2026-10-21): never leave a voicemail, hang up as soon as one is detected.
+        on_voicemail_detected: { action: "stop_assistant" },
       },
     },
     ...(voice ? { voice_settings: { voice } } : {}),
