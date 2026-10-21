@@ -46,6 +46,12 @@ export interface IngestOpts { orgId: string; campaignId: string; isDemo: boolean
  * Identity = (sourceSystem, sourceRecordId); the same phone from another
  * source merges into the existing candidate instead of creating outreach twice.
  */
+/** Facebook lead-ad fields for a lead row; empty values are left unset. */
+function fbData(fb: IncomingLead["fb"]) {
+  const v = (x?: string) => x?.trim().slice(0, 200) || undefined;
+  return { fbLeadId: v(fb?.leadId), fbCampaign: v(fb?.campaign), fbAd: v(fb?.ad), fbForm: v(fb?.form) };
+}
+
 export async function ingestLead(inc: IncomingLead, opts: IngestOpts): Promise<IngestResult> {
   const phone = normalizePhone(inc.phone);
   if (!phone) return { result: "invalid", error: "Invalid phone number" };
@@ -67,6 +73,7 @@ export async function ingestLead(inc: IncomingLead, opts: IngestOpts): Promise<I
       if (!existing.email && inc.email) fill.email = inc.email;
       if (!existing.state && inc.state) fill.state = inc.state.toUpperCase();
       if (!existing.zip && inc.zip) fill.zip = inc.zip;
+      if (!existing.fbLeadId && inc.fb?.leadId) Object.assign(fill, fbData(inc.fb));
       if (Object.keys(fill).length) await tx.lead.update({ where: { id: existing.id }, data: fill });
       await addPermissions(tx, existing.id, inc, opts);
       await recordEvent({ leadId: existing.id, actorType: "SYSTEM", type: "DUPLICATE_MERGED", message: `Same phone received again from ${inc.sourceSystem}; merged, no new outreach created` }, tx);
@@ -84,6 +91,7 @@ export async function ingestLead(inc: IncomingLead, opts: IngestOpts): Promise<I
         timezone: tz.timezone, timezoneSource: tz.source,
         pipelineStatus: suppressed ? "OPTED_OUT" : "NEW",
         optedOutAt: suppressed ? new Date() : null,
+        ...fbData(inc.fb),
         sourceRecords: { create: { sourceSystem: inc.sourceSystem, sourceRecordId: inc.sourceRecordId, importBatchId: opts.importBatchId, raw: (inc.raw ?? {}) as Prisma.InputJsonValue } },
       },
     });

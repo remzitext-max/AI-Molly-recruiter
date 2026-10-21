@@ -10,6 +10,7 @@ import { MockExtractor } from "@/adapters/mock";
 import { sendMetaStageEvent, syncMetaLeads } from "@/lib/meta";
 import { getAdapters } from "@/adapters/registry";
 import type { DocumentExtractor } from "@/adapters/types";
+import { commitBatch, createImportPreview } from "@/lib/import";
 
 beforeEach(async () => { await resetDb(); });
 
@@ -167,6 +168,15 @@ describe("Facebook lead ads", () => {
       spy.mockRestore();
       for (const k of Object.keys(env)) delete process.env[k];
     }
+  });
+
+  it("reads Campaign and FB Lead ID columns from the sheet when Make.com adds them", async () => {
+    const base = await seedBase();
+    const csv = "Applied,Name,Phone,Source,Campaign,FB Lead ID,Ad name\n2026-10-21,Jean Test,(239) 555-0107,SOLO,Solo OTR - Florida,1234567890,Ad 2\n2026-10-21,No Ad,(239) 555-0108,SOLO,,,\n";
+    const b = await createImportPreview({ fileName: "pool.csv", data: Buffer.from(csv), campaignId: base.campaign.id, userId: base.admin.id, orgId: base.org.id, isDemo: true });
+    expect((await commitBatch(b.id, base.admin)).created).toBe(2);
+    expect(await db.lead.findFirstOrThrow({ where: { phoneE164: "+12395550107" } })).toMatchObject({ fbLeadId: "1234567890", fbCampaign: "Solo OTR - Florida", fbAd: "Ad 2", fbForm: null });
+    expect(await db.lead.findFirstOrThrow({ where: { phoneE164: "+12395550108" } })).toMatchObject({ fbLeadId: null, fbCampaign: null });
   });
 
   it("waits for the Facebook lead ID on a fresh lead before sending", async () => {

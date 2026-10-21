@@ -29,6 +29,8 @@ export interface IncomingLead {
   sourceRecordId: string;
   firstName?: string; lastName?: string; phone: string; email?: string; state?: string; zip?: string;
   permission?: { scope: "AI_CALL" | "SMS"; source: string; grantedAt: string; evidence?: string }[];
+  /** Facebook lead-ad details when the source carries them (e.g. Make.com sheet columns). */
+  fb?: { leadId?: string; campaign?: string; ad?: string; form?: string };
   raw?: Record<string, unknown>;
 }
 export interface LeadSourceAdapter {
