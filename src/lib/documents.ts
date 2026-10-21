@@ -54,28 +54,33 @@ export async function handleUpload(token: string, file: { data: Buffer; declared
   // Atomically consume one file slot.
   const consumed = await db.uploadToken.updateMany({ where: { id: t.id, filesUsed: { lt: t.maxFiles }, revokedAt: null, completedAt: null }, data: { filesUsed: { increment: 1 } } });
   if (!consumed.count) throw new UploadError("This upload link has already been used.");
+  return saveDriverDocument(t.lead, file.data, mime, "upload link");
+}
 
-  const key = `cdl/${t.leadId}/${crypto.randomUUID()}.${ALLOWED_TYPES[mime].ext}`;
-  await getAdapters().storage.put(key, file.data, mime);
+/** Stores a checked CDL / medical card file for a lead and tells the recruiter. */
+export async function saveDriverDocument(lead: { id: string; isDemo: boolean }, data: Buffer, mime: string, via: string) {
+  const s = await getSettings();
+  const key = `cdl/${lead.id}/${crypto.randomUUID()}.${ALLOWED_TYPES[mime].ext}`;
+  await getAdapters().storage.put(key, data, mime);
   const doc = await db.document.create({
     data: {
-      leadId: t.leadId, isDemo: t.lead.isDemo, kind: "CDL", storageKey: key, mimeType: mime, sizeBytes: file.data.length,
-      sha256: sha256(file.data), deleteAfter: new Date(Date.now() + s.documentRetentionDays * 86400_000),
+      leadId: lead.id, isDemo: lead.isDemo, kind: "CDL", storageKey: key, mimeType: mime, sizeBytes: data.length,
+      sha256: sha256(data), deleteAfter: new Date(Date.now() + s.documentRetentionDays * 86400_000),
     },
   });
-  await db.lead.update({ where: { id: t.leadId }, data: { documentStatus: "RECEIVED" } });
-  await advancePipeline(t.leadId, "DOCS_RECEIVED");
+  await db.lead.update({ where: { id: lead.id }, data: { documentStatus: "RECEIVED" } });
+  await advancePipeline(lead.id, "DOCS_RECEIVED");
   // Never log file contents or license numbers: only metadata.
-  await recordEvent({ leadId: t.leadId, actorType: "DRIVER", type: "DOCUMENT_RECEIVED", message: `CDL document received (${mime}, ${Math.round(file.data.length / 1024)} KB)`, data: { documentId: doc.id } });
-  if (telegramConfigured() && !t.lead.isDemo) await enqueue("notify.telegram-document", { documentId: doc.id }, { idempotencyKey: `telegram-doc:${doc.id}`, maxAttempts: 3 });
+  await recordEvent({ leadId: lead.id, actorType: "DRIVER", type: "DOCUMENT_RECEIVED", message: `CDL document received by ${via} (${mime}, ${Math.round(data.length / 1024)} KB)`, data: { documentId: doc.id } });
+  if (telegramConfigured() && !lead.isDemo) await enqueue("notify.telegram-document", { documentId: doc.id }, { idempotencyKey: `telegram-doc:${doc.id}`, maxAttempts: 3 });
 
   try {
-    const ex = await getAdapters().extraction.extract(file.data, mime);
+    const ex = await getAdapters().extraction.extract(data, mime);
     await db.document.update({ where: { id: doc.id }, data: { extraction: ex as object } });
   } catch {
     /* extraction is optional */
   }
-  await enqueue("handoff.evaluate", { leadId: t.leadId }, { idempotencyKey: `handoff-eval:${doc.id}` });
+  await enqueue("handoff.evaluate", { leadId: lead.id }, { idempotencyKey: `handoff-eval:${doc.id}` });
   return { documentId: doc.id };
 }
 

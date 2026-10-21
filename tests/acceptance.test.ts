@@ -1,4 +1,5 @@
 // Acceptance checks 1-14 from the specification, run against a real Postgres.
+import { pollRingCentralInbound } from "../src/lib/messaging";
 import { fillScreeningFromTranscript } from "../src/lib/transcript-extract";
 import { realCallsInProgress } from "../src/lib/calls";
 import { fetchTelnyxTranscript } from "../src/lib/telnyx-transcript";
@@ -622,6 +623,39 @@ describe("Screening answers from the transcript", () => {
     } finally {
       fetchSpy.mockRestore();
       delete process.env.TELNYX_API_KEY;
+    }
+  });
+});
+
+describe("Photos texted back to the RingCentral number", () => {
+  it("saves a lead's MMS photo as a document and ignores numbers that are not leads", async () => {
+    const base = await seedBase();
+    Object.assign(process.env, { RINGCENTRAL_CLIENT_ID: "id", RINGCENTRAL_CLIENT_SECRET: "sec", RINGCENTRAL_JWT: "jwt", RINGCENTRAL_SMS_FROM: "+18162913808" });
+    const urls: string[] = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (u) => {
+      const url = String(u);
+      urls.push(url);
+      if (url.includes("/oauth/token")) return new Response(JSON.stringify({ access_token: "T", expires_in: 3600 }), { status: 200 });
+      if (url.includes("/message-store?")) return new Response(JSON.stringify({ records: [
+        { id: 11, from: { phoneNumber: "+15108305523" }, to: [{ phoneNumber: "+18162913808" }], subject: "", attachments: [{ type: "Text", uri: "https://media.ringcentral.com/x/text" }, { type: "MmsAttachment", contentType: "image/jpeg", uri: "https://media.ringcentral.com/x/photo" }] },
+        { id: 12, from: { phoneNumber: "+13125550000" }, to: [{ phoneNumber: "+18162913808" }], subject: "hi", attachments: [] },
+      ] }), { status: 200 });
+      if (url.endsWith("/x/photo")) return new Response(new Uint8Array(JPEG), { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    try {
+      const l = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Melvin", lastName: "S", phoneE164: "+15108305523" } });
+      expect(await pollRingCentralInbound()).toEqual({ checked: 2, docs: 1 });
+      expect(await db.document.count({ where: { leadId: l.id } })).toBe(1);
+      expect((await db.lead.findUniqueOrThrow({ where: { id: l.id } })).documentStatus).toBe("RECEIVED");
+      expect(await db.message.count({ where: { providerMessageId: "rc_12" } })).toBe(0);
+      expect(urls.some((u) => u.endsWith("/x/text"))).toBe(false);
+      // A second poll sees the same message and does nothing.
+      expect(await pollRingCentralInbound()).toEqual({ checked: 2, docs: 0 });
+      expect(await db.document.count({ where: { leadId: l.id } })).toBe(1);
+    } finally {
+      fetchSpy.mockRestore();
+      for (const k of ["RINGCENTRAL_CLIENT_ID", "RINGCENTRAL_CLIENT_SECRET", "RINGCENTRAL_JWT", "RINGCENTRAL_SMS_FROM"]) delete process.env[k];
     }
   });
 });

@@ -1,6 +1,6 @@
 import type { JobHandler } from "./queue";
 import { attemptCallJob, handoffEvaluateJob, reconcileCallJob, simulateCallJob, syncSourceJob, transferTimeoutJob } from "../calls";
-import { sendCdlLink } from "../messaging";
+import { pollRingCentralInbound, sendCdlLink } from "../messaging";
 import { runRetentionSweep } from "../documents";
 import { pollGoogleSheet } from "../sheets-sync";
 import { db } from "../db";
@@ -33,6 +33,10 @@ export const handlers: Record<string, JobHandler> = {
   "notify.telegram-document": async (job) => {
     const { documentId } = job.payload as { documentId: string };
     await sendDocumentToTelegram(documentId);
+  },
+  "sms.poll-inbound": async () => {
+    await pollRingCentralInbound();
+    await db.job.deleteMany({ where: { type: "sms.poll-inbound", status: { in: ["DONE", "DEAD"] }, updatedAt: { lt: new Date(Date.now() - 86400_000) } } });
   },
   "call.fetch-transcript": async (job) => {
     const { attemptId } = job.payload as { attemptId: string };

@@ -23,6 +23,29 @@ async function accessToken(): Promise<string> {
   return cached.token;
 }
 
+export type RcInbound = { id: string; from: string; to: string[]; text: string; attachments: { uri: string; contentType: string }[] };
+
+/** Inbound texts (SMS/MMS) to this extension since a time. Needs the app's "Read Messages" permission. */
+export async function listInboundRcMessages(since: Date): Promise<RcInbound[]> {
+  const q = new URLSearchParams({ direction: "Inbound", messageType: "SMS", dateFrom: since.toISOString(), perPage: "100" });
+  const res = await providerFetch(`${config.ringcentral.serverUrl}/restapi/v1.0/account/~/extension/~/message-store?${q}`, { headers: { Authorization: `Bearer ${await accessToken()}` } });
+  const j = (await res.json()) as { records?: { id: string | number; from?: { phoneNumber?: string }; to?: { phoneNumber?: string }[]; subject?: string; attachments?: { uri?: string; type?: string; contentType?: string }[] }[] };
+  return (j.records ?? []).map((r) => ({
+    id: String(r.id),
+    from: r.from?.phoneNumber ?? "",
+    to: (r.to ?? []).map((t) => t.phoneNumber ?? ""),
+    text: r.subject ?? "",
+    attachments: (r.attachments ?? []).filter((a) => a.type === "MmsAttachment" && a.uri).map((a) => ({ uri: a.uri!, contentType: a.contentType ?? "" })),
+  }));
+}
+
+/** Downloads one MMS attachment. */
+export async function downloadRcAttachment(uri: string): Promise<Buffer> {
+  if (!uri.startsWith(config.ringcentral.serverUrl.replace("platform.", "media.")) && !uri.startsWith(config.ringcentral.serverUrl)) throw new Error("Unexpected attachment host");
+  const res = await providerFetch(uri, { headers: { Authorization: `Bearer ${await accessToken()}` }, timeoutMs: 60_000 });
+  return Buffer.from(await res.arrayBuffer());
+}
+
 function rcStatus(kind: IntegrationStatus["kind"], extraMissing: string[] = []): IntegrationStatus {
   const c = config.ringcentral;
   const missing = [!c.clientId && "RINGCENTRAL_CLIENT_ID", !c.clientSecret && "RINGCENTRAL_CLIENT_SECRET", !c.jwt && "RINGCENTRAL_JWT", ...extraMissing].filter(Boolean) as string[];

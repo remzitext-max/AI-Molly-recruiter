@@ -1,8 +1,12 @@
 import { db } from "./db";
 import { getSettings } from "./settings";
 import { evaluateContactGate } from "./contact-policy";
-import { createUploadLink } from "./documents";
+import { createUploadLink, detectMime, saveDriverDocument } from "./documents";
+import { config } from "./config";
+import { normalizePhone } from "./phone";
+import { downloadRcAttachment, listInboundRcMessages } from "../adapters/live/ringcentral";
 import { recordEvent } from "./activity";
+import { enqueue } from "./jobs/queue";
 import { advancePipeline, optOutLead } from "./leads";
 import { getAdapters } from "../adapters/registry";
 import { LiveContactBlockedError } from "../adapters/types";
@@ -66,4 +70,38 @@ export async function handleInboundSms(fromE164: string, body: string, providerM
     await db.task.create({ data: { leadId: lead.id, type: "CALLBACK", assignedToId: lead.assignedToId, title: "Driver replied by text", notes: body.slice(0, 500) } });
   }
   return { matched: true };
+}
+
+/**
+ * Reads texts drivers sent back to the RingCentral number (many reply with photos
+ * of their CDL / medical card instead of using the link). Only messages from a
+ * lead's phone are kept; photos and PDFs are saved as the lead's documents.
+ */
+export async function pollRingCentralInbound(now = new Date()) {
+  const ours = normalizePhone(config.ringcentral.smsFromNumber);
+  const msgs = await listInboundRcMessages(new Date(now.getTime() - 24 * 3600_000));
+  let docs = 0;
+  for (const m of msgs) {
+    const from = normalizePhone(m.from);
+    if (!from || (ours && !m.to.some((t) => normalizePhone(t) === ours))) continue;
+    const lead = await db.lead.findFirst({ where: { phoneE164: from }, orderBy: { createdAt: "desc" } });
+    if (!lead) continue;
+    if (await db.message.findUnique({ where: { providerMessageId: `rc_${m.id}` } })) continue;
+    const files: { data: Buffer; mime: string }[] = [];
+    for (const a of m.attachments) {
+      const data = await downloadRcAttachment(a.uri);
+      const mime = detectMime(data);
+      if (mime) files.push({ data, mime });
+    }
+    await handleInboundSms(from, m.text || (files.length ? "(sent a photo)" : ""), `rc_${m.id}`, "ringcentral");
+    for (const f of files) { await saveDriverDocument(lead, f.data, f.mime, "text message"); docs++; }
+  }
+  return { checked: msgs.length, docs };
+}
+
+/** Called by the worker every minute in live mode when RingCentral is set up. */
+export async function scheduleInboundSmsPoll(now = Date.now()) {
+  const c = config.ringcentral;
+  if (config.mode !== "live" || !c.clientId || !c.jwt || !c.smsFromNumber) return;
+  await enqueue("sms.poll-inbound", {}, { idempotencyKey: `rc-inbound:${Math.floor(now / 60_000)}`, maxAttempts: 1 });
 }

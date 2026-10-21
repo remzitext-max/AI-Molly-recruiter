@@ -7,6 +7,7 @@ import { db } from "../src/lib/db";
 import { config } from "../src/lib/config";
 import { log } from "../src/lib/redact";
 import { scheduleSheetPoll } from "../src/lib/sheets-sync";
+import { scheduleInboundSmsPoll } from "../src/lib/messaging";
 
 const workerId = `${os.hostname()}:${process.pid}`;
 let stopping = false;
@@ -26,7 +27,7 @@ async function main() {
       const jobs = await claimJobs(workerId, 5);
       for (const j of jobs) await runJob(j, handlers);
       if (Date.now() - lastMaint > 60 * 60 * 1000) { await scheduleMaintenance(); lastMaint = Date.now(); }
-      if (Date.now() - lastSheetCheck > 60 * 1000) { await scheduleSheetPoll(); lastSheetCheck = Date.now(); }
+      if (Date.now() - lastSheetCheck > 60 * 1000) { await scheduleSheetPoll(); await scheduleInboundSmsPoll(); lastSheetCheck = Date.now(); }
       if (!jobs.length) await new Promise((r) => setTimeout(r, 1000));
     } catch (e) {
       log.error("worker loop error", { error: (e as Error).message });
