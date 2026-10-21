@@ -213,8 +213,10 @@ async function applyVoiceEvent(ev: VoiceEvent): Promise<boolean> {
   });
   if (!r.count) {
     // Late duplicate data (e.g. call_analyzed after call_ended): fill gaps only.
-    if (ev.transcript || ev.summary) {
+    if (ev.transcript || ev.summary || ev.metrics) {
       await db.callAttempt.update({ where: { id: attempt.id }, data: {
+        // Keep both callbacks' fields (e.g. the conversation's end reason after the TeXML status).
+        metrics: ev.metrics ? ({ ...(attempt.metrics as Record<string, unknown> | null), ...Object.fromEntries(Object.entries(ev.metrics).filter(([, v]) => v !== null && v !== undefined)) } as Prisma.InputJsonValue) : undefined,
         transcript: attempt.transcript ? undefined : (ev.transcript?.map((t) => ({ ...t, text: redactText(t.text) })) as Prisma.InputJsonValue | undefined),
         summary: attempt.summary ? undefined : ev.summary ? redactText(ev.summary) : undefined,
       } });

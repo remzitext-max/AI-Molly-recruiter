@@ -7,6 +7,10 @@ import { Badge, Card, PageHead, fmt, name, initials } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { getSettings } from "@/lib/settings";
 import { answersOf, fitRulesFrom, fitScore, fitTone } from "@/lib/fit-score";
+import { endedByText, whoEnded } from "@/lib/call-end";
+import { config } from "@/lib/config";
+
+const endedBy = (c: Parameters<typeof whoEnded>[0]) => endedByText(whoEnded(c), config.agentPersona.name);
 
 const PIPE = ["NEW", "NEEDS_PERMISSION", "NEEDS_TIMEZONE", "QUEUED", "CALLBACK_SCHEDULED", "INTERESTED", "NOT_INTERESTED", "DOCS_REQUESTED", "DOCS_RECEIVED", "HANDOFF_READY", "HANDED_OFF", "OPTED_OUT", "CLOSED"];
 const DOCS = ["NONE", "REQUESTED", "RECEIVED", "EXPIRED", "DELETED"];
@@ -80,7 +84,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
                 <td className="small">{l.phoneE164}</td>
                 <td>{(() => { const f = fitScore(answersOf(l.screening), rules); return <span className={`badge ${fitTone(f)}`} title={[...f.reasons, ...(f.missing.length ? [`Not asked yet: ${f.missing.join(", ")}`] : [])].join("\n") || f.label}>{f.score === null ? "—" : f.score}</span>; })()}</td>
                 <td><Badge v={l.pipelineStatus} />{l.queueReason && <div className="small muted">{l.queueReason}</div>}</td>
-                <td>{l.calls[0] ? <><Badge v={l.calls[0].status} /> <span className="small muted">{l.calls[0].outcome?.toLowerCase().replace(/_/g, " ")}</span></> : <span className="muted">—</span>}</td>
+                <td>{l.calls[0] ? <><Badge v={l.calls[0].status} /> <span className="small muted">{l.calls[0].outcome?.toLowerCase().replace(/_/g, " ")}</span>{endedBy(l.calls[0]) && <div className="small muted">{endedBy(l.calls[0])}</div>}</> : <span className="muted">—</span>}</td>
                 <td><Badge v={l.documentStatus} /></td>
                 <td className="small">{l.assignedTo?.name ?? <span className="muted">unassigned</span>}</td>
                 <td className="small">{fmt(l.nextContactAt)}</td>

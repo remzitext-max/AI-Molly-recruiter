@@ -69,7 +69,7 @@ async function main() {
     },
   }));
   if (managerPhone) tools.push({ type: "transfer", transfer: { from: fromNumber, targets: [{ name: "manager", to: managerPhone }] } });
-  tools.push({ type: "hangup", hangup: { description: "End the call after set_call_outcome, or when the driver is done." } });
+  tools.push({ type: "hangup", hangup: { description: "End the call. Only after you said goodbye AND the driver said goodbye back or stayed silent; never in the same turn as your goodbye. Use right away for voicemail." } });
 
   const body = {
     name: `${company} - Molly AI recruiter`,

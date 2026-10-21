@@ -193,3 +193,15 @@ describe("Facebook lead ads", () => {
     }
   });
 });
+
+describe("who ended the call", () => {
+  it("reads Telnyx hangup fields first, then Crystal's hangup note in the transcript", async () => {
+    const { whoEnded } = await import("@/lib/call-end");
+    expect(whoEnded({ status: "COMPLETED", metrics: { hangup_source: "callee" } })).toBe("driver");
+    expect(whoEnded({ status: "COMPLETED", transcript: [{ speaker: "agent", text: "Have a great day! [hangup]" }] })).toBe("agent");
+    expect(whoEnded({ status: "COMPLETED", transcript: [{ speaker: "agent", text: "Hi, is this Jean?" }, { speaker: "driver", text: "yeah" }] })).toBe("driver");
+    expect(whoEnded({ status: "COMPLETED" })).toBeNull();
+    expect(whoEnded({ status: "VOICEMAIL" })).toBe("voicemail");
+    expect(whoEnded({ status: "NO_ANSWER" })).toBeNull();
+  });
+});

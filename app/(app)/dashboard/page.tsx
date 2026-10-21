@@ -22,6 +22,7 @@ const ANSWERED = ["COMPLETED"] as const;
 // real conversation is an answered call that lasted at least this long, or one
 // where the driver gave an answer Crystal recorded.
 const TALK_SECONDS = 30;
+const TEST_LAST_NAMES = ["(owner test)", "Test", "test", "TEST"];
 const SPOKE = ["INTERESTED", "NOT_INTERESTED", "CALLBACK", "HUMAN_REQUESTED", "OPT_OUT", "WRONG_NUMBER"];
 const talked = (c: { status?: string; outcome: string | null; startedAt: Date | null; endedAt: Date | null }) =>
   (c.status ?? "COMPLETED") === "COMPLETED" &&
@@ -113,7 +114,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const range: Range = sp.range && sp.range in RANGES ? (sp.range as Range) : "7d";
   const isDemo = config.mode === "demo";
-  const scope = { ...leadScope(user), isDemo };
+  // Owner test calls (scripts/telnyx-test-call.ts, "Remzi Test" sheet rows) are not real results.
+  const scope = { ...leadScope(user), isDemo, OR: [{ lastName: null }, { lastName: { notIn: TEST_LAST_NAMES } }] };
   const now = DateTime.now().setZone(ZONE);
   const start = range === "today" ? now.startOf("day") : now.startOf("day").minus({ days: range === "7d" ? 6 : 29 });
   const len = now.toMillis() - start.toMillis();

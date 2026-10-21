@@ -40,5 +40,9 @@ export function mapTelnyxCallback(body: Flat, attemptId: string | undefined): Vo
   if (!end) return null;
   const answeredBy = String(body.AnsweredBy ?? "").toLowerCase();
   const status: CallStatus = end === "COMPLETED" && answeredBy.startsWith("machine") ? "VOICEMAIL" : end;
-  return { ...base, type: "call_ended", status, metrics: { call_status: st, answered_by: answeredBy || null, duration_sec: body.CallDuration ?? null } };
+  return { ...base, type: "call_ended", status, metrics: {
+    call_status: st, answered_by: answeredBy || null, duration_sec: body.CallDuration ?? null,
+    // Who hung up, when Telnyx sends it (field names vary between callback formats).
+    hangup_source: body.HangupSource ?? body.hangup_source ?? null, hangup_cause: body.HangupCause ?? body.hangup_cause ?? null,
+  } };
 }

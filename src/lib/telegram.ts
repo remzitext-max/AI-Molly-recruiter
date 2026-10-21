@@ -8,6 +8,7 @@ import { getAdapters } from "../adapters/registry";
 import { recordingMime } from "./recordings";
 import { getSettings } from "./settings";
 import { answersOf, fitRulesFrom, fitScore, fitText } from "./fit-score";
+import { endedByText, whoEnded } from "./call-end";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -49,13 +50,16 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
   const team = /team/i.test(slot("driving_type"));
   const name = v([l.firstName, l.lastName].filter(Boolean).join(" "));
   const tags = await recruiterTags(l.id);
+  const secs = a.startedAt && a.endedAt ? Math.round((a.endedAt.getTime() - a.startedAt.getTime()) / 1000) : null;
+  const ended = endedByText(whoEnded(a), config.agentPersona.name);
+  const endLine = ended ? `📴 ${v(ended)}${secs !== null ? ` (${secs} sec call)` : ""}` : null;
   if (!l.screening.some((f) => f.reportedValue)) {
     // Nothing was collected (driver hung up, short call): a one-line note instead of an empty card.
-    const secs = a.startedAt && a.endedAt ? Math.round((a.endedAt.getTime() - a.startedAt.getTime()) / 1000) : null;
     return [
       ...tags,
       `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}${secs !== null ? ` (${secs} sec)` : ""}: no answers collected`,
       `☎️ ${v(l.phoneE164)}`,
+      ...(endLine ? [endLine] : []),
       ...lastDriverLines(a.transcript),
       l.attemptCount < l.campaign.maxAttempts ? `🔁 ${v(config.agentPersona.name)} will try again (attempt ${l.attemptCount} of ${l.campaign.maxAttempts})` : `⛔ No more AI attempts; call manually`,
     ].join("\n");
@@ -75,6 +79,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
     `✅ Ready date: ${v(slot("start_date"))}`,
     `☎️Phone number : ${v(l.phoneE164)}`,
     `⭐ Fit: ${v(fitText(fit))}`,
+    ...(endLine ? [endLine] : []),
   ].join("\n");
 }
 

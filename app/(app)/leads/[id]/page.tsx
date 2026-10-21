@@ -11,12 +11,15 @@ import { sendCdlLink } from "@/lib/messaging";
 import { recordEvent } from "@/lib/activity";
 import { isValidTimezone, formatLocal } from "@/lib/timezone";
 import { config } from "@/lib/config";
+
+const endedBy = (c: Parameters<typeof whoEnded>[0]) => endedByText(whoEnded(c), config.agentPersona.name);
 import { PERSONAS } from "@/lib/conversation/personas";
 import { getAdapters } from "@/adapters/registry";
 import { readDemoOutbox } from "@/adapters/mock";
 import { Badge, Card, fmt, name, initials } from "@/components/ui";
 import { getSettings } from "@/lib/settings";
 import { answersOf, fitRulesFrom, fitScore, fitTone } from "@/lib/fit-score";
+import { endedByText, whoEnded } from "@/lib/call-end";
 
 type Turn = { speaker: string; text: string; latencyMs?: number };
 
@@ -288,7 +291,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
           <div key={c.id} id={`call-${c.id}`} style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 10 }}>
             <div className="row">
               <strong>{fmt(c.createdAt)}</strong> <Badge v={c.status} /> {c.outcome && <Badge v={c.outcome} />}
-              {c.isDemo && <Badge v="SIMULATED" tone="demo" />} <span className="small muted">provider: {c.provider}</span>
+              {c.isDemo && <Badge v="SIMULATED" tone="demo" />} {endedBy(c) && <strong className="small">{endedBy(c)}</strong>} <span className="small muted">provider: {c.provider}</span>
               {ov(c.offerVersionId) && <span className="small muted">offer: {ov(c.offerVersionId)!.offer.name} v{ov(c.offerVersionId)!.version}{ov(c.offerVersionId)!.synthetic ? " (synthetic)" : ""}</span>}
             </div>
             {c.summary && <p>{c.summary}</p>}
