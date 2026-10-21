@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { FACT_CATEGORIES, FactsSchema, type Fact } from "@/lib/knowledge";
 import { recordEvent } from "@/lib/activity";
 import { Badge, Card } from "@/components/ui";
+import { flash } from "@/lib/flash";
 
 function readFacts(fd: FormData): Fact[] {
   const out: Fact[] = [];
@@ -40,6 +41,7 @@ async function save(fd: FormData) {
     ]);
     await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "OFFER_PUBLISHED", message: `Published "${v.offer.name}" v${v.version}` });
   }
+  await flash(fd.get("publish") ? "Offer published. Crystal uses it from the next call" : "Your changes are saved");
   redirect(`/knowledge/${id}?saved=1`);
 }
 
@@ -56,7 +58,6 @@ export default async function VersionPage({ params, searchParams }: { params: Pr
     <>
       <h1>{v.offer.name} · v{v.version} <Badge v={v.status} /> {v.synthetic && <Badge v="SYNTHETIC" tone="demo" />}</h1>
       {sp.error && <div className="alert error">{sp.error}</div>}
-      {sp.saved && <div className="alert ok">Saved.</div>}
       {!editable && <div className="alert warn">Published and archived versions are read-only so call records stay accurate. Create a new draft to change facts.</div>}
       <form action={save}>
         <input type="hidden" name="versionId" value={v.id} />

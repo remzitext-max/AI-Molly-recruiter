@@ -9,6 +9,8 @@ import { integrationStatuses } from "@/adapters/registry";
 import { DEFAULT_SLOTS, type SlotSpec } from "@/lib/conversation/brain";
 import { Badge, Card, PageHead, fmt } from "@/components/ui";
 import { fitRulesFrom, type FitRules } from "@/lib/fit-score";
+import { ConfirmButton } from "@/components/confirm-button";
+import { flash } from "@/lib/flash";
 
 async function togglePause(fd: FormData) {
   "use server";
@@ -16,6 +18,7 @@ async function togglePause(fd: FormData) {
   const on = fd.get("on") === "1";
   await db.systemSetting.update({ where: { id: "global" }, data: { globalPause: on } });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "GLOBAL_PAUSE", message: `Global pause ${on ? "ON" : "OFF"}` });
+  await flash("Global pause updated");
   revalidatePath("/", "layout");
 }
 
@@ -36,6 +39,7 @@ async function saveCampaign(fd: FormData) {
     },
   });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "CAMPAIGN", message: `Campaign settings updated${fd.get("paused") === "on" ? " (paused)" : ""}` });
+  await flash("Your changes are saved");
   revalidatePath("/settings");
 }
 
@@ -58,6 +62,7 @@ async function savePolicy(fd: FormData) {
     },
   });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "POLICY", message: "Contact policy settings updated" });
+  await flash("Your changes are saved");
   revalidatePath("/settings");
 }
 
@@ -70,6 +75,7 @@ async function saveFitRules(fd: FormData) {
   });
   await db.systemSetting.update({ where: { id: "global" }, data: { fitRules: rules as never } });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "FIT_RULES", message: "Fit score rules updated" });
+  await flash("Your changes are saved");
   revalidatePath("/settings");
 }
 
@@ -80,6 +86,7 @@ async function confirmPolicy(fd: FormData) {
   if (notes.length < 20) redirect("/settings?error=Describe the reviewed contact policy (who approved it and what it covers)");
   await db.systemSetting.update({ where: { id: "global" }, data: { contactPolicyConfirmedAt: new Date(), contactPolicyConfirmedById: u.id, contactPolicyNotes: notes } });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "POLICY_CONFIRMED", message: "Contact policy confirmed for production" });
+  await flash("Contact policy confirmed");
   revalidatePath("/settings");
 }
 
@@ -97,6 +104,7 @@ async function setLive(fd: FormData) {
   }
   await db.systemSetting.update({ where: { id: "global" }, data: { liveContactEnabled: on } });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "LIVE_CONTACT", message: `Production contact ${on ? "ENABLED" : "DISABLED"}` });
+  await flash("Live contact updated");
   revalidatePath("/", "layout");
 }
 
@@ -106,6 +114,7 @@ async function saveScreening(fd: FormData) {
   const cfg: SlotSpec[] = DEFAULT_SLOTS.map((s) => ({ ...s, enabled: fd.get(`en_${s.key}`) === "on", essential: fd.get(`es_${s.key}`) === "on", prompt: String(fd.get(`p_${s.key}`) || s.prompt).slice(0, 200) }));
   await db.systemSetting.update({ where: { id: "global" }, data: { screeningConfig: cfg as never } });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "SCREENING_CONFIG", message: "Screening questions updated" });
+  await flash("Your changes are saved");
   revalidatePath("/settings");
 }
 
@@ -123,14 +132,14 @@ export default async function Settings({ searchParams }: { searchParams: Promise
       <div className="grid two">
         <Card title="Global pause">
           <p>{s.globalPause ? <Badge v="PAUSED" tone="bad" /> : <Badge v="RUNNING" tone="ok" />} Stops every automated call and text immediately; queued work waits.</p>
-          <form action={togglePause}><input type="hidden" name="on" value={s.globalPause ? "0" : "1"} /><button className={s.globalPause ? "" : "danger"}>{s.globalPause ? "Resume outreach" : "Pause all outreach"}</button></form>
+          <form action={togglePause}><input type="hidden" name="on" value={s.globalPause ? "0" : "1"} /><ConfirmButton className={s.globalPause ? "" : "danger"} danger={!s.globalPause} title={s.globalPause ? "Resume all outreach?" : "Pause all outreach?"} message={s.globalPause ? "Crystal starts calling and texting leads again." : "No AI calls or texts will go out until you resume."} confirmLabel={s.globalPause ? "Resume" : "Pause everything"}>{s.globalPause ? "Resume outreach" : "Pause all outreach"}</ConfirmButton></form>
         </Card>
         <Card title="Production contact">
           <p>Server mode: <strong>{config.mode.toUpperCase()}</strong> · switch: {s.liveContactEnabled ? <Badge v="ENABLED" tone="bad" /> : <Badge v="DISABLED" tone="ok" />}</p>
           <p className="small muted">Real calls/texts need: APP_MODE=live, configured provider credentials, a confirmed contact policy, a published non-synthetic offer, and this switch.</p>
           <p className="small">Policy confirmed: {s.contactPolicyConfirmedAt ? `${fmt(s.contactPolicyConfirmedAt)}: ${s.contactPolicyNotes}` : "not yet"}</p>
           <form action={confirmPolicy}><label>Contact policy review notes (who approved, which consent language, which states)</label><textarea name="notes" rows={2} /><button className="secondary">Confirm contact policy</button></form>
-          <form action={setLive} style={{ marginTop: 8 }}><input type="hidden" name="on" value={s.liveContactEnabled ? "0" : "1"} /><button className={s.liveContactEnabled ? "" : "danger"}>{s.liveContactEnabled ? "Disable production contact" : "Enable production contact"}</button></form>
+          <form action={setLive} style={{ marginTop: 8 }}><input type="hidden" name="on" value={s.liveContactEnabled ? "0" : "1"} /><ConfirmButton className={s.liveContactEnabled ? "" : "danger"} danger={!s.liveContactEnabled} title={s.liveContactEnabled ? "Turn off real calls and texts?" : "Turn on real calls and texts?"} message={s.liveContactEnabled ? "Crystal stops reaching real drivers until you turn it back on." : "Crystal will call and text real drivers."} confirmLabel={s.liveContactEnabled ? "Turn off" : "Turn on"}>{s.liveContactEnabled ? "Disable production contact" : "Enable production contact"}</ConfirmButton></form>
         </Card>
       </div>
 

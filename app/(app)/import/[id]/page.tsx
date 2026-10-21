@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import { commitBatch, previewBatch, SHEETS_SOURCE, TARGET_FIELDS } from "@/lib/import";
 import { getAdapters } from "@/adapters/registry";
 import { Badge, Card } from "@/components/ui";
+import { ConfirmButton } from "@/components/confirm-button";
+import { flash } from "@/lib/flash";
 
 async function remap(fd: FormData) {
   "use server";
@@ -16,6 +18,7 @@ async function remap(fd: FormData) {
   const b = await db.importBatch.findUniqueOrThrow({ where: { id } });
   if (b.sourceSystem === SHEETS_SOURCE && getAdapters().sheets.idColumn) mapping.sourceRecordId = getAdapters().sheets.idColumn!;
   await db.importBatch.update({ where: { id, status: "PREVIEW" } as Prisma.ImportBatchWhereUniqueInput, data: { mapping } });
+  await flash("Column mapping updated");
   redirect(`/import/${id}`);
 }
 
@@ -24,6 +27,7 @@ async function commit(fd: FormData) {
   const u = await requireAdmin();
   const id = String(fd.get("batchId"));
   await commitBatch(id, u);
+  await flash("Import finished");
   redirect(`/import/${id}`);
 }
 
@@ -31,6 +35,7 @@ async function discard(fd: FormData) {
   "use server";
   await requireAdmin();
   await db.importBatch.updateMany({ where: { id: String(fd.get("batchId")), status: "PREVIEW" }, data: { status: "DISCARDED" } });
+  await flash("Import discarded");
   redirect("/import");
 }
 
@@ -80,7 +85,7 @@ export default async function Preview({ params }: { params: Promise<{ id: string
         {editable && (
           <div className="row" style={{ marginTop: 12 }}>
             <form action={commit}><input type="hidden" name="batchId" value={batch.id} /><button>Import {(counts.new ?? 0) + (counts.merge_existing_phone ?? 0) + (counts.suppressed ?? 0)} valid rows</button></form>
-            <form action={discard}><input type="hidden" name="batchId" value={batch.id} /><button className="secondary">Discard</button></form>
+            <form action={discard}><input type="hidden" name="batchId" value={batch.id} /><ConfirmButton className="secondary" title="Discard this import?" message="Nothing from this file is saved." confirmLabel="Discard">Discard</ConfirmButton></form>
           </div>
         )}
       </Card>

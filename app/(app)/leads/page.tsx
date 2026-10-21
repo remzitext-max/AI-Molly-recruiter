@@ -70,7 +70,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
             {user.role === "ADMIN" && <option value="none">Unassigned</option>}
             {recruiters.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
-          <select name="data" defaultValue={sp.data ?? ""}><option value="">Demo + live</option><option value="demo">Demo only</option><option value="live">Live only</option></select>
+          {config.mode === "demo" && <select name="data" defaultValue={sp.data ?? ""}><option value="">Demo + live</option><option value="demo">Demo only</option><option value="live">Live only</option></select>}
           <button type="submit">Filter</button>
         </form>
       </Card>
@@ -79,7 +79,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
           <thead><tr><th>Lead</th><th>Phone</th><th>Fit</th><th>Pipeline</th><th>Last call</th><th>Documents</th><th>Assigned</th><th>Next contact</th></tr></thead>
           <tbody>
             {leads.map((l) => (
-              <tr key={l.id}>
+              <tr key={l.id} data-href={`/leads/${l.id}`}>
                 <td><div className="person"><div className="avatar">{initials(l)}</div><div><Link href={`/leads/${l.id}`}>{name(l)}</Link> {l.isDemo && <Badge v="DEMO" tone="demo" />}<div className="small muted">{[l.state, l.zip].filter(Boolean).join(" ") || "—"}</div></div></div></td>
                 <td className="small">{l.phoneE164}</td>
                 <td>{(() => { const f = fitScore(answersOf(l.screening), rules); return <span className={`badge ${fitTone(f)}`} title={[...f.reasons, ...(f.missing.length ? [`Not asked yet: ${f.missing.join(", ")}`] : [])].join("\n") || f.label}>{f.score === null ? "—" : f.score}</span>; })()}</td>

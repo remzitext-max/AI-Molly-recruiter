@@ -3,11 +3,13 @@ import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { retryDeadJob } from "@/lib/jobs/queue";
 import { Badge, Card, fmt } from "@/components/ui";
+import { flash } from "@/lib/flash";
 
 async function retry(fd: FormData) {
   "use server";
   await requireAdmin();
   await retryDeadJob(String(fd.get("jobId")));
+  await flash("Job queued to run again");
   revalidatePath("/jobs");
 }
 

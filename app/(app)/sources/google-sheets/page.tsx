@@ -8,18 +8,22 @@ import { createSheetPreview, getSheetConnection, pollGoogleSheet, SHEETS_CONN_ID
 import { getAdapters } from "@/adapters/registry";
 import { addDemoSheetRow, readDemoSheet } from "@/adapters/mock";
 import { Badge, Card, fmt } from "@/components/ui";
+import { flash } from "@/lib/flash";
 
 const describe = (c: Record<string, number> | null | undefined) =>
   !c ? "no new rows" : `${c.created ?? 0} new lead(s), ${c.merged ?? 0} merged into existing leads`;
 
-const back = (msg: string, kind: "ok" | "error" = "ok") => redirect(`/sources/google-sheets?${kind}=${encodeURIComponent(msg)}`);
+const back = async (msg: string, kind: "ok" | "error" = "ok") => {
+  await flash(msg.length > 140 ? `${msg.slice(0, 137)}…` : msg, kind);
+  redirect(`/sources/google-sheets?${kind}=${encodeURIComponent(msg)}`);
+};
 
 async function preview(fd: FormData) {
   "use server";
   const u = await requireAdmin();
   let id: string;
   try { id = (await createSheetPreview(u, String(fd.get("campaignId")))).id; }
-  catch (e) { back((e as Error).message, "error"); }
+  catch (e) { await back((e as Error).message, "error"); }
   redirect(`/import/${id!}`);
 }
 
@@ -29,24 +33,24 @@ async function saveAuto(fd: FormData) {
   const autoSync = fd.get("autoSync") === "on";
   const pollMinutes = Math.min(Math.max(Number(fd.get("pollMinutes")) || 5, 1), 60);
   const r = await db.sourceConnection.updateMany({ where: { id: SHEETS_CONN_ID, orgId: u.orgId }, data: { autoSync, pollMinutes } });
-  if (!r.count) back("Preview and import the sheet once before turning on automatic sync.", "error");
+  if (!r.count) await back("Preview and import the sheet once before turning on automatic sync.", "error");
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "SOURCE_SETTINGS", message: `Google Sheets automatic sync ${autoSync ? `on, every ${pollMinutes} min` : "off"}` });
-  back(autoSync ? `Automatic sync is on (every ${pollMinutes} minutes).` : "Automatic sync is off.");
+  await back(autoSync ? `Automatic sync is on (every ${pollMinutes} minutes).` : "Automatic sync is off.");
 }
 
 async function syncNow() {
   "use server";
   await requireAdmin();
   const r = await pollGoogleSheet({ manual: true });
-  back(r.error ?? r.skipped ?? `Checked ${r.checkedRows} rows: ${describe(r.imported)}.${r.rowsWithErrors ? ` ${r.rowsWithErrors} row(s) need fixing in the sheet.` : ""}`, r.error || r.skipped ? "error" : "ok");
+  await back(r.error ?? r.skipped ?? `Checked ${r.checkedRows} rows: ${describe(r.imported)}.${r.rowsWithErrors ? ` ${r.rowsWithErrors} row(s) need fixing in the sheet.` : ""}`, r.error || r.skipped ? "error" : "ok");
 }
 
 async function addDemoRow() {
   "use server";
   await requireAdmin();
-  if (config.mode !== "demo") back("Only available in demo mode.", "error");
+  if (config.mode !== "demo") await back("Only available in demo mode.", "error");
   const id = await addDemoSheetRow();
-  back(`Added synthetic row ${id} to the demo sheet. It is imported on the next sync.`);
+  await back(`Added synthetic row ${id} to the demo sheet. It is imported on the next sync.`);
 }
 
 export default async function GoogleSheetsPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
@@ -61,7 +65,6 @@ export default async function GoogleSheetsPage({ searchParams }: { searchParams:
   return (
     <>
       <h1>Google Sheets sync</h1>
-      {sp.ok && <div className="alert ok">{sp.ok}</div>}
       {sp.error && <div className="alert error">{sp.error}</div>}
       <Card title="Connection" right={<Badge v={st.state} tone={st.state === "configured" ? "ok" : st.state === "mock" ? "demo" : "bad"} />}>
         <p>{st.detail}</p>

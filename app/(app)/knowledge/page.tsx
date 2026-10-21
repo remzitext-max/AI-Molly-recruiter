@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { recordEvent } from "@/lib/activity";
 import { Badge, Card, fmt } from "@/components/ui";
+import { flash } from "@/lib/flash";
 
 async function newDraft(fd: FormData) {
   "use server";
@@ -13,6 +14,7 @@ async function newDraft(fd: FormData) {
   const last = await db.offerVersion.findFirst({ where: { offerId: offer.id }, orderBy: { version: "desc" } });
   const v = await db.offerVersion.create({ data: { offerId: offer.id, version: (last?.version ?? 0) + 1, status: "DRAFT", synthetic: base?.synthetic ?? false, facts: base?.facts ?? [], createdById: u.id } });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "OFFER_DRAFT", message: `Draft v${v.version} of "${offer.name}" created` });
+  await flash("New draft created");
   redirect(`/knowledge/${v.id}`);
 }
 
@@ -23,6 +25,7 @@ async function newOffer(fd: FormData) {
   if (!name) return;
   const offer = await db.offer.create({ data: { orgId: u.orgId, name } });
   const v = await db.offerVersion.create({ data: { offerId: offer.id, version: 1, status: "DRAFT", synthetic: false, facts: [], createdById: u.id } });
+  await flash("Offer created");
   redirect(`/knowledge/${v.id}`);
 }
 

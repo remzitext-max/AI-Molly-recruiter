@@ -6,6 +6,7 @@ import { leadScope, assertLeadAccess } from "@/lib/rbac";
 import { recordEvent } from "@/lib/activity";
 import { formatLocal } from "@/lib/timezone";
 import { Badge, Card, fmt, name } from "@/components/ui";
+import { flash } from "@/lib/flash";
 
 async function complete(fd: FormData) {
   "use server";
@@ -14,6 +15,7 @@ async function complete(fd: FormData) {
   await assertLeadAccess(u, t.leadId);
   await db.task.update({ where: { id: t.id }, data: { status: "DONE", completedAt: new Date(), notes: [t.notes, fd.get("note") ? `Done: ${fd.get("note")}` : null].filter(Boolean).join("\n") } });
   await recordEvent({ leadId: t.leadId, actorType: "USER", actorId: u.id, type: "TASK_DONE", message: `Task completed: ${t.title}` });
+  await flash("Task marked as done");
   revalidatePath("/tasks");
 }
 

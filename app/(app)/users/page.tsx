@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { normalizePhone } from "@/lib/phone";
 import { recordEvent } from "@/lib/activity";
 import { Badge, Card } from "@/components/ui";
+import { flash } from "@/lib/flash";
 
 async function createUser(fd: FormData) {
   "use server";
@@ -15,6 +16,7 @@ async function createUser(fd: FormData) {
   if (await db.user.findUnique({ where: { email } })) redirect("/users?error=Email already exists");
   await db.user.create({ data: { orgId: u.orgId, email, name: String(fd.get("name") || email), role: fd.get("role") === "ADMIN" ? "ADMIN" : "RECRUITER", passwordHash: await hashPassword(pw) } });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "USER_CREATED", message: `User ${email} created` });
+  await flash("User created");
   revalidatePath("/users");
 }
 
@@ -36,6 +38,7 @@ async function updateUser(fd: FormData) {
   if (!active) await db.session.deleteMany({ where: { userId: id } });
   if (String(fd.get("password") || "").length >= 12) await db.user.update({ where: { id }, data: { passwordHash: await hashPassword(String(fd.get("password"))) } });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "USER_UPDATED", message: `User ${target.email} updated` });
+  await flash("Your changes are saved");
   revalidatePath("/users");
 }
 

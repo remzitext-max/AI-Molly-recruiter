@@ -5,6 +5,7 @@ import { ingestLead } from "@/lib/leads";
 import { config } from "@/lib/config";
 import { randomToken } from "@/lib/crypto";
 import { Card } from "@/components/ui";
+import { flash } from "@/lib/flash";
 
 async function create(fd: FormData) {
   "use server";
@@ -19,6 +20,7 @@ async function create(fd: FormData) {
     { orgId: u.orgId, campaignId: campaign.id, isDemo: config.mode === "demo" || campaign.isDemo, actorId: u.id },
   );
   if (r.result === "invalid") redirect(`/leads/new?error=${encodeURIComponent(r.error)}`);
+  await flash("Lead added");
   redirect(`/leads/${r.leadId}`);
 }
 

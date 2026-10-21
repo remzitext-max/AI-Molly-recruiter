@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Icon } from "./icons";
 
 const TONE: Record<string, string> = {
   INTERESTED: "ok", DOCS_RECEIVED: "ok", HANDOFF_READY: "ok", HANDED_OFF: "ok", RECEIVED: "ok", COMPLETED: "ok", CONFIRMED: "ok", configured: "ok", DONE: "ok",
@@ -13,8 +14,13 @@ export function Badge({ v, tone }: { v: string | null | undefined; tone?: string
   return <span className={`badge ${tone ?? TONE[v] ?? ""}`}>{v.replace(/_/g, " ").toLowerCase()}</span>;
 }
 
-export function Stat({ n, label, sub }: { n: number | string; label: string; sub?: ReactNode }) {
-  return <div className="stat"><div className="l">{label}</div><div className="n">{n}</div>{sub && <div className="d">{sub}</div>}</div>;
+export function Stat({ n, label, sub, icon, tone }: { n: number | string; label: string; sub?: ReactNode; icon?: string; tone?: "blue" | "violet" | "teal" | "green" | "amber" | "rose" }) {
+  return (
+    <div className={`stat${tone ? ` tone-${tone}` : ""}`}>
+      <div className="top"><div className="l">{label}</div>{icon && <span className="chip"><Icon name={icon} size={18} /></span>}</div>
+      <div className="n">{n}</div>{sub && <div className="d">{sub}</div>}
+    </div>
+  );
 }
 
 export function Card({ title, children, right, flush }: { title?: string; children: ReactNode; right?: ReactNode; flush?: boolean }) {

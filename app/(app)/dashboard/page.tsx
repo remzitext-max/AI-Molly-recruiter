@@ -10,6 +10,7 @@ import { Card, Stat, Badge, PageHead, fmt, name, initials, initialsOf } from "@/
 import { loadDemoLeads } from "@/lib/demo-actions";
 import { drainQueue } from "@/lib/jobs/queue";
 import { handlers } from "@/lib/jobs/handlers";
+import { flash } from "@/lib/flash";
 
 // Day buckets and "today" follow US Central time.
 const ZONE = "America/Chicago";
@@ -34,6 +35,7 @@ async function loadDemo() {
   const u = await requireUser();
   if (u.role !== "ADMIN") throw new Error("Admin only");
   await loadDemoLeads(u.orgId, u.id);
+  await flash("Demo leads loaded");
   revalidatePath("/dashboard");
 }
 
@@ -42,6 +44,7 @@ async function processNow() {
   const u = await requireUser();
   if (u.role !== "ADMIN" || config.mode !== "demo") throw new Error("Demo admin only");
   await drainQueue(handlers, "dashboard");
+  await flash("Due jobs processed");
   revalidatePath("/dashboard");
 }
 
@@ -220,12 +223,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <PageHead title={`${hello}, ${user.name.split(" ")[0]}`} sub={`Recruiting overview · ${RANGES[range].toLowerCase()} · ${now.toFormat("ccc, MMM d")} (Central time)`} right={rangeTabs} />
 
       <div className="stats">
-        <Stat label="New leads" n={newLeads} sub={<Delta now={newLeads} prev={prevLeads} />} />
-        <Stat label="AI calls placed" n={placed} sub={<Delta now={placed} prev={prevPlaced} />} />
-        <Stat label="Talked to driver" n={`${pct(answered, placed)}%`} sub={<>{answered} of {placed} calls · {pickedUp - answered} voicemail or under {TALK_SECONDS}s · <Delta now={answered} prev={prevAnswered} /></>} />
-        <Stat label="Interested drivers" n={interestedLeads} sub={<Delta now={interestedLeads} prev={prevInterested} />} />
-        <Stat label="CDL / med card received" n={docsLeads} sub={<Delta now={docsLeads} prev={prevDocs} />} />
-        <Stat label="Speed to first call" n={mins(speed)} sub="median, lead in → first AI call" />
+        <Stat label="New leads" icon="leads" tone="blue" n={newLeads} sub={<Delta now={newLeads} prev={prevLeads} />} />
+        <Stat label="AI calls placed" icon="phone" tone="violet" n={placed} sub={<Delta now={placed} prev={prevPlaced} />} />
+        <Stat label="Talked to driver" icon="voice" tone="teal" n={`${pct(answered, placed)}%`} sub={<>{answered} of {placed} calls · {pickedUp - answered} voicemail or under {TALK_SECONDS}s · <Delta now={answered} prev={prevAnswered} /></>} />
+        <Stat label="Interested drivers" icon="star" tone="green" n={interestedLeads} sub={<Delta now={interestedLeads} prev={prevInterested} />} />
+        <Stat label="CDL / med card received" icon="doc" tone="amber" n={docsLeads} sub={<Delta now={docsLeads} prev={prevDocs} />} />
+        <Stat label="Speed to first call" icon="clock" tone="rose" n={mins(speed)} sub="median, lead in → first AI call" />
       </div>
 
       <div className="grid wide-left section">

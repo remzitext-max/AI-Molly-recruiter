@@ -7,6 +7,7 @@ import { recordEvent } from "@/lib/activity";
 import { Badge, Card, fmt } from "@/components/ui";
 import { ChatConsole } from "./chat-console";
 import { InspectForm } from "./inspect-form";
+import { flash } from "@/lib/flash";
 
 const PROFILE = "Molly Recruiting Assistant";
 
@@ -22,6 +23,7 @@ async function saveProfile(fd: FormData) {
     update: { provider, providerVoiceId: g("providerVoiceId"), status: provider === "mock" ? "MOCK" : g("providerVoiceId") ? "READY" : "NOT_CREATED", isMock: provider === "mock", consentScope: g("consentScope"), consentDate, consentRecordedById: u.id, consentNotes: g("consentNotes"), verificationStatus: g("verificationStatus"), notes: g("notes") },
   });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "VOICE_PROFILE", message: `Voice profile updated (provider ${provider})` });
+  await flash("Your changes are saved");
   revalidatePath("/voice");
 }
 
@@ -41,6 +43,7 @@ async function generatePreviews() {
     }
   }
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "VOICE_PREVIEW", message: `Generated private voice previews with ${synth.key}${synth.isMock ? " (placeholder tone, not Molly)" : ""}` });
+  await flash("Voice previews generated");
   revalidatePath("/voice");
 }
 

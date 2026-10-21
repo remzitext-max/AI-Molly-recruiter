@@ -20,6 +20,8 @@ import { Badge, Card, fmt, name, initials } from "@/components/ui";
 import { getSettings } from "@/lib/settings";
 import { answersOf, fitRulesFrom, fitScore, fitTone } from "@/lib/fit-score";
 import { endedByText, whoEnded } from "@/lib/call-end";
+import { ConfirmButton } from "@/components/confirm-button";
+import { flash } from "@/lib/flash";
 
 type Turn = { speaker: string; text: string; latencyMs?: number };
 
@@ -36,6 +38,7 @@ async function assign(fd: FormData) {
   assertAdmin(u);
   const to = String(fd.get("userId") || "") || null;
   await assignLead(id, to, "MANUAL", u.id);
+  await flash("Recruiter assigned");
   revalidatePath(`/leads/${id}`);
 }
 
@@ -48,6 +51,7 @@ async function schedule(fd: FormData) {
   await db.lead.update({ where: { id }, data: { attemptCount: 0 } }).catch(() => {});
   await scheduleLeadCall(id, { at, reason: `Scheduled by ${u.name}`, personaKey: persona });
   await recordEvent({ leadId: id, actorType: "USER", actorId: u.id, type: "CALL_SCHEDULED", message: `AI call scheduled${at ? ` for ${at.toISOString()}` : ""} (contact rules still apply)` });
+  await flash("AI call scheduled");
   revalidatePath(`/leads/${id}`);
 }
 
@@ -56,6 +60,7 @@ async function stopCalls(fd: FormData) {
   const id = String(fd.get("leadId"));
   const u = await guard(id);
   await stopAiCalls(id, { id: u.id, name: u.name });
+  await flash("AI calls stopped for this lead");
   revalidatePath(`/leads/${id}`);
 }
 
@@ -64,6 +69,7 @@ async function optOut(fd: FormData) {
   const id = String(fd.get("leadId"));
   const u = await guard(id);
   await optOutLead(id, `Marked by ${u.name}`, { type: "USER", id: u.id });
+  await flash("Driver opted out. No more calls or texts");
   revalidatePath(`/leads/${id}`);
 }
 
@@ -84,6 +90,7 @@ async function addPermission(fd: FormData) {
     await scheduleLeadCall(id, { reason: "Permission recorded" });
   }
   await db.task.updateMany({ where: { leadId: id, type: "RECORD_PERMISSION", status: "OPEN" }, data: { status: "DONE", completedAt: new Date() } });
+  await flash("Permission saved");
   revalidatePath(`/leads/${id}`);
 }
 
@@ -100,6 +107,7 @@ async function setTimezone(fd: FormData) {
     await db.lead.update({ where: { id }, data: { pipelineStatus: "NEW" } });
     await scheduleLeadCall(id, { reason: "Timezone resolved" });
   }
+  await flash("Timezone saved");
   revalidatePath(`/leads/${id}`);
 }
 
@@ -111,6 +119,7 @@ async function verifyField(fd: FormData) {
   const value = String(fd.get("verifiedValue") || "").trim();
   await db.screeningField.update({ where: { leadId_key: { leadId: id, key } }, data: { verifiedValue: value || null, verifiedById: value ? u.id : null, verifiedAt: value ? new Date() : null } });
   await recordEvent({ leadId: id, actorType: "USER", actorId: u.id, type: "VERIFIED", message: `${key.replace(/_/g, " ")} ${value ? "verified by recruiter" : "verification cleared"}` });
+  await flash("Your changes are saved");
   revalidatePath(`/leads/${id}`);
 }
 
@@ -120,6 +129,7 @@ async function delDoc(fd: FormData) {
   const u = await guard(id);
   assertAdmin(u);
   await deleteDocument(String(fd.get("documentId")), { type: "USER", id: u.id }, `deleted by ${u.name}`);
+  await flash("Document deleted");
   revalidatePath(`/leads/${id}`);
 }
 
@@ -129,6 +139,7 @@ async function sendLink(fd: FormData) {
   const u = await guard(id);
   const r = await sendCdlLink(id, null, { verbalConsent: false });
   await recordEvent({ leadId: id, actorType: "USER", actorId: u.id, type: "CDL_LINK_REQUEST", message: r.sent ? "Recruiter sent CDL upload link" : `CDL link not sent: ${r.reason}` });
+  await flash(r.sent ? "Text sent to the driver" : `Text not sent: ${r.reason}`, r.sent ? "ok" : "error");
   revalidatePath(`/leads/${id}`);
 }
 
@@ -138,6 +149,7 @@ async function closeQuestion(fd: FormData) {
   const u = await guard(id);
   await db.unansweredQuestion.update({ where: { id: String(fd.get("questionId")) }, data: { status: "ANSWERED", answer: String(fd.get("answer") || "") || null } });
   await recordEvent({ leadId: id, actorType: "USER", actorId: u.id, type: "QUESTION_ANSWERED", message: "Recruiter answered a driver question" });
+  await flash("Question closed");
   revalidatePath(`/leads/${id}`);
 }
 
@@ -146,15 +158,19 @@ async function clickToCall(fd: FormData) {
   const id = String(fd.get("leadId"));
   const u = await guard(id);
   const lead = await db.lead.findUniqueOrThrow({ where: { id } });
-  if (lead.optedOutAt) throw new Error("Driver opted out");
-  if (!u.transferPhoneE164) throw new Error("Set your phone number on the Users page first");
-  if (config.mode === "live" && lead.isDemo) throw new Error("Demo record");
+  const blocked = lead.optedOutAt ? "This driver opted out" : !u.transferPhoneE164 ? "Set your phone number on the Users page first" : config.mode === "live" && lead.isDemo ? "This is a demo record" : null;
+  if (blocked) {
+    await flash(blocked, "error");
+    return revalidatePath(`/leads/${id}`);
+  }
   const t = getAdapters().telephony;
   try {
-    const r = await t.connectRecruiterToDriver(u.transferPhoneE164, lead.phoneE164);
+    const r = await t.connectRecruiterToDriver(u.transferPhoneE164!, lead.phoneE164);
     await recordEvent({ leadId: id, actorType: "USER", actorId: u.id, type: "RECRUITER_CALL", message: `Click-to-call requested via ${t.key}${t.isMock ? " (MOCK, no call placed)" : ""}`, data: { ref: r.providerRef } });
+    await flash("Calling your phone now. Pick up to be connected to the driver");
   } catch (e) {
     await recordEvent({ leadId: id, actorType: "USER", actorId: u.id, type: "RECRUITER_CALL_FAILED", message: `Click-to-call failed: ${(e as Error).message}` });
+    await flash(`Call failed: ${(e as Error).message}`, "error");
   }
   revalidatePath(`/leads/${id}`);
 }
@@ -230,8 +246,8 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
               <div className="row">
                 <form action={sendLink}>{hidden}<button className="secondary">Text CDL / med card request</button></form>
                 <form action={clickToCall}>{hidden}<button className="secondary">Call from my phone</button></form>
-                <form action={stopCalls}>{hidden}<button className="secondary">Stop AI calls</button></form>
-                <form action={optOut}>{hidden}<button className="danger">Opt out / stop contact</button></form>
+                <form action={stopCalls}>{hidden}<ConfirmButton className="secondary" title="Stop AI calls for this driver?" message="Crystal will not call this driver again. The lead stays on the site and you can still call or text them yourself." confirmLabel="Stop AI calls">Stop AI calls</ConfirmButton></form>
+                <form action={optOut}>{hidden}<ConfirmButton className="danger" danger title="Opt this driver out?" message="The number is blocked for good: no AI calls, no texts, and future imports of this number are skipped. Use this only if the driver asked not to be contacted." confirmLabel="Yes, opt out">Opt out / stop contact</ConfirmButton></form>
               </div>
             </>
           )}
@@ -291,12 +307,11 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
           <div key={c.id} id={`call-${c.id}`} style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 10 }}>
             <div className="row">
               <strong>{fmt(c.createdAt)}</strong> <Badge v={c.status} /> {c.outcome && <Badge v={c.outcome} />}
-              {c.isDemo && <Badge v="SIMULATED" tone="demo" />} {endedBy(c) && <strong className="small">{endedBy(c)}</strong>} <span className="small muted">provider: {c.provider}</span>
+              {c.isDemo && <Badge v="SIMULATED" tone="demo" />} {endedBy(c) && <strong className="small">{endedBy(c)}</strong>} {c.startedAt && c.endedAt && <span className="small muted">{Math.round((c.endedAt.getTime() - c.startedAt.getTime()) / 1000)} sec</span>}
               {ov(c.offerVersionId) && <span className="small muted">offer: {ov(c.offerVersionId)!.offer.name} v{ov(c.offerVersionId)!.version}{ov(c.offerVersionId)!.synthetic ? " (synthetic)" : ""}</span>}
             </div>
             {c.summary && <p>{c.summary}</p>}
             {c.errorMessage && <p className="small" style={{ color: "var(--bad)" }}>{c.errorMessage}</p>}
-            {c.metrics && <p className="small muted">Metrics: {JSON.stringify(c.metrics)}</p>}
             {Array.isArray(c.transcript) && (
               <details><summary>Transcript ({(c.transcript as Turn[]).length} turns)</summary>
                 <div className="transcript">
@@ -328,7 +343,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                   );
                 })()}
               </div>
-              {!d.deletedAt && user.role === "ADMIN" && <form action={delDoc}>{hidden}<input type="hidden" name="documentId" value={d.id} /><button className="danger">Delete</button></form>}
+              {!d.deletedAt && user.role === "ADMIN" && <form action={delDoc}>{hidden}<input type="hidden" name="documentId" value={d.id} /><ConfirmButton className="danger" danger title="Delete this document?" message="The file is removed from storage and cannot be recovered." confirmLabel="Delete">Delete</ConfirmButton></form>}
             </div>
           ))}
           {!lead.documents.length && <p className="muted">No documents.</p>}
