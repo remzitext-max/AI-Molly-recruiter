@@ -5,6 +5,7 @@ import { config } from "./config";
 import { db } from "./db";
 import { providerFetch } from "../adapters/live/http";
 import { redactText } from "./redact";
+import { recordEvent } from "./activity";
 
 const URL_ = "https://api.telnyx.com/v2/ai/openai/chat/completions";
 
@@ -51,24 +52,34 @@ export async function fillScreeningFromTranscript(attemptId: string): Promise<st
   const wanted = Object.keys(FIELDS).filter((k) => !have.has(k));
   if (!wanted.length) return [];
 
-  const text = turns.map((t) => `${t.speaker === "driver" ? "Driver" : "Recruiter"}: ${t.text}`).join("\n").slice(0, 20_000);
-  const res = await providerFetch(URL_, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${config.telnyx.apiKey}`, "Content-Type": "application/json" },
-    timeoutMs: 60_000,
-    body: JSON.stringify({
-      model: process.env.TELNYX_EXTRACT_MODEL || "moonshotai/Kimi-K2.6",
-      temperature: 0,
-      max_tokens: 800,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: "You read a phone call between a trucking recruiter and a truck driver and return ONLY a JSON object. Include a key only when the DRIVER actually gave that answer in the call; never guess, never copy what the recruiter offered. Use the driver's own words, short." },
-        { role: "user", content: `Keys:\n${wanted.map((k) => `- ${k}: ${FIELDS[k]}`).join("\n")}\n\nCall:\n${text}` },
-      ],
-    }),
-  });
-  const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-  const answers = parseAnswers(body.choices?.[0]?.message?.content ?? "");
+  const text = turns.map((t) => `${t.speaker === "driver" ? "Driver" : "Recruiter"}: ${t.text.replace(/<[^>]+>/g, "")}`).join("\n").slice(0, 20_000);
+  const messages = [
+    { role: "system", content: "You read a phone call between a trucking recruiter and a truck driver and return ONLY a JSON object, no other text. Include a key only when the DRIVER actually gave that answer in the call; never guess, never copy what the recruiter offered. Use the driver's own words, short." },
+    { role: "user", content: `Keys:\n${wanted.map((k) => `- ${k}: ${FIELDS[k]}`).join("\n")}\n\nCall:\n${text}` },
+  ];
+  const ask = async (strict: boolean) => {
+    const res = await providerFetch(URL_, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.telnyx.apiKey}`, "Content-Type": "application/json" },
+      timeoutMs: 90_000,
+      body: JSON.stringify({
+        model: process.env.TELNYX_EXTRACT_MODEL || "moonshotai/Kimi-K2.6",
+        temperature: 0, max_tokens: 1500, enable_thinking: false, messages,
+        ...(strict ? { response_format: { type: "json_object" } } : {}),
+      }),
+    });
+    const body = (await res.json()) as { choices?: { message?: { content?: string | null } }[] };
+    return body.choices?.[0]?.message?.content ?? "";
+  };
+  let content: string;
+  try {
+    // Some models reject response_format; ask again in plain mode before giving up.
+    content = await ask(true).catch(() => ask(false));
+  } catch (e) {
+    await recordEvent({ leadId: a.leadId, actorType: "SYSTEM", type: "TRANSCRIPT_ANSWERS", message: `Could not read answers from the call text: ${redactText((e as Error).message).slice(0, 300)}` });
+    throw e;
+  }
+  const answers = parseAnswers(content);
   const filled: string[] = [];
   for (const k of wanted) {
     const v = answers[k];
@@ -80,5 +91,6 @@ export async function fillScreeningFromTranscript(attemptId: string): Promise<st
     });
     filled.push(k);
   }
+  await recordEvent({ leadId: a.leadId, actorType: "SYSTEM", type: "TRANSCRIPT_ANSWERS", message: filled.length ? `Answers read from the call text: ${filled.join(", ")}` : "No new answers found in the call text" });
   return filled;
 }

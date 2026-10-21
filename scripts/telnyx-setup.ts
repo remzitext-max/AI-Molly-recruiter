@@ -81,6 +81,9 @@ async function main() {
     dynamic_variables: { driver_first_name: "there", applied_when: "a while back", time_greeting: "Hi", position_applied: "a truck driving position", driver_timezone: "unknown", attempt_id: "", transfer_number: managerPhone, recruiter_phone: managerPhone, company_name: company },
     telephony_settings: {
       time_limit_secs: 15 * 60,
+      // A silent line (voicemail recording, phone in a pocket) is checked once, then the call ends.
+      user_idle_reply_secs: 10,
+      user_idle_timeout_secs: 25,
       voicemail_detection: {
         // Owner's choice (2026-10-21): never leave a voicemail, hang up as soon as one is detected.
         on_voicemail_detected: { action: "stop_assistant" },
