@@ -133,6 +133,16 @@ export async function cancelPendingOutreach(leadId: string, tx: Tx | typeof db =
   await tx.$executeRaw`UPDATE "Job" SET status = 'CANCELED', "updatedAt" = now() WHERE status = 'PENDING' AND payload->>'leadId' = ${leadId}`;
 }
 
+/** A recruiter stops further AI calls for one lead (no suppression; they can still schedule one by hand). */
+export async function stopAiCalls(leadId: string, actor: { id: string; name: string }) {
+  await db.$transaction(async (tx) => {
+    await cancelPendingOutreach(leadId, tx);
+    await tx.lead.update({ where: { id: leadId }, data: { nextContactAt: null, queueReason: `AI calls stopped by ${actor.name}` } });
+    await advancePipeline(leadId, "CLOSED", tx, { force: true });
+    await recordEvent({ leadId, actorType: "USER", actorId: actor.id, type: "AI_CALLS_STOPPED", message: `AI calls stopped by ${actor.name}; no more automatic calls or texts are queued` }, tx);
+  });
+}
+
 export async function optOutLead(leadId: string, source: string, actor: { type: "USER" | "AI" | "DRIVER" | "SYSTEM"; id?: string | null }) {
   await db.$transaction(async (tx) => {
     const lead = await tx.lead.findUniqueOrThrow({ where: { id: leadId } });

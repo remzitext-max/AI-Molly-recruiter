@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { assertAdmin, assertLeadAccess, leadScope } from "@/lib/rbac";
 import { assignLead } from "@/lib/assignment";
-import { optOutLead, scheduleLeadCall } from "@/lib/leads";
+import { optOutLead, scheduleLeadCall, stopAiCalls } from "@/lib/leads";
 import { deleteDocument } from "@/lib/documents";
 import { sendCdlLink } from "@/lib/messaging";
 import { recordEvent } from "@/lib/activity";
@@ -43,6 +43,14 @@ async function schedule(fd: FormData) {
   await db.lead.update({ where: { id }, data: { attemptCount: 0 } }).catch(() => {});
   await scheduleLeadCall(id, { at, reason: `Scheduled by ${u.name}`, personaKey: persona });
   await recordEvent({ leadId: id, actorType: "USER", actorId: u.id, type: "CALL_SCHEDULED", message: `AI call scheduled${at ? ` for ${at.toISOString()}` : ""} (contact rules still apply)` });
+  revalidatePath(`/leads/${id}`);
+}
+
+async function stopCalls(fd: FormData) {
+  "use server";
+  const id = String(fd.get("leadId"));
+  const u = await guard(id);
+  await stopAiCalls(id, { id: u.id, name: u.name });
   revalidatePath(`/leads/${id}`);
 }
 
@@ -212,6 +220,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
               <div className="row">
                 <form action={sendLink}>{hidden}<button className="secondary">Text CDL / med card request</button></form>
                 <form action={clickToCall}>{hidden}<button className="secondary">Call from my phone</button></form>
+                <form action={stopCalls}>{hidden}<button className="secondary">Stop AI calls</button></form>
                 <form action={optOut}>{hidden}<button className="danger">Opt out / stop contact</button></form>
               </div>
             </>

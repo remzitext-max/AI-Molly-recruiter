@@ -1,4 +1,5 @@
 // Acceptance checks 1-14 from the specification, run against a real Postgres.
+import { stopAiCalls } from "../src/lib/leads";
 import { pollRingCentralInbound } from "../src/lib/messaging";
 import { fillScreeningFromTranscript } from "../src/lib/transcript-extract";
 import { realCallsInProgress } from "../src/lib/calls";
@@ -660,6 +661,20 @@ describe("Photos texted back to the RingCentral number", () => {
       fetchSpy.mockRestore();
       for (const k of ["RINGCENTRAL_CLIENT_ID", "RINGCENTRAL_CLIENT_SECRET", "RINGCENTRAL_JWT", "RINGCENTRAL_SMS_FROM"]) delete process.env[k];
     }
+  });
+});
+
+describe("Stop AI calls", () => {
+  it("cancels the queued retry and closes the lead without suppressing the number", async () => {
+    const base = await seedBase();
+    const l = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Jean", lastName: "S", phoneE164: "+12397916207", pipelineStatus: "QUEUED" } });
+    await enqueue("lead.attempt-call", { leadId: l.id }, { runAt: new Date(Date.now() + 3600_000) });
+    await stopAiCalls(l.id, { id: base.admin.id, name: "Remzi" });
+    expect(await db.job.count({ where: { type: "lead.attempt-call", status: "PENDING" } })).toBe(0);
+    const after = await db.lead.findUniqueOrThrow({ where: { id: l.id } });
+    expect(after.pipelineStatus).toBe("CLOSED");
+    expect(after.optedOutAt).toBeNull();
+    expect(await db.suppression.count()).toBe(0);
   });
 });
 
