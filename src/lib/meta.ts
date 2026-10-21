@@ -71,7 +71,8 @@ export async function sendMetaStageEvent(leadId: string, stage: PipelineStatus, 
   const eventName = META_STAGE_EVENTS[stage];
   if (!lead || lead.isDemo || !eventName) return;
   // Wait for the lead sync to find the Facebook lead ID (better match) for up to 2 hours.
-  if (!lead.fbLeadId && now.getTime() - lead.createdAt.getTime() < 2 * 3600_000) {
+  // Without Page access there is no sync to wait for: send matched by phone.
+  if (!lead.fbLeadId && metaLeadsConfigured() && now.getTime() - lead.createdAt.getTime() < 2 * 3600_000) {
     return { rescheduleAt: new Date(now.getTime() + 15 * 60_000), reason: "WAITING_FOR_FB_LEAD_ID" };
   }
   const r = await sendLeadEvent({ eventName, time: now, fbLeadId: lead.fbLeadId, phoneE164: lead.phoneE164, eventId: `${leadId}:${eventName}` });
