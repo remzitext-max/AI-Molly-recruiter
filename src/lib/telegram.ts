@@ -6,6 +6,8 @@ import { db } from "./db";
 import { providerFetch } from "../adapters/live/http";
 import { getAdapters } from "../adapters/registry";
 import { recordingMime } from "./recordings";
+import { getSettings } from "./settings";
+import { answersOf, fitRulesFrom, fitScore, fitText } from "./fit-score";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -58,6 +60,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
       l.attemptCount < l.campaign.maxAttempts ? `🔁 ${v(config.agentPersona.name)} will try again (attempt ${l.attemptCount} of ${l.campaign.maxAttempts})` : `⛔ No more AI attempts; call manually`,
     ].join("\n");
   }
+  const fit = fitScore(answersOf(l.screening), fitRulesFrom((await getSettings()).fitRules));
   return [
     ...tags,
     `👔Recruiter: ${v(config.agentPersona.name)} AI`,
@@ -71,6 +74,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
     `🗣 English: ${v(slot("english_level"))}`,
     `✅ Ready date: ${v(slot("start_date"))}`,
     `☎️Phone number : ${v(l.phoneE164)}`,
+    `⭐ Fit: ${v(fitText(fit))}`,
   ].join("\n");
 }
 
@@ -92,6 +96,15 @@ export async function sendCallReport(attemptId: string) {
     return { sent: true, withRecording: true };
   }
   await sendTelegram(text);
+  return { sent: true };
+}
+
+/** Tells the group a driver answered one of our texts (the missed-call text, usually). */
+export async function sendSmsReplyToTelegram(leadId: string, text: string) {
+  const l = await db.lead.findUnique({ where: { id: leadId } });
+  if (!l || l.isDemo) return { sent: false };
+  const name = esc([l.firstName, l.lastName].filter(Boolean).join(" ") || "A driver");
+  await sendTelegram([...(await recruiterTags(l.id)), `💬 ${name} replied by text:`, `"${esc(text)}"`, `☎️ ${esc(l.phoneE164)}`].join("\n"));
   return { sent: true };
 }
 

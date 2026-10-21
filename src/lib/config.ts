@@ -63,6 +63,14 @@ export const config = {
     get smsFromNumber() { return env("RINGCENTRAL_SMS_FROM"); },
   },
   /** Optional Telegram bot that posts a driver card after each answered AI call. */
+  /** Facebook / Meta: lead ad details, ad spend per campaign (admin only) and Conversions API events. */
+  meta: {
+    get accessToken() { return env("META_ACCESS_TOKEN"); },
+    get pageId() { return env("META_PAGE_ID"); },
+    get adAccountId() { const v = env("META_AD_ACCOUNT_ID"); return v ? (v.startsWith("act_") ? v : `act_${v}`) : undefined; },
+    get datasetId() { return env("META_DATASET_ID"); },
+    get graphVersion() { return env("META_GRAPH_VERSION") ?? "v23.0"; },
+  },
   telegram: {
     get botToken() { return env("TELEGRAM_BOT_TOKEN"); },
     get chatId() { return env("TELEGRAM_CHAT_ID"); },

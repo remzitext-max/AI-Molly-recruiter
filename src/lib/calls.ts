@@ -261,6 +261,9 @@ async function postCallWorkflow(attemptId: string) {
       await maybeRetry(lead.id, lead.campaign.retryDelayMinutes, lead.campaign.maxAttempts, "Retry after technical failure");
       break;
     default:
+      if (["NO_ANSWER", "BUSY", "VOICEMAIL"].includes(a.status) || outcome === "NO_CONTACT" || outcome === "VOICEMAIL_LEFT") {
+        await enqueue("sms.missed-call", { leadId: lead.id, attemptId }, { idempotencyKey: `missed-call:${lead.id}`, maxAttempts: 2 });
+      }
       // No contact / voicemail / incomplete: bounded retry, progress untouched.
       await maybeRetry(lead.id, lead.campaign.retryDelayMinutes, lead.campaign.maxAttempts, `Retry after ${(outcome ?? a.status).toLowerCase().replace(/_/g, " ")}`);
   }
@@ -595,7 +598,7 @@ export async function syncSourceJob(job: Job) {
 
 /** Per-call values the voice agent's prompt refers to as {{name}}. */
 export async function callVariables(
-  lead: { id: string; orgId: string; firstName: string | null; timezone: string | null; createdAt?: Date; permissions: { scope: string; revokedAt: Date | null; grantedAt: Date }[] },
+  lead: { id: string; orgId: string; firstName: string | null; timezone: string | null; createdAt?: Date; reengagedAt?: Date | null; permissions: { scope: string; revokedAt: Date | null; grantedAt: Date }[] },
   attemptId: string, offerVersionId: string, now = new Date(),
 ): Promise<Record<string, string>> {
   const sources = await db.leadSourceRecord.findMany({ where: { leadId: lead.id }, select: { raw: true } });
@@ -607,6 +610,7 @@ export async function callVariables(
     applied_when: appliedWhen(lead.permissions.find((p) => p.scope === "AI_CALL" && !p.revokedAt)?.grantedAt ?? lead.createdAt ?? null, now),
     time_greeting: timeGreeting(lead.timezone, now),
     position_applied: appliedPosition(sources.map((r) => r.raw)),
+    follow_up: lead.reengagedAt ? "yes" : "no",
   };
 }
 

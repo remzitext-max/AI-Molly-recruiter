@@ -8,6 +8,7 @@ import { recordEvent } from "@/lib/activity";
 import { integrationStatuses } from "@/adapters/registry";
 import { DEFAULT_SLOTS, type SlotSpec } from "@/lib/conversation/brain";
 import { Badge, Card, PageHead, fmt } from "@/components/ui";
+import { fitRulesFrom, type FitRules } from "@/lib/fit-score";
 
 async function togglePause(fd: FormData) {
   "use server";
@@ -29,6 +30,7 @@ async function saveCampaign(fd: FormData) {
     data: {
       paused: fd.get("paused") === "on", contactWindowStart: time(fd.get("start")), contactWindowEnd: time(fd.get("end")), contactDays: days,
       hotCallMinutes: Math.min(120, Math.max(0, Math.round(Number(fd.get("hotCallMinutes")) || 0))),
+      reengageAfterDays: Math.min(365, Math.max(0, Math.round(Number(fd.get("reengageAfterDays")) || 0))),
       maxAttempts: Math.min(10, Math.max(1, Number(fd.get("maxAttempts")) || 3)), retryDelayMinutes: Math.min(10080, Math.max(1, Number(fd.get("retryDelay")) || 240)),
       assignmentMode: fd.get("assignmentMode") === "MANUAL" ? "MANUAL" : "ROUND_ROBIN", offerId: String(fd.get("offerId") || "") || null,
     },
@@ -52,9 +54,22 @@ async function savePolicy(fd: FormData) {
       recordingNotice: String(fd.get("recordingNotice") || "").slice(0, 300), aiDisclosure: String(fd.get("aiDisclosure") || "").slice(0, 400),
       voicemailMessage: String(fd.get("voicemailMessage") || "").slice(0, 400), documentRetentionDays: n("retention", 30, 1, 3650),
       uploadLinkTtlMinutes: n("ttl", 60, 5, 1440), maxUploadBytes: n("maxMb", 10, 1, 25) * 1048576,
+      missedCallSms: fd.get("missedCallSms") === "on", missedCallSmsText: String(fd.get("missedCallSmsText") || "").trim().slice(0, 480) || undefined,
     },
   });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "POLICY", message: "Contact policy settings updated" });
+  revalidatePath("/settings");
+}
+
+async function saveFitRules(fd: FormData) {
+  "use server";
+  const u = await requireAdmin();
+  const rules: FitRules = fitRulesFrom({
+    minSoloMonths: Number(fd.get("minSoloMonths")), minTeamMonths: Number(fd.get("minTeamMonths")),
+    sapKnockout: fd.get("sapKnockout") === "on", requireClassA: fd.get("requireClassA") === "on",
+  });
+  await db.systemSetting.update({ where: { id: "global" }, data: { fitRules: rules as never } });
+  await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "FIT_RULES", message: "Fit score rules updated" });
   revalidatePath("/settings");
 }
 
@@ -100,6 +115,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const s = await getSettings();
   const [campaigns, offers] = await Promise.all([db.campaign.findMany({ where: { orgId: u.orgId } }), db.offer.findMany({ where: { orgId: u.orgId } })]);
   const slots = (s.screeningConfig as SlotSpec[] | null) ?? DEFAULT_SLOTS;
+  const fit = fitRulesFrom(s.fitRules);
   return (
     <>
       <PageHead title="Settings" sub="Calling hours, campaigns, contact policy, Crystal’s screening questions and recording." />
@@ -131,6 +147,9 @@ export default async function Settings({ searchParams }: { searchParams: Promise
               <span className="small">Call a new applicant right away at any hour if they applied within</span><input type="number" name="hotCallMinutes" defaultValue={c.hotCallMinutes} min={0} max={120} style={{ width: 60 }} /><span className="small">min (0 = off; retries keep to the hours above)</span>
             </div>
             <div className="row">
+              <span className="small">Call unreached and not-interested leads one more time</span><input type="number" name="reengageAfterDays" defaultValue={c.reengageAfterDays} min={0} max={365} style={{ width: 60 }} /><span className="small">days after their last call (0 = off; once per lead, up to 2 calls; never for opted-out or stopped leads)</span>
+            </div>
+            <div className="row">
               <span className="small">Max AI attempts</span><input type="number" name="maxAttempts" defaultValue={c.maxAttempts} min={1} max={10} style={{ width: 60 }} />
               <span className="small">Retry after (min)</span><input type="number" name="retryDelay" defaultValue={c.retryDelayMinutes} style={{ width: 80 }} />
               <select name="assignmentMode" defaultValue={c.assignmentMode}><option value="ROUND_ROBIN">Round-robin assignment</option><option value="MANUAL">Manual assignment</option></select>
@@ -152,12 +171,28 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <label><input type="checkbox" name="recordingEnabled" defaultChecked={s.recordingEnabled} /> Calls are recorded (the notice below is spoken at the start)</label>
           <label>Recording notice</label><input name="recordingNotice" defaultValue={s.recordingNotice} style={{ width: "100%" }} />
           <label>Call opening (spoken first; must include {"{company}"}; may not claim to be a person. If a driver asks, the AI always says it is an AI.)</label><textarea name="aiDisclosure" rows={2} defaultValue={s.aiDisclosure} />
+          <label><input type="checkbox" name="missedCallSms" defaultChecked={s.missedCallSms} /> Text the driver once when the AI call is not answered (replies show up as a task and in Telegram)</label>
+          <label>Missed-call text ({"{company}"}, {"{first}"} = driver’s first name, {"{persona}"} = {config.agentPersona.name})</label><textarea name="missedCallSmsText" rows={2} defaultValue={s.missedCallSmsText} />
           <label>Voicemail message</label><textarea name="voicemailMessage" rows={2} defaultValue={s.voicemailMessage} />
           <div className="row">
             <span className="small">Keep CDL files</span><input type="number" name="retention" defaultValue={s.documentRetentionDays} style={{ width: 70 }} /><span className="small">days</span>
             <span className="small">Upload link valid</span><input type="number" name="ttl" defaultValue={s.uploadLinkTtlMinutes} style={{ width: 70 }} /><span className="small">min</span>
             <span className="small">Max file</span><input type="number" name="maxMb" defaultValue={Math.round(s.maxUploadBytes / 1048576)} style={{ width: 60 }} /><span className="small">MB</span>
           </div>
+          <div style={{ marginTop: 8 }}><button>Save</button></div>
+        </form>
+      </Card>
+
+      <Card title="Fit score rules">
+        <p className="small muted">Each lead gets a 0-100 score from the driver’s own answers. It is a guide for recruiters only: it is never said to the driver and does not decide hiring.</p>
+        <form action={saveFitRules}>
+          <div className="row">
+            <span className="small">Minimum experience, solo</span><input type="number" name="minSoloMonths" defaultValue={fit.minSoloMonths} min={0} max={240} style={{ width: 70 }} /><span className="small">months</span>
+            <span className="small">team</span><input type="number" name="minTeamMonths" defaultValue={fit.minTeamMonths} min={0} max={240} style={{ width: 70 }} /><span className="small">months</span>
+          </div>
+          <label><input type="checkbox" name="sapKnockout" defaultChecked={fit.sapKnockout} /> SAP history means not a fit</label>
+          <label><input type="checkbox" name="requireClassA" defaultChecked={fit.requireClassA} /> Only Class A CDL fits</label>
+          <p className="small muted">Also lowers the score: at-fault accidents, English rated fair or poor, not interested, and unanswered questions.</p>
           <div style={{ marginTop: 8 }}><button>Save</button></div>
         </form>
       </Card>

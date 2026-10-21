@@ -110,7 +110,7 @@ export interface ExtractedField { name: string; value: string | null; confidence
 export interface DocumentExtractor {
   key: string;
   status(): IntegrationStatus;
-  extract(data: Buffer, mimeType: string): Promise<{ fields: ExtractedField[]; warnings: string[] }>;
+  extract(data: Buffer, mimeType: string): Promise<{ fields: ExtractedField[]; warnings: string[]; docType?: string }>;
 }
 
 // ---------- Voice synthesis (previews; live calls stream through the voice agent) ----------

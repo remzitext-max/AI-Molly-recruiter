@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import { leadScope } from "@/lib/rbac";
 import { Badge, Card, PageHead, fmt, name, initials } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { getSettings } from "@/lib/settings";
+import { answersOf, fitRulesFrom, fitScore, fitTone } from "@/lib/fit-score";
 
 const PIPE = ["NEW", "NEEDS_PERMISSION", "NEEDS_TIMEZONE", "QUEUED", "CALLBACK_SCHEDULED", "INTERESTED", "NOT_INTERESTED", "DOCS_REQUESTED", "DOCS_RECEIVED", "HANDOFF_READY", "HANDED_OFF", "OPTED_OUT", "CLOSED"];
 const DOCS = ["NONE", "REQUESTED", "RECEIVED", "EXPIRED", "DELETED"];
@@ -40,10 +42,11 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
   if (sp.data === "demo") where.isDemo = true;
   if (sp.data === "live") where.isDemo = false;
   const [leads, recruiters, counts] = await Promise.all([
-    db.lead.findMany({ where, orderBy: { updatedAt: "desc" }, take: 200, include: { assignedTo: true, calls: { orderBy: { createdAt: "desc" }, take: 1 } } }),
+    db.lead.findMany({ where, orderBy: { updatedAt: "desc" }, take: 200, include: { assignedTo: true, calls: { orderBy: { createdAt: "desc" }, take: 1 }, screening: { select: { key: true, reportedValue: true, verifiedValue: true } } } }),
     user.role === "ADMIN" ? db.user.findMany({ where: { orgId: user.orgId, active: true } }) : Promise.resolve([]),
     db.lead.groupBy({ by: ["pipelineStatus"], where: leadScope(user), _count: true }),
   ]);
+  const rules = fitRulesFrom((await getSettings()).fitRules);
   const countOf = (v: (typeof VIEWS)[number]) => counts.filter((c) => !v.statuses || v.statuses.includes(c.pipelineStatus)).reduce((n, c) => n + c._count, 0);
   const keep = (v: string) => { const q = new URLSearchParams(Object.entries(sp).filter(([k, x]) => x && k !== "view" && k !== "pipeline") as [string, string][]); if (v) q.set("view", v); const t = q.toString(); return t ? `/leads?${t}` : "/leads"; };
   return (
@@ -69,12 +72,13 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
       </Card>
       <Card flush>
         <table>
-          <thead><tr><th>Lead</th><th>Phone</th><th>Pipeline</th><th>Last call</th><th>Documents</th><th>Assigned</th><th>Next contact</th></tr></thead>
+          <thead><tr><th>Lead</th><th>Phone</th><th>Fit</th><th>Pipeline</th><th>Last call</th><th>Documents</th><th>Assigned</th><th>Next contact</th></tr></thead>
           <tbody>
             {leads.map((l) => (
               <tr key={l.id}>
                 <td><div className="person"><div className="avatar">{initials(l)}</div><div><Link href={`/leads/${l.id}`}>{name(l)}</Link> {l.isDemo && <Badge v="DEMO" tone="demo" />}<div className="small muted">{[l.state, l.zip].filter(Boolean).join(" ") || "—"}</div></div></div></td>
                 <td className="small">{l.phoneE164}</td>
+                <td>{(() => { const f = fitScore(answersOf(l.screening), rules); return <span className={`badge ${fitTone(f)}`} title={[...f.reasons, ...(f.missing.length ? [`Not asked yet: ${f.missing.join(", ")}`] : [])].join("\n") || f.label}>{f.score === null ? "—" : f.score}</span>; })()}</td>
                 <td><Badge v={l.pipelineStatus} />{l.queueReason && <div className="small muted">{l.queueReason}</div>}</td>
                 <td>{l.calls[0] ? <><Badge v={l.calls[0].status} /> <span className="small muted">{l.calls[0].outcome?.toLowerCase().replace(/_/g, " ")}</span></> : <span className="muted">—</span>}</td>
                 <td><Badge v={l.documentStatus} /></td>
@@ -82,7 +86,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
                 <td className="small">{fmt(l.nextContactAt)}</td>
               </tr>
             ))}
-            {!leads.length && <tr><td colSpan={7} className="muted">No leads match.</td></tr>}
+            {!leads.length && <tr><td colSpan={8} className="muted">No leads match.</td></tr>}
           </tbody>
         </table>
       </Card>

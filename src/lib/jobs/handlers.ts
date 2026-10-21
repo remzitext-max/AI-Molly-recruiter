@@ -1,14 +1,18 @@
 import type { JobHandler } from "./queue";
 import { attemptCallJob, handoffEvaluateJob, reconcileCallJob, simulateCallJob, syncSourceJob, transferTimeoutJob } from "../calls";
-import { pollRingCentralInbound, sendCdlLink } from "../messaging";
+import { pollRingCentralInbound, sendCdlLink, sendMissedCallText } from "../messaging";
 import { runRetentionSweep } from "../documents";
 import { pollGoogleSheet } from "../sheets-sync";
 import { db } from "../db";
-import { sendCallReport, sendConsentToTelegram, sendDocumentToTelegram } from "../telegram";
+import { sendCallReport, sendConsentToTelegram, sendDocumentToTelegram, sendSmsReplyToTelegram } from "../telegram";
 import { fetchTelnyxTranscript } from "../telnyx-transcript";
 import { fillScreeningFromTranscript } from "../transcript-extract";
 import { log } from "../redact";
 import { fetchRecording } from "../recordings";
+import { reengageScan } from "../reengage";
+import { readDocument } from "../document-read";
+import { sendMetaStageEvent, syncMetaLeads } from "../meta";
+import type { PipelineStatus } from "@prisma/client";
 
 export const handlers: Record<string, JobHandler> = {
   "lead.attempt-call": attemptCallJob,
@@ -35,6 +39,24 @@ export const handlers: Record<string, JobHandler> = {
       return { rescheduleAt: new Date(Date.now() + 30_000), reason: "WAITING_FOR_RECORDING" };
     }
     await sendCallReport(attemptId);
+  },
+  "sms.missed-call": async (job) => {
+    const { leadId, attemptId } = job.payload as { leadId: string; attemptId: string };
+    await sendMissedCallText(leadId, attemptId);
+  },
+  "notify.telegram-sms-reply": async (job) => {
+    const { leadId, text } = job.payload as { leadId: string; text: string };
+    await sendSmsReplyToTelegram(leadId, text);
+  },
+  "lead.reengage-scan": async () => { await reengageScan(); },
+  "document.read": async (job) => {
+    const { documentId } = job.payload as { documentId: string };
+    await readDocument(documentId);
+  },
+  "meta.sync-leads": async () => { await syncMetaLeads(); },
+  "meta.send-event": async (job) => {
+    const { leadId, stage } = job.payload as { leadId: string; stage: PipelineStatus };
+    return sendMetaStageEvent(leadId, stage);
   },
   "call.fetch-recording": async (job) => {
     const { attemptId } = job.payload as { attemptId: string };

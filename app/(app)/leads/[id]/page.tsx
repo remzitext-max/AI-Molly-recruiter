@@ -15,6 +15,8 @@ import { PERSONAS } from "@/lib/conversation/personas";
 import { getAdapters } from "@/adapters/registry";
 import { readDemoOutbox } from "@/adapters/mock";
 import { Badge, Card, fmt, name, initials } from "@/components/ui";
+import { getSettings } from "@/lib/settings";
+import { answersOf, fitRulesFrom, fitScore, fitTone } from "@/lib/fit-score";
 
 type Turn = { speaker: string; text: string; latencyMs?: number };
 
@@ -172,6 +174,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
   const offerVersions = await db.offerVersion.findMany({ where: { id: { in: lead.calls.map((c) => c.offerVersionId).filter(Boolean) as string[] } }, include: { offer: true } });
   const ov = (vid: string | null) => offerVersions.find((o) => o.id === vid);
   const hidden = <input type="hidden" name="leadId" value={lead.id} />;
+  const fit = fitScore(answersOf(lead.screening), fitRulesFrom((await getSettings()).fitRules));
   const demoPhone = lead.isDemo ? (await readDemoOutbox(lead.phoneE164)).slice(-1)[0] : undefined;
 
   return (
@@ -200,6 +203,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
             <tr><th>Call attempts</th><td>{lead.attemptCount} / {lead.campaign.maxAttempts}</td></tr>
             <tr><th>Next contact</th><td>{fmt(lead.nextContactAt)} {lead.queueReason && <div className="small muted">{lead.queueReason}</div>}</td></tr>
             <tr><th>Agreed callback</th><td>{lead.callbackAt ? `${formatLocal(lead.callbackAt, lead.timezone)} (driver local)` : "—"}</td></tr>
+            {user.role === "ADMIN" && lead.fbCampaign && <tr><th>Facebook ad</th><td className="small">{lead.fbCampaign}{lead.fbAd ? ` · ${lead.fbAd}` : ""}{lead.fbForm ? <div className="muted">form: {lead.fbForm}</div> : null}</td></tr>}
             <tr><th>Sources</th><td className="small">{lead.sourceRecords.map((s) => <div key={s.id}>{s.sourceSystem}: {s.sourceRecordId} <span className="muted">sync: {s.syncStatus?.toLowerCase().replace(/_/g, " ") ?? "—"}</span></div>)}</td></tr>
           </tbody></table>
         </Card>
@@ -238,6 +242,13 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
           </form>
         </Card>
       </div>
+
+      <Card title="Fit score" right={<span className={`badge ${fitTone(fit)}`} style={{ fontSize: 13 }}>{fit.score === null ? fit.label : `${fit.score}/100 · ${fit.label}`}</span>}>
+        {fit.reasons.length > 0 && <ul style={{ margin: "0 0 6px", paddingLeft: 18 }}>{fit.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}
+        {fit.missing.length > 0 && <p className="small muted" style={{ margin: 0 }}>Not answered yet: {fit.missing.join(", ")}.</p>}
+        {!fit.reasons.length && !fit.missing.length && <p className="small muted" style={{ margin: 0 }}>Meets the requirements set in Settings, based on the driver’s own answers.</p>}
+        <p className="small muted" style={{ margin: "6px 0 0" }}>A guide for recruiters from driver-reported answers (verified values win). Not a hiring decision.</p>
+      </Card>
 
       <Card title="Screening (driver-reported vs verified)">
         <p className="small muted">Driver-reported answers are unverified. Verified values are entered only by the recruiter/Safety team after official checks. This system performs no MVR, PSP/PEV or Clearinghouse checks.</p>
@@ -301,11 +312,18 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
           {lead.documents.map((d) => (
             <div key={d.id} className="spread" style={{ marginBottom: 8 }}>
               <div>
-                {d.deletedAt ? <span className="muted">Deleted {fmt(d.deletedAt)}</span> : <a href={`/api/documents/${d.id}`} target="_blank" rel="noreferrer">View CDL ({d.mimeType}, {Math.round(d.sizeBytes / 1024)} KB)</a>}
+                {d.deletedAt ? <span className="muted">Deleted {fmt(d.deletedAt)}</span> : <a href={`/api/documents/${d.id}`} target="_blank" rel="noreferrer">View {d.kind === "MED_CARD" ? "medical card" : "CDL"} ({d.mimeType}, {Math.round(d.sizeBytes / 1024)} KB)</a>}
                 <div className="small muted">Uploaded {fmt(d.uploadedAt)} · auto-delete {fmt(d.deleteAfter)}</div>
-                {d.extraction && !d.deletedAt && (
-                  <details><summary className="small">Extracted fields (needs human review)</summary><pre>{JSON.stringify(d.extraction, null, 2)}</pre></details>
-                )}
+                {d.extraction && !d.deletedAt && (() => {
+                  const ex = d.extraction as { fields?: { name: string; value: string | null }[]; warnings?: string[] };
+                  const fields = (ex.fields ?? []).filter((f) => f.value);
+                  return (
+                    <div className="small" style={{ marginTop: 4 }}>
+                      {fields.length > 0 && <div>Read by AI: {fields.map((f) => `${f.name.replace(/_/g, " ")} ${f.value}`).join(" · ")}</div>}
+                      {(ex.warnings ?? []).map((w) => <div key={w} className="muted">{w}</div>)}
+                    </div>
+                  );
+                })()}
               </div>
               {!d.deletedAt && user.role === "ADMIN" && <form action={delDoc}>{hidden}<input type="hidden" name="documentId" value={d.id} /><button className="danger">Delete</button></form>}
             </div>

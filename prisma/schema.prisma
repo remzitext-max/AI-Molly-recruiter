@@ -184,6 +184,11 @@ model SystemSetting {
   recordConsentText          String    @default("I authorize {company} and its agents to obtain and review my motor vehicle record (MVR), my FMCSA Pre-Employment Screening Program (PSP) report, my previous employers' safety performance history, and a limited query of the FMCSA Drug and Alcohol Clearinghouse, for hiring purposes only. I understand this is not a job offer. Typing my full name below is my electronic signature.")
   maxUploadBytes             Int       @default(10485760)
   screeningConfig            Json?
+  /// Text a driver once when the AI call is not answered.
+  missedCallSms              Boolean   @default(true)
+  missedCallSmsText          String    @default("{company} recruiting team: Hi {first}, it's {persona}. We just tried to call you about the truck driving job you applied for. When is a good time to call you back? Reply STOP to opt out.")
+  /// Fit score rules (see src/lib/fit-score.ts); empty = the company's published requirements.
+  fitRules                   Json?
   aiDisclosure               String    @default("Hi, this is the AI recruiting assistant for {company}, calling on behalf of Molly, one of our recruiters.")
   voicemailMessage           String    @default("Hi, this is the AI recruiting assistant for {company}, calling for Molly about a truck driving position you applied for. You can reach Molly at {recruiterPhone}. Thanks!")
   updatedAt                  DateTime  @updatedAt
@@ -206,6 +211,7 @@ model Campaign {
   contactWindowEnd    String         @default("19:00")
   contactDays         String         @default("1,2,3,4,5,6") // ISO weekdays
   hotCallMinutes      Int            @default(0) // >0: first call to a new applicant ignores the hours if it starts within this many minutes of import
+  reengageAfterDays   Int            @default(0) // >0: one more round of calls to unreached / not-interested leads this many days after their last call
   createdAt           DateTime       @default(now())
   leads               Lead[]
 }
@@ -237,6 +243,12 @@ model Lead {
   callbackAt         DateTime?
   queueReason        String?
   lastOfferVersionId String?
+  reengagedAt        DateTime?
+  /// Facebook lead ad details, matched by phone from the Meta Lead Ads API (admin only).
+  fbLeadId           String?
+  fbCampaign         String?
+  fbAd               String?
+  fbForm             String?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
   sourceRecords      LeadSourceRecord[]

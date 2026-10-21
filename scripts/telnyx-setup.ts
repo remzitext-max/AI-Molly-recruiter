@@ -78,7 +78,7 @@ async function main() {
     enabled_features: ["telephony"],
     ...(process.env.TELNYX_MODEL ? { model: process.env.TELNYX_MODEL } : {}),
     tools,
-    dynamic_variables: { driver_first_name: "there", applied_when: "a while back", time_greeting: "Hi", position_applied: "a truck driving position", driver_timezone: "unknown", attempt_id: "", transfer_number: managerPhone, recruiter_phone: managerPhone, company_name: company },
+    dynamic_variables: { driver_first_name: "there", applied_when: "a while back", time_greeting: "Hi", position_applied: "a truck driving position", follow_up: "no", driver_timezone: "unknown", attempt_id: "", transfer_number: managerPhone, recruiter_phone: managerPhone, company_name: company },
     telephony_settings: {
       time_limit_secs: 15 * 60,
       // A silent line (voicemail recording, phone in a pocket) is checked once, then the call ends.

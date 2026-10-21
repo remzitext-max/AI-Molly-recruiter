@@ -7,6 +7,7 @@ import { RetellVoiceAgent } from "./live/retell";
 import { TelnyxVoiceAgent } from "./live/telnyx";
 import { RingCentralSms, RingCentralTelephony } from "./live/ringcentral";
 import { HeyGenSynth } from "./live/heygen";
+import { TelnyxVisionExtractor } from "./live/telnyx-vision";
 import { NoExtraction } from "./live/unconfigured";
 import { GoogleSheetsSource } from "./live/google-sheets";
 import { LocalPrivateStorage } from "./storage";
@@ -33,7 +34,7 @@ export function getAdapters(): Adapters {
     sms: live ? new RingCentralSms() : new MockSms(),
     telephony: live ? new RingCentralTelephony() : new MockTelephony(),
     storage: new LocalPrivateStorage(path.resolve(config.storageDir, "private")),
-    extraction: live ? new NoExtraction() : new MockExtractor(),
+    extraction: !live ? new MockExtractor() : config.telnyx.apiKey ? new TelnyxVisionExtractor() : new NoExtraction(),
     synth: live && config.heygen.apiKey ? new HeyGenSynth() : new MockSynth(),
     sheets: live ? new GoogleSheetsSource() : new MockGoogleSheet(),
   };

@@ -10,6 +10,7 @@ import { enqueue } from "./jobs/queue";
 import { advancePipeline, optOutLead } from "./leads";
 import { getAdapters } from "../adapters/registry";
 import { LiveContactBlockedError } from "../adapters/types";
+import { telegramConfigured } from "./telegram";
 
 const STOP_WORDS = /^\s*(stop|stopall|unsubscribe|cancel|end|quit|revoke|opt ?out)\s*$/i;
 
@@ -62,6 +63,41 @@ export async function sendCdlLink(leadId: string, attemptId: string | null, opts
   return { sent: true, messageId: msg.id, uploadUrl: link?.url };
 }
 
+/**
+ * One text after an unanswered AI call, asking when to call back. Sent at most
+ * once per lead, only where an automated text is allowed right now.
+ */
+export async function sendMissedCallText(leadId: string, attemptId: string, now = new Date()) {
+  const settings = await getSettings();
+  if (!settings.missedCallSms) return { sent: false, reason: "off" };
+  const idem = `missed-call:${leadId}`;
+  if (await db.message.findUnique({ where: { idempotencyKey: idem } })) return { sent: false, reason: "already sent" };
+  const lead = await db.lead.findUniqueOrThrow({ where: { id: leadId }, include: { permissions: true, campaign: true, org: true } });
+  if (lead.optedOutAt || ["OPTED_OUT", "CLOSED"].includes(lead.pipelineStatus)) return { sent: false, reason: "lead closed" };
+  const gate = await evaluateContactGate({ lead, settings, channel: "SMS", now, verbalSmsConsent: false });
+  if (!gate.ok) {
+    await recordEvent({ leadId, actorType: "SYSTEM", type: "SMS_BLOCKED", message: `Missed-call text not sent: ${gate.message}` });
+    return { sent: false, reason: gate.message };
+  }
+  const body = settings.missedCallSmsText
+    .replace(/\{company\}/g, lead.org.name)
+    .replace(/\{persona\}/g, config.agentPersona.name)
+    .replace(/Hi \{first\}/g, lead.firstName ? `Hi ${lead.firstName}` : "Hi")
+    .replace(/\{first\}/g, lead.firstName ?? "")
+    .slice(0, 480);
+  const msg = await db.message.create({ data: { leadId, isDemo: lead.isDemo, direction: "OUTBOUND", purpose: "MISSED_CALL", body, provider: getAdapters().sms.key, idempotencyKey: idem, status: "SENDING" } });
+  try {
+    const r = await getAdapters().sms.send(lead.phoneE164, body, idem);
+    await db.message.update({ where: { id: msg.id }, data: { status: "SENT", providerMessageId: r.providerMessageId } });
+  } catch (e) {
+    await db.message.update({ where: { id: msg.id }, data: { status: e instanceof LiveContactBlockedError ? "BLOCKED" : "FAILED" } });
+    await recordEvent({ leadId, actorType: "SYSTEM", type: "SMS_FAILED", message: `Missed-call text failed: ${(e as Error).message}` });
+    return { sent: false, reason: (e as Error).message };
+  }
+  await recordEvent({ leadId, actorType: "AI", type: "SMS_SENT", message: `Missed-call text sent${getAdapters().sms.isMock ? " (MOCK, not delivered to a phone)" : ""}`, data: { attemptId } });
+  return { sent: true, messageId: msg.id };
+}
+
 /** Inbound SMS from a provider webhook. Message text is untrusted data. */
 export async function handleInboundSms(fromE164: string, body: string, providerMessageId: string, provider: string) {
   const exists = await db.message.findUnique({ where: { providerMessageId } });
@@ -76,6 +112,9 @@ export async function handleInboundSms(fromE164: string, body: string, providerM
   await recordEvent({ leadId: lead.id, actorType: "DRIVER", type: "SMS_RECEIVED", message: "Driver replied by text" });
   if (!STOP_WORDS.test(body)) {
     await db.task.create({ data: { leadId: lead.id, type: "CALLBACK", assignedToId: lead.assignedToId, title: "Driver replied by text", notes: body.slice(0, 500) } });
+    if (telegramConfigured() && !lead.isDemo && body.trim() && body !== "(sent a photo)") {
+      await enqueue("notify.telegram-sms-reply", { leadId: lead.id, text: body.slice(0, 500) }, { idempotencyKey: `telegram-sms:${providerMessageId}`, maxAttempts: 3 });
+    }
   }
   return { matched: true };
 }

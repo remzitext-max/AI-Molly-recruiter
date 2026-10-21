@@ -74,12 +74,8 @@ export async function saveDriverDocument(lead: { id: string; isDemo: boolean }, 
   await recordEvent({ leadId: lead.id, actorType: "DRIVER", type: "DOCUMENT_RECEIVED", message: `CDL document received by ${via} (${mime}, ${Math.round(data.length / 1024)} KB)`, data: { documentId: doc.id } });
   if (telegramConfigured() && !lead.isDemo) await enqueue("notify.telegram-document", { documentId: doc.id }, { idempotencyKey: `telegram-doc:${doc.id}`, maxAttempts: 3 });
 
-  try {
-    const ex = await getAdapters().extraction.extract(data, mime);
-    await db.document.update({ where: { id: doc.id }, data: { extraction: ex as object } });
-  } catch {
-    /* extraction is optional */
-  }
+  // Reading the photo can take a while (vision model), so it runs as its own job.
+  await enqueue("document.read", { documentId: doc.id }, { idempotencyKey: `doc-read:${doc.id}`, maxAttempts: 2 });
   await enqueue("handoff.evaluate", { leadId: lead.id }, { idempotencyKey: `handoff-eval:${doc.id}` });
   return { documentId: doc.id };
 }

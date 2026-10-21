@@ -582,6 +582,7 @@ describe("Telegram driver card", () => {
       "🗣 English: Good",
       "✅ Ready date: Next Monday",
       "☎️Phone number : +12145550111",
+      "⭐ Fit: Not enough answers",
     ].join("\n"));
 
     const demo = await lead(base, "interested");
