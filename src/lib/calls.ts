@@ -75,6 +75,13 @@ export async function attemptCallJob(job: Job) {
   }
   const provider = getAdapters().voice;
 
+  // The phone line has a fixed number of channels: queued leads wait their turn
+  // instead of all dialing at once (extra calls fail at the carrier).
+  if (!provider.isMock && (await realCallsInProgress(now)) >= config.maxConcurrentCalls) {
+    await db.lead.update({ where: { id: leadId }, data: { queueReason: "Waiting for a free line (another call in progress)" } });
+    return { rescheduleAt: new Date(Date.now() + 45_000), reason: "LINE_BUSY" };
+  }
+
   // Acquire the per-lead call lock atomically. activeAttemptId is UNIQUE and is
   // only set when currently NULL, so two workers can never dial the same lead.
   const attempt = await db.$transaction(async (tx) => {
@@ -112,6 +119,11 @@ export async function attemptCallJob(job: Job) {
     await recordEvent({ leadId, actorType: "SYSTEM", type: blocked ? "CALL_BLOCKED" : "CALL_FAILED", message: `${blocked ? "Real contact blocked" : "Call failed to start"}: ${(e as Error).message}` });
     if (!blocked) throw e; // retried by the queue with backoff
   }
+}
+
+/** Real (non-demo) calls that are dialing or talking now. Attempts older than 20 min are ignored as stuck. */
+export async function realCallsInProgress(now = new Date()) {
+  return db.callAttempt.count({ where: { isDemo: false, status: { in: ["SCHEDULED", "DIALING", "RINGING", "IN_PROGRESS"] }, createdAt: { gte: new Date(now.getTime() - 20 * 60_000) } } });
 }
 
 async function releaseLock(leadId: string, attemptId: string) {

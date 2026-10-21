@@ -1,4 +1,5 @@
 // Acceptance checks 1-14 from the specification, run against a real Postgres.
+import { realCallsInProgress } from "../src/lib/calls";
 import { fetchTelnyxTranscript } from "../src/lib/telnyx-transcript";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
@@ -590,6 +591,20 @@ describe("Telegram driver card", () => {
     expect(note).toContain("called Frank D (26 sec): no answers collected");
     expect(note).toContain("+18124065861");
     expect(note).toMatch(/will try again \(attempt 1 of \d\)/);
+  });
+});
+
+describe("Phone line limit", () => {
+  it("counts only real calls that are dialing or talking, ignoring stuck ones", async () => {
+    const base = await seedBase();
+    const l = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Line", lastName: "Test", phoneE164: "+13125550190" } });
+    const now = new Date();
+    expect(await realCallsInProgress(now)).toBe(0);
+    await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "line-1", status: "RINGING" } });
+    await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "line-2", status: "COMPLETED" } });
+    await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "line-3", status: "DIALING", createdAt: new Date(now.getTime() - 30 * 60_000) } });
+    await db.callAttempt.create({ data: { leadId: l.id, provider: "mock", isDemo: true, idempotencyKey: "line-4", status: "IN_PROGRESS" } });
+    expect(await realCallsInProgress(now)).toBe(1);
   });
 });
 

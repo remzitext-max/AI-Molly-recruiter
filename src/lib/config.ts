@@ -42,6 +42,8 @@ export const config = {
     get name() { return env("AGENT_NAME") ?? "Crystal"; },
     get role() { return env("AGENT_ROLE") ?? "Molly's assistant"; },
   },
+  /** Real calls allowed at the same time; the Telnyx account has 1 outbound channel. */
+  get maxConcurrentCalls() { return Math.max(1, Number(env("MAX_CONCURRENT_CALLS") ?? 1) || 1); },
   telnyx: {
     get apiKey() { return env("TELNYX_API_KEY"); },
     get assistantId() { return env("TELNYX_ASSISTANT_ID"); },
