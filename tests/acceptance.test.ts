@@ -51,9 +51,12 @@ describe("1. synthetic lead -> simulated call -> handoff", () => {
     // driver-reported only; nothing verified
     expect(l.screening.every((s) => s.verifiedValue === null)).toBe(true);
 
-    // driver uploads CDL through the SMS link
+    // the text asks for photos by reply, with no link
     const sms = mockSmsOutbox.at(-1)!;
-    const token = sms.body.match(/\/u\/([A-Za-z0-9_-]+)/)![1];
+    expect(sms.body).toContain("Can you send a photo of your CDL and medical card here please? Just reply to this text.");
+    expect(sms.body).not.toMatch(/https?:/);
+    // the upload page still works for links a recruiter sends
+    const token = (await createUploadLink(id)).token;
     await handleUpload(token, { data: JPEG });
     await drain();
     l = await db.lead.findUniqueOrThrow({ where: { id }, include: { screening: true } });

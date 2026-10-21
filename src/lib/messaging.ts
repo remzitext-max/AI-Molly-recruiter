@@ -13,7 +13,11 @@ import { LiveContactBlockedError } from "../adapters/types";
 
 const STOP_WORDS = /^\s*(stop|stopall|unsubscribe|cancel|end|quit|revoke|opt ?out)\s*$/i;
 
-/** Send the secure CDL upload link by SMS. Idempotent per call attempt. */
+/**
+ * Text the driver asking for their CDL and medical card. By default they just
+ * reply with photos (the owner found a link looks odd); CDL_SMS_LINK=1 sends
+ * the secure upload link instead. Idempotent per call attempt.
+ */
 export async function sendCdlLink(leadId: string, attemptId: string | null, opts: { verbalConsent: boolean; now?: Date }) {
   const idem = `cdl-link:${attemptId ?? leadId + ":" + new Date().toISOString().slice(0, 13)}`;
   const prior = await db.message.findUnique({ where: { idempotencyKey: idem } });
@@ -33,12 +37,16 @@ export async function sendCdlLink(leadId: string, attemptId: string | null, opts
     return { sent: false, reason: gate.message };
   }
   if (opts.verbalConsent && !lead.permissions.some((p) => p.scope === "SMS" && !p.revokedAt)) {
-    await db.contactPermission.create({ data: { leadId, scope: "SMS", source: `Verbal consent during AI call ${attemptId ?? ""}`.trim(), grantedAt: now, evidence: "Driver agreed to receive the CDL upload link by text (see call transcript).", isDemo: lead.isDemo } });
+    await db.contactPermission.create({ data: { leadId, scope: "SMS", source: `Verbal consent during AI call ${attemptId ?? ""}`.trim(), grantedAt: now, evidence: "Driver agreed to receive a text for their CDL and medical card (see call transcript).", isDemo: lead.isDemo } });
   }
-  const link = await createUploadLink(leadId);
+  const useLink = process.env.CDL_SMS_LINK === "1";
+  const link = useLink ? await createUploadLink(leadId) : null;
   const ttl = settings.uploadLinkTtlMinutes;
-  const body = `${lead.org.name} recruiting team: can you send your CDL and medical card here please: ${link.url} . Link expires in ${ttl >= 60 ? `${Math.round(ttl / 60)} hr` : `${ttl} min`}. Reply STOP to opt out.`;
-  const stored = body.replace(link.token, "[link-token]");
+  const hi = lead.firstName ? `Hi ${lead.firstName}, it's ${config.agentPersona.name}. ` : "";
+  const body = link
+    ? `${lead.org.name} recruiting team: can you send your CDL and medical card here please: ${link.url} . Link expires in ${ttl >= 60 ? `${Math.round(ttl / 60)} hr` : `${ttl} min`}. Reply STOP to opt out.`
+    : `${lead.org.name} recruiting team: ${hi}Can you send a photo of your CDL and medical card here please? Just reply to this text. Reply STOP to opt out.`;
+  const stored = link ? body.replace(link.token, "[link-token]") : body;
   const msg = await db.message.create({ data: { leadId, isDemo: lead.isDemo, direction: "OUTBOUND", purpose: "CDL_LINK", body: stored, provider: getAdapters().sms.key, idempotencyKey: idem, status: "SENDING" } });
   try {
     const r = await getAdapters().sms.send(lead.phoneE164, body, idem);
@@ -50,8 +58,8 @@ export async function sendCdlLink(leadId: string, attemptId: string | null, opts
   }
   await db.lead.update({ where: { id: leadId }, data: { documentStatus: "REQUESTED" } });
   await advancePipeline(leadId, "DOCS_REQUESTED");
-  await recordEvent({ leadId, actorType: "AI", type: "SMS_SENT", message: `Secure CDL upload link sent by text${getAdapters().sms.isMock ? " (MOCK, not delivered to a phone)" : ""}` });
-  return { sent: true, messageId: msg.id, uploadUrl: link.url };
+  await recordEvent({ leadId, actorType: "AI", type: "SMS_SENT", message: `${link ? "Secure CDL upload link" : "CDL and medical card request"} sent by text${getAdapters().sms.isMock ? " (MOCK, not delivered to a phone)" : ""}` });
+  return { sent: true, messageId: msg.id, uploadUrl: link?.url };
 }
 
 /** Inbound SMS from a provider webhook. Message text is untrusted data. */

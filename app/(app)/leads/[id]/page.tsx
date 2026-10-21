@@ -210,7 +210,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
               <p className="small muted">Permission, contact hours, pause switches and attempt limits are checked again when the call is due.</p>
               <h3>Recruiter actions</h3>
               <div className="row">
-                <form action={sendLink}>{hidden}<button className="secondary">Text CDL upload link</button></form>
+                <form action={sendLink}>{hidden}<button className="secondary">Text CDL / med card request</button></form>
                 <form action={clickToCall}>{hidden}<button className="secondary">Call from my phone</button></form>
                 <form action={optOut}>{hidden}<button className="danger">Opt out / stop contact</button></form>
               </div>
