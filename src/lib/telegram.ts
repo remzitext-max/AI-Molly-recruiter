@@ -1,4 +1,4 @@
-// Posts a driver card to the owner's Telegram group after each answered AI call,
+// Posts a driver card to the owner's Telegram group after each AI call (a one-line note when nobody answered),
 // and forwards each CDL / medical card file a driver uploads.
 // Off unless TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set.
 import { config } from "./config";
@@ -40,16 +40,24 @@ export async function sendTelegram(text: string, chatId = config.telegram.chatId
   });
 }
 
-/** The owner's driver card for one finished call, or null when there is nothing to report (not answered, voicemail, demo record). */
+const MISSED: Record<string, string> = { NO_ANSWER: "no answer", BUSY: "line busy", VOICEMAIL: "voicemail, hung up", FAILED: "call did not go through", CANCELED: "call canceled" };
+
+/** The owner's driver card for one finished call: a full card when the driver talked, a one-line note otherwise, or null for demo records. */
 export async function buildCallReport(attemptId: string): Promise<string | null> {
   const a = await db.callAttempt.findUnique({ where: { id: attemptId }, include: { lead: { include: { screening: true, campaign: true } } } });
-  if (!a || a.lead.isDemo || !a.startedAt || a.status === "VOICEMAIL") return null;
+  if (!a || a.lead.isDemo) return null;
   const l = a.lead;
   const slot = (k: string) => l.screening.find((f) => f.key === k && f.reportedValue)?.reportedValue ?? "";
   const v = (s: string | null | undefined) => esc((s ?? "").trim());
   const team = /team/i.test(slot("driving_type"));
   const name = v([l.firstName, l.lastName].filter(Boolean).join(" "));
   const tags = await recruiterTags(l.id);
+  const retryLine = l.attemptCount < l.campaign.maxAttempts ? `🔁 ${v(config.agentPersona.name)} will try again (attempt ${l.attemptCount} of ${l.campaign.maxAttempts})` : `⛔ No more AI attempts; call manually`;
+  if (!a.startedAt || a.status === "VOICEMAIL") {
+    // Nobody picked up: still tell the group the call was made, so a missing card is never a mystery.
+    const why = MISSED[a.status] ?? a.status.toLowerCase().replace(/_/g, " ");
+    return [...tags, `📵 ${v(config.agentPersona.name)} AI called ${name || "a driver"}: ${why}`, `☎️ ${v(l.phoneE164)}`, retryLine].join("\n");
+  }
   const secs = a.startedAt && a.endedAt ? Math.round((a.endedAt.getTime() - a.startedAt.getTime()) / 1000) : null;
   const ended = endedByText(whoEnded(a), config.agentPersona.name);
   const endLine = ended ? `📴 ${v(ended)}${secs !== null ? ` (${secs} sec call)` : ""}` : null;
@@ -61,7 +69,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
       `☎️ ${v(l.phoneE164)}`,
       ...(endLine ? [endLine] : []),
       ...lastDriverLines(a.transcript),
-      l.attemptCount < l.campaign.maxAttempts ? `🔁 ${v(config.agentPersona.name)} will try again (attempt ${l.attemptCount} of ${l.campaign.maxAttempts})` : `⛔ No more AI attempts; call manually`,
+      retryLine,
     ].join("\n");
   }
   const fit = fitScore(answersOf(l.screening), fitRulesFrom((await getSettings()).fitRules));

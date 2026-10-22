@@ -589,7 +589,11 @@ describe("Telegram driver card", () => {
     await drain();
     expect(await buildCallReport((await lastCall(demo)).id)).toBeNull();
     const unanswered = await db.callAttempt.create({ data: { leadId: real.id, provider: "telnyx", idempotencyKey: "tg-2", status: "NO_ANSWER" } });
-    expect(await buildCallReport(unanswered.id)).toBeNull();
+    // Nobody picked up: a one-line note so the group knows the call was made.
+    const missed = await buildCallReport(unanswered.id);
+    expect(missed).toContain("📵 Crystal AI called");
+    expect(missed).toContain(": no answer");
+    expect(missed).toMatch(/will try again|No more AI attempts/);
 
     // Answered but nothing collected: a short note, not an empty card.
     const quiet = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Frank", lastName: "D", phoneE164: "+18124065861", attemptCount: 1 } });
