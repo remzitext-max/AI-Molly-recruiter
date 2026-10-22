@@ -221,6 +221,25 @@ describe("6. contact hours", () => {
     expect(await db.callAttempt.count({ where: { leadId: old } })).toBe(0);
   });
 
+  it("double dial: a hot applicant who does not pick up is rung again a minute later, even outside the hours", async () => {
+    const { DateTime } = await import("luxon");
+    const local = DateTime.now().setZone("America/Chicago").plus({ hours: 3 });
+    const start = local.toFormat("HH:mm");
+    const end = local.plus({ minutes: 1 }).toFormat("HH:mm");
+    const base = await seedBase({ window: start < end ? [start, end] : ["03:00", "03:01"] });
+    await db.campaign.updateMany({ data: { hotCallMinutes: 15 } });
+    const id = await lead(base, "no_answer");
+    await drain();
+    const retry = await db.job.findFirstOrThrow({ where: { type: "lead.attempt-call", status: "PENDING" } });
+    expect(retry.runAt.getTime() - Date.now()).toBeLessThan(2 * 60_000);
+    await db.job.updateMany({ where: { status: "PENDING", type: "lead.attempt-call" }, data: { runAt: new Date() } });
+    await drain();
+    expect(await db.callAttempt.count({ where: { leadId: id } })).toBe(2);
+    // The third try keeps to the hours.
+    const third = await db.job.findFirst({ where: { type: "lead.attempt-call", status: "PENDING" } });
+    expect(third!.runAt.getTime() - Date.now()).toBeGreaterThan(30 * 60_000);
+  });
+
   it("unknown timezone blocks automatic calling", async () => {
     const base = await seedBase();
     const id = await lead(base, "interested", { state: "", zip: "", phone: "(867) 555-0123" });

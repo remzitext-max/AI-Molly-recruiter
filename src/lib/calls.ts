@@ -267,7 +267,9 @@ async function postCallWorkflow(attemptId: string) {
         await enqueue("sms.missed-call", { leadId: lead.id, attemptId }, { idempotencyKey: `missed-call:${lead.id}`, maxAttempts: 2 });
       }
       // No contact / voicemail / incomplete: bounded retry, progress untouched.
-      await maybeRetry(lead.id, lead.campaign.retryDelayMinutes, lead.campaign.maxAttempts, `Retry after ${(outcome ?? a.status).toLowerCase().replace(/_/g, " ")}`);
+      // First call rang out: ring again in a minute; a second call from the same number is picked up far more often.
+      if (a.status === "NO_ANSWER" && lead.attemptCount === 1) await maybeRetry(lead.id, 1, lead.campaign.maxAttempts, "Double dial after no answer");
+      else await maybeRetry(lead.id, lead.campaign.retryDelayMinutes, lead.campaign.maxAttempts, `Retry after ${(outcome ?? a.status).toLowerCase().replace(/_/g, " ")}`);
   }
   // Sync results back to the source system when a connector supports it.
   await enqueue("lead.sync-source", { leadId: lead.id, attemptId }, { idempotencyKey: `sync:${attemptId}` });
