@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { addLead, drain, resetDb, seedBase, setPersona } from "./helpers";
-import { setHireStage } from "@/lib/hiring";
+import { setHireStage, syncHiringFromSheet } from "@/lib/hiring";
 import { smsSenderFor } from "@/lib/messaging";
 import { mockSmsOutbox } from "@/adapters/mock";
 import { setAdapterOverride } from "@/adapters/registry";
@@ -102,5 +102,47 @@ describe("missed-call texts: greeting + offer", () => {
       "Good part of the day Derrick Johnson\nIt is Crystal\nYou have applied for team driver position",
       "Requirements:\n- Minimum 2 year of CDL Class A",
     ]);
+  });
+});
+
+describe("hiring and good outcomes from the recruiters' lead sheet", () => {
+  const env = { APP_MODE: "live", GOOGLE_SHEETS_SPREADSHEET_ID: "SHEET", META_ACCESS_TOKEN: "TOKEN", META_DATASET_ID: "DS" };
+  it("copies Hired / Application onto our leads and sends each good status to Facebook once", async () => {
+    const base = await seedBase();
+    const r = await addLead(base, { phone: "(214) 555-0177" });
+    if (r.result !== "created") throw new Error("no lead");
+    await db.lead.update({ where: { id: r.leadId }, data: { isDemo: false } });
+    const tabs: Record<string, string[][]> = {
+      Pool: [],
+      Molly: [["(214) 555-0177", "Hired"], ["(312) 555-0100", "Need to bring"], ["(312) 555-0101", "No answer"], ["(312) 555-0102", "Call back"]],
+      Ben: [["312-555-0103", "Application"], ["312-555-0100", "Need to bring"]],
+      Notes: [],
+    };
+    setAdapterOverride({ sheets: {
+      status: () => ({ kind: "lead_source", provider: "test", state: "configured", isMock: true, detail: "" }),
+      listTabs: async () => Object.keys(tabs),
+      readSheet: async (t?: string) => ({ title: t!, headers: t === "Notes" ? ["Note"] : ["Phone", "Status"], rows: tabs[t!] ?? [], warnings: [] }),
+    } as never });
+    const sent: { event_name: string }[] = [];
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (u, init) => {
+      if (String(u).includes("/DS/events")) sent.push(JSON.parse(init!.body as string).data[0]);
+      return new Response(JSON.stringify({ events_received: 1 }));
+    });
+    Object.assign(process.env, env);
+    try {
+      expect(await syncHiringFromSheet()).toEqual({ tabs: 3, updated: 1, sent: 3 });
+      const l = await db.lead.findUniqueOrThrow({ where: { id: r.leadId } });
+      expect(l.hireStage).toBe("HIRED");
+      const ev = await db.activityEvent.findFirstOrThrow({ where: { leadId: r.leadId, type: "HIRE_STAGE" } });
+      expect(ev.actorType).toBe("SYSTEM");
+      // Our lead's "Hired" goes through the lead's own Meta job; sheet-only drivers go directly.
+      expect(sent.map((e) => e.event_name).sort()).toEqual(["Application", "Interested", "Qualified"]);
+      expect(await db.job.count({ where: { type: "meta.send-event" } })).toBe(1);
+      expect(await syncHiringFromSheet()).toEqual({ tabs: 3, updated: 0, sent: 0 });
+    } finally {
+      spy.mockRestore();
+      for (const k of Object.keys(env)) delete process.env[k];
+      process.env.APP_MODE = "demo";
+    }
   });
 });

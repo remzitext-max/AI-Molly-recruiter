@@ -108,6 +108,13 @@ export class GoogleSheetsSource implements SheetLeadSource {
     return quote(title);
   }
 
+  async listTabs(): Promise<string[]> {
+    const url = `${API}/${encodeURIComponent(config.googleSheets.spreadsheetId!)}?fields=sheets.properties(title)`;
+    const res = await providerFetch(url, { headers: { authorization: `Bearer ${await this.token()}` } });
+    const j = (await res.json()) as { sheets?: { properties: { title: string } }[] };
+    return (j.sheets ?? []).map((s) => s.properties.title);
+  }
+
   private async getValues(r?: string) {
     const g = config.googleSheets;
     const url = `${API}/${encodeURIComponent(g.spreadsheetId!)}/values/${encodeURIComponent(await this.range(r))}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`;

@@ -10,6 +10,7 @@ import { SHEET_FAST_POLL_MS, scheduleSheetPoll } from "../src/lib/sheets-sync";
 import { scheduleInboundSmsPoll } from "../src/lib/messaging";
 import { scheduleReengageScan } from "../src/lib/reengage";
 import { scheduleMetaSync } from "../src/lib/meta";
+import { scheduleHiringSync } from "../src/lib/hiring";
 
 const workerId = `${os.hostname()}:${process.pid}`;
 let stopping = false;
@@ -31,7 +32,7 @@ async function main() {
       for (const j of jobs) await runJob(j, handlers);
       if (Date.now() - lastMaint > 60 * 60 * 1000) { await scheduleMaintenance(); lastMaint = Date.now(); }
       if (Date.now() - lastFastSheetCheck > SHEET_FAST_POLL_MS) { await scheduleSheetPoll(); lastFastSheetCheck = Date.now(); }
-      if (Date.now() - lastSheetCheck > 60 * 1000) { await scheduleInboundSmsPoll(); await scheduleReengageScan(); await scheduleMetaSync(); lastSheetCheck = Date.now(); }
+      if (Date.now() - lastSheetCheck > 60 * 1000) { await scheduleInboundSmsPoll(); await scheduleReengageScan(); await scheduleMetaSync(); await scheduleHiringSync(); lastSheetCheck = Date.now(); }
       if (!jobs.length) await new Promise((r) => setTimeout(r, 1000));
     } catch (e) {
       log.error("worker loop error", { error: (e as Error).message });

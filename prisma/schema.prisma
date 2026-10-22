@@ -611,3 +611,14 @@ model RecordCheckConsent {
 
   @@index([leadId])
 }
+
+/// Good outcomes read from the recruiters' lead sheet, sent to Facebook once per phone and event.
+model MetaSheetEvent {
+  phoneE164 String
+  eventName String
+  tab       String
+  status    String
+  sentAt    DateTime @default(now())
+
+  @@id([phoneE164, eventName])
+}

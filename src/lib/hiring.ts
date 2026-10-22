@@ -5,7 +5,11 @@ import { db } from "./db";
 import { recordEvent } from "./activity";
 import { enqueue } from "./jobs/queue";
 import { telegramConfigured } from "./telegram";
-import { queueMetaStageEvent } from "./meta";
+import { metaEventsConfigured, queueMetaStageEvent } from "./meta";
+import { sendLeadEvent } from "../adapters/live/meta";
+import { getAdapters } from "../adapters/registry";
+import { normalizePhone } from "./phone";
+import { config } from "./config";
 
 export const HIRE_STAGES: HireStage[] = ["NONE", "APPLICATION", "ORIENTATION", "HIRED", "NOT_HIRED"];
 export const HIRE_LABEL: Record<HireStage, string> = {
@@ -16,7 +20,8 @@ export const HIRE_LABEL: Record<HireStage, string> = {
   NOT_HIRED: "Not hired",
 };
 
-export async function setHireStage(leadId: string, stage: HireStage, note: string | null, actor: { id: string; name: string }, now = new Date()) {
+/** actor.id null = the lead sheet (a recruiter changed the Status column there). */
+export async function setHireStage(leadId: string, stage: HireStage, note: string | null, actor: { id: string | null; name: string }, now = new Date()) {
   if (!HIRE_STAGES.includes(stage)) throw new Error("Unknown hiring stage");
   const lead = await db.lead.findUniqueOrThrow({ where: { id: leadId } });
   const cleanNote = note?.trim().slice(0, 500) || null;
@@ -31,11 +36,67 @@ export async function setHireStage(leadId: string, stage: HireStage, note: strin
         hireNote: cleanNote,
       },
     });
-    await recordEvent({ leadId, actorType: "USER", actorId: actor.id, type: "HIRE_STAGE", message: `Hiring: ${HIRE_LABEL[lead.hireStage]} → ${HIRE_LABEL[stage]} (by ${actor.name})${cleanNote ? `: ${cleanNote}` : ""}` }, tx);
+    await recordEvent({ leadId, actorType: actor.id ? "USER" : "SYSTEM", actorId: actor.id, type: "HIRE_STAGE", message: `Hiring: ${HIRE_LABEL[lead.hireStage]} → ${HIRE_LABEL[stage]} (by ${actor.name})${cleanNote ? `: ${cleanNote}` : ""}` }, tx);
     if (stage === "HIRED" && lead.hireStage !== "HIRED") {
       await queueMetaStageEvent(leadId, "HIRED", tx);
       if (telegramConfigured() && !lead.isDemo) await enqueue("notify.telegram-hired", { leadId, by: actor.name }, { idempotencyKey: `telegram-hired:${leadId}`, maxAttempts: 3 }, tx);
     }
   });
   return { changed: true };
+}
+
+// Recruiters work in the lead sheet, not on this site. Every 15 minutes the recruiter tabs
+// are read: Status "Application" / "Hired" is copied onto the matching lead (by phone), and
+// good outcomes are reported to Facebook so it finds more drivers like them.
+const SHEET_STATUS: { re: RegExp; stage?: HireStage; event: string }[] = [
+  { re: /^(interested|need to talk|call ?back|need (a )?teammate|changed his mind)$/i, event: "Interested" },
+  { re: /^(need to bring|need approval|paired)$/i, event: "Qualified" },
+  { re: /^application$/i, stage: "APPLICATION", event: "Application" },
+  { re: /^hired$/i, stage: "HIRED", event: "Hired" },
+];
+const RANK: Record<HireStage, number> = { NONE: 0, NOT_HIRED: 0, APPLICATION: 1, ORIENTATION: 2, HIRED: 3 };
+
+export async function syncHiringFromSheet(now = new Date()) {
+  const src = getAdapters().sheets;
+  if (!src.listTabs || !config.googleSheets.spreadsheetId) return { tabs: 0, updated: 0, sent: 0 };
+  const meta = metaEventsConfigured() && config.mode === "live";
+  let tabs = 0, updated = 0, sent = 0;
+  for (const title of await src.listTabs()) {
+    const snap = await src.readSheet(title).catch(() => null);
+    if (!snap) continue;
+    const phoneI = snap.headers.findIndex((h) => /^phone$/i.test(h));
+    const statusI = snap.headers.findIndex((h) => /^status$/i.test(h));
+    if (phoneI < 0 || statusI < 0) continue;
+    tabs++;
+    for (const row of snap.rows) {
+      const status = (row[statusI] ?? "").trim();
+      const hit = SHEET_STATUS.find((s) => s.re.test(status));
+      const phone = hit && normalizePhone(row[phoneI] ?? "");
+      if (!hit || !phone) continue;
+      const lead = await db.lead.findFirst({ where: { phoneE164: phone, isDemo: false }, orderBy: { createdAt: "desc" } });
+      // Only moves forward: a recruiter's choice on the site, or a later stage, is never undone.
+      // "Hired" on a lead of ours goes to Facebook from setHireStage (with the lead's FB id).
+      if (lead && hit.stage && RANK[lead.hireStage] < RANK[hit.stage]) {
+        await setHireStage(lead.id, hit.stage, lead.hireNote, { id: null, name: `lead sheet (${title} tab)` });
+        updated++;
+      }
+      if (!meta || (lead && hit.event === "Hired")) continue;
+      const key = { phoneE164: phone, eventName: hit.event };
+      if (await db.metaSheetEvent.findUnique({ where: { phoneE164_eventName: key } })) continue;
+      // Crystal's own "Interested" (or a stage set on the site) already went to Facebook.
+      const already = lead && (await db.activityEvent.count({ where: { leadId: lead.id, type: "META_EVENT", message: { startsWith: `Sent "${hit.event}"` } } }));
+      if (already) { await db.metaSheetEvent.create({ data: { ...key, tab: title.slice(0, 100), status: status.slice(0, 100) } }); continue; }
+      const r = await sendLeadEvent({ eventName: hit.event, time: now, fbLeadId: lead?.fbLeadId, phoneE164: phone, eventId: `sheet:${phone}:${hit.event}` });
+      await db.metaSheetEvent.create({ data: { ...key, tab: title.slice(0, 100), status: status.slice(0, 100) } });
+      if (lead) await recordEvent({ leadId: lead.id, actorType: "SYSTEM", type: "META_EVENT", message: `Sent "${hit.event}" to Facebook (sheet ${title} tab: ${status})${r.events_received ? "" : ": not confirmed"}` });
+      sent++;
+    }
+  }
+  return { tabs, updated, sent };
+}
+
+/** Called by the worker every minute; reads the sheet's recruiter tabs every 15 minutes. */
+export async function scheduleHiringSync(now = Date.now()) {
+  if (config.mode !== "live" || !config.googleSheets.spreadsheetId) return;
+  await enqueue("source.google-sheets.hiring", {}, { idempotencyKey: `gsheets-hiring:${Math.floor(now / 900_000)}`, maxAttempts: 1 });
 }

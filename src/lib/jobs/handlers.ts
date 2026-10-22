@@ -11,6 +11,7 @@ import { log } from "../redact";
 import { fetchRecording } from "../recordings";
 import { reengageScan } from "../reengage";
 import { readDocument } from "../document-read";
+import { syncHiringFromSheet } from "../hiring";
 import { sendMetaStageEvent, syncMetaLeads, type MetaStage } from "../meta";
 
 export const handlers: Record<string, JobHandler> = {
@@ -46,6 +47,10 @@ export const handlers: Record<string, JobHandler> = {
   "notify.telegram-sms-reply": async (job) => {
     const { leadId, text } = job.payload as { leadId: string; text: string };
     await sendSmsReplyToTelegram(leadId, text);
+  },
+  "source.google-sheets.hiring": async () => {
+    await syncHiringFromSheet();
+    await db.job.deleteMany({ where: { type: "source.google-sheets.hiring", status: { in: ["DONE", "DEAD"] }, updatedAt: { lt: new Date(Date.now() - 2 * 86400_000) } } });
   },
   "notify.telegram-hired": async (job) => {
     const { leadId, by } = job.payload as { leadId: string; by: string };

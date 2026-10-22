@@ -25,6 +25,7 @@ export type JobType =
   | "sms.missed-call"
   | "notify.telegram-sms-reply"
   | "notify.telegram-hired"
+  | "source.google-sheets.hiring"
   | "lead.reengage-scan"
   | "document.read"
   | "meta.sync-leads"
