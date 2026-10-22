@@ -210,3 +210,12 @@ describe("Telnyx callbacks", () => {
     expect(mapTelnyxCallback({ CallSid: "x", CallStatus: "weird" }, undefined)).toBeNull();
   });
 });
+
+describe("Facebook lead count", () => {
+  it("uses Ads Manager's Leads (Form) count, else plain lead", async () => {
+    const { formLeads } = await import("@/adapters/live/meta");
+    expect(formLeads([{ action_type: "lead", value: "40" }, { action_type: "onsite_conversion.lead_grouped", value: "37" }])).toBe(37);
+    expect(formLeads([{ action_type: "lead", value: "12" }])).toBe(12);
+    expect(formLeads(undefined)).toBe(0);
+  });
+});

@@ -46,14 +46,21 @@ export async function listMetaLeads(since: Date): Promise<MetaLead[]> {
   return out;
 }
 
-export interface CampaignSpend { campaign_id: string; campaign_name: string; spend: number }
+/** `leads` is Facebook's own count for the whole campaign (every team's leads), as Ads Manager shows it. */
+export interface CampaignSpend { campaign_id: string; campaign_name: string; spend: number; leads: number }
 
-/** Ad spend per campaign for a date range (YYYY-MM-DD, ad account's timezone). */
+/** Instant-form leads as Ads Manager counts "Leads (Form)"; plain "lead" when the grouped one is missing. */
+export function formLeads(actions?: { action_type: string; value: string }[]): number {
+  const pick = (t: string) => actions?.find((a) => a.action_type === t);
+  return Number((pick("onsite_conversion.lead_grouped") ?? pick("lead"))?.value ?? 0);
+}
+
+/** Ad spend and Facebook lead count per campaign for a date range (YYYY-MM-DD, ad account's timezone). */
 export async function campaignSpend(since: string, until: string): Promise<CampaignSpend[]> {
-  const rows = await all<{ campaign_id: string; campaign_name: string; spend?: string }>(`/${config.meta.adAccountId}/insights`, {
-    level: "campaign", fields: "campaign_id,campaign_name,spend", time_range: JSON.stringify({ since, until }), limit: "500",
+  const rows = await all<{ campaign_id: string; campaign_name: string; spend?: string; actions?: { action_type: string; value: string }[] }>(`/${config.meta.adAccountId}/insights`, {
+    level: "campaign", fields: "campaign_id,campaign_name,spend,actions", time_range: JSON.stringify({ since, until }), limit: "500",
   });
-  return rows.map((r) => ({ campaign_id: r.campaign_id, campaign_name: r.campaign_name, spend: Number(r.spend ?? 0) }));
+  return rows.map((r) => ({ campaign_id: r.campaign_id, campaign_name: r.campaign_name, spend: Number(r.spend ?? 0), leads: formLeads(r.actions) }));
 }
 
 const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex");

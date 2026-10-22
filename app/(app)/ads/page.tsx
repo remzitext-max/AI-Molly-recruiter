@@ -26,36 +26,41 @@ export default async function Ads({ searchParams }: { searchParams: Promise<Reco
     range === "month" ? [now.startOf("month"), now] :
     [now.minus({ months: 1 }).startOf("month"), now.startOf("month").minus({ milliseconds: 1 })];
 
-  // Spend before Crystal received her first sheet lead would inflate cost per lead, so it starts there.
-  const first = await db.leadSourceRecord.findFirst({ where: { sourceSystem: { startsWith: "GOOGLE_SHEETS" }, lead: { isDemo: false } }, orderBy: { createdAt: "asc" }, select: { createdAt: true } });
-  const firstDay = first ? DateTime.fromJSDate(first.createdAt).setZone(ZONE).startOf("day") : null;
-  const from = firstDay && firstDay > start ? firstDay : start;
   const leads = await db.lead.findMany({
-    where: { isDemo: false, createdAt: { gte: from.toJSDate(), lte: end.toJSDate() } },
+    where: { isDemo: false, createdAt: { gte: start.toJSDate(), lte: end.toJSDate() } },
     select: { fbCampaign: true, fbLeadId: true, pipelineStatus: true, documentStatus: true, _count: { select: { calls: { where: { status: "COMPLETED" } } } } },
   });
   let spend: CampaignSpend[] = [];
   let spendError: string | null = null;
   if (metaSpendConfigured()) {
-    try { spend = await campaignSpend(from.toISODate()!, end.toISODate()!); } catch (e) { spendError = (e as Error).message.slice(0, 300); }
+    try { spend = await campaignSpend(start.toISODate()!, end.toISODate()!); } catch (e) { spendError = (e as Error).message.slice(0, 300); }
   }
   const sync = await db.sourceConnection.findUnique({ where: { id: "meta-leads" } });
 
+  // Facebook's CPL divides spend by every team's leads (as Ads Manager does). This team's cost is
+  // its own leads at that CPL, so later stages (interested, CDL) are priced from the same base.
   const names = new Set<string>([...spend.map((s) => s.campaign_name), ...leads.map((l) => l.fbCampaign ?? "")]);
+  const fb = { spend: spend.reduce((n, s) => n + s.spend, 0), leads: spend.reduce((n, s) => n + s.leads, 0) };
+  const fbCpl = spend.length ? per(fb.spend, fb.leads) : null;
   const rows = [...names].map((name) => {
     const ls = leads.filter((l) => (l.fbCampaign ?? "") === name);
-    const sp$ = spend.filter((s) => s.campaign_name === name).reduce((n, s) => n + s.spend, 0);
-    const known = name !== "" && spend.length > 0;
+    const camp = spend.filter((s) => s.campaign_name === name);
+    const known = name !== "" && camp.length > 0;
+    const cSpend = camp.reduce((n, s) => n + s.spend, 0);
+    const cLeads = camp.reduce((n, s) => n + s.leads, 0);
+    const cpl = known ? per(cSpend, cLeads) : name === "" ? fbCpl : null;
     return {
-      name: name || "Not matched to a campaign yet", spend: known ? sp$ : name === "" ? null : spend.length ? 0 : null,
+      name: name || "Not matched to a campaign yet", spend: known ? cSpend : null, fbLeads: known ? cLeads : null, cpl,
       leads: ls.length, answered: ls.filter((l) => l._count.calls > 0).length,
       interested: ls.filter((l) => INTERESTED_UP.includes(l.pipelineStatus)).length,
       docs: ls.filter((l) => l.documentStatus === "RECEIVED").length,
       qualified: ls.filter((l) => ["HANDOFF_READY", "HANDED_OFF"].includes(l.pipelineStatus)).length,
+      ours: cpl !== null ? cpl * ls.length : null,
     };
   }).sort((a, b) => (b.spend ?? -1) - (a.spend ?? -1) || b.leads - a.leads);
   const total = {
-    spend: spend.length ? spend.reduce((n, s) => n + s.spend, 0) : null,
+    spend: spend.length ? fb.spend : null,
+    ours: spend.length ? rows.reduce((n, r) => n + (r.ours ?? 0), 0) : null,
     leads: leads.length, interested: leads.filter((l) => INTERESTED_UP.includes(l.pipelineStatus)).length,
     docs: leads.filter((l) => l.documentStatus === "RECEIVED").length, qualified: leads.filter((l) => ["HANDOFF_READY", "HANDED_OFF"].includes(l.pipelineStatus)).length,
   };
@@ -64,28 +69,30 @@ export default async function Ads({ searchParams }: { searchParams: Promise<Reco
     <>
       <PageHead
         title="Facebook ads"
-        sub={`Spend and cost per lead and driver by campaign · ${from.toFormat("MMM d")} – ${end.toFormat("MMM d")}${from > start ? " (from Crystal\u2019s first lead)" : ""} · admins only, never sent to Telegram`}
+        sub={`Spend and cost per lead and driver by campaign · ${start.toFormat("MMM d")} – ${end.toFormat("MMM d")} · admins only, never sent to Telegram`}
         right={<div className="tabs" style={{ margin: 0 }}>{(Object.keys(RANGES) as Range[]).map((r) => <Link key={r} href={`/ads?range=${r}`} className={`tab ${r === range ? "on" : ""}`}>{RANGES[r]}</Link>)}</div>}
       />
       <div className="stats">
-        <div className="stat"><div className="l">Ad spend</div><div className="n">{money(total.spend)}</div><div className="d">{metaSpendConfigured() ? "from Meta" : "connect Meta to see spend"}</div></div>
-        <div className="stat"><div className="l">Cost per lead</div><div className="n">{money(per(total.spend, total.leads))}</div><div className="d">{total.leads} leads</div></div>
-        <div className="stat"><div className="l">Cost per interested driver</div><div className="n">{money(per(total.spend, total.interested))}</div><div className="d">{total.interested} interested</div></div>
-        <div className="stat"><div className="l">Cost per CDL received</div><div className="n">{money(per(total.spend, total.docs))}</div><div className="d">{total.docs} sent CDL</div></div>
-        <div className="stat"><div className="l">Cost per qualified driver</div><div className="n">{money(per(total.spend, total.qualified))}</div><div className="d">{total.qualified} handed to recruiter</div></div>
+        <div className="stat"><div className="l">Ad spend (all teams)</div><div className="n">{money(total.spend)}</div><div className="d">{metaSpendConfigured() ? `${fb.leads} Facebook leads` : "connect Meta to see spend"}</div></div>
+        <div className="stat"><div className="l">Cost per lead</div><div className="n">{money(fbCpl)}</div><div className="d">as in Ads Manager</div></div>
+        <div className="stat"><div className="l">This team&apos;s leads</div><div className="n">{total.leads}</div><div className="d">{total.ours !== null ? `${money(total.ours)} of the spend` : "leads Crystal received"}</div></div>
+        <div className="stat"><div className="l">Cost per interested driver</div><div className="n">{money(per(total.ours, total.interested))}</div><div className="d">{total.interested} interested</div></div>
+        <div className="stat"><div className="l">Cost per CDL received</div><div className="n">{money(per(total.ours, total.docs))}</div><div className="d">{total.docs} sent CDL</div></div>
+        <div className="stat"><div className="l">Cost per qualified driver</div><div className="n">{money(per(total.ours, total.qualified))}</div><div className="d">{total.qualified} handed to recruiter</div></div>
       </div>
       {spendError && <div className="alert error">Could not read spend from Meta: {spendError}</div>}
       <Card title="By campaign" flush>
         <table>
-          <thead><tr><th>Campaign</th><th className="num">Spend</th><th className="num">Leads</th><th className="num">Answered</th><th className="num">Interested</th><th className="num">CDL in</th><th className="num">Qualified</th><th className="num">Per lead</th><th className="num">Per interested</th><th className="num">Per CDL</th></tr></thead>
+          <thead><tr><th>Campaign</th><th className="num">Spend</th><th className="num">FB leads</th><th className="num">CPL</th><th className="num">Our leads</th><th className="num">Answered</th><th className="num">Interested</th><th className="num">CDL in</th><th className="num">Qualified</th><th className="num">Per interested</th><th className="num">Per CDL</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.name}>
-                <td>{r.name}</td><td className="num">{money(r.spend)}</td><td className="num">{r.leads}</td><td className="num">{r.answered}</td><td className="num">{r.interested}</td><td className="num">{r.docs}</td><td className="num">{r.qualified}</td>
-                <td className="num">{money(per(r.spend, r.leads))}</td><td className="num">{money(per(r.spend, r.interested))}</td><td className="num">{money(per(r.spend, r.docs))}</td>
+                <td>{r.name}</td><td className="num">{money(r.spend)}</td><td className="num">{r.fbLeads ?? "—"}</td><td className="num">{money(r.cpl)}</td>
+                <td className="num">{r.leads}</td><td className="num">{r.answered}</td><td className="num">{r.interested}</td><td className="num">{r.docs}</td><td className="num">{r.qualified}</td>
+                <td className="num">{money(per(r.ours, r.interested))}</td><td className="num">{money(per(r.ours, r.docs))}</td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan={10} className="muted">No leads or spend in this period.</td></tr>}
+            {!rows.length && <tr><td colSpan={11} className="muted">No leads or spend in this period.</td></tr>}
           </tbody>
         </table>
       </Card>
