@@ -87,8 +87,9 @@ async function main() {
       // Telnyx records every answered call; the app copies it to the lead page and the Telegram card.
       recording_settings: { enabled: true, channels: "single", format: "mp3" },
       voicemail_detection: {
-        // Owner's choice (2026-10-21): never leave a voicemail, hang up as soon as one is detected.
-        on_voicemail_detected: { action: "stop_assistant" },
+        // stop_assistant hung up on real drivers ("Hello. Good morning. Who's this?" -> ended at 7 sec, 2026-10-22).
+        // Crystal decides instead: the prompt tells her to hang up silently on a voicemail greeting.
+        on_voicemail_detected: { action: "continue_assistant" },
       },
     },
     ...(voice ? { voice_settings: { voice } } : {}),
