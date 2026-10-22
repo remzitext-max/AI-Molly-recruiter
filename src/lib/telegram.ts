@@ -60,12 +60,13 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
   }
   const secs = a.startedAt && a.endedAt ? Math.round((a.endedAt.getTime() - a.startedAt.getTime()) / 1000) : null;
   const ended = endedByText(whoEnded(a), config.agentPersona.name);
-  const endLine = ended ? `📴 ${v(ended)}${secs !== null ? ` (${secs} sec call)` : ""}` : null;
+  const transferred = Array.isArray(a.transcript) && (a.transcript as { text?: string }[]).some((t) => /^\[transfer/.test(String(t.text ?? "")));
+  const endLine = transferred ? `🔀 ${v(config.agentPersona.name)} transferred the driver to the manager${secs !== null ? ` (${secs} sec call)` : ""}` : ended ? `📴 ${v(ended)}${secs !== null ? ` (${secs} sec call)` : ""}` : null;
   if (!l.screening.some((f) => f.reportedValue && f.key !== "english_level")) {
     // Nothing was collected (driver hung up, short call; an English rating alone does not count): a one-line note instead of an empty card.
     return [
       ...tags,
-      `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}${secs !== null ? ` (${secs} sec)` : ""}: no answers collected`,
+      `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}${secs !== null ? ` (${secs} sec)` : ""}: ${transferred ? "driver asked for a person" : "no answers collected"}`,
       `☎️ ${v(l.phoneE164)}`,
       ...(endLine ? [endLine] : []),
       ...lastDriverLines(a.transcript),
