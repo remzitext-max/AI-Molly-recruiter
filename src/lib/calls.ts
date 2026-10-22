@@ -279,8 +279,8 @@ async function postCallWorkflow(attemptId: string) {
     // The Telnyx assistant records every answered call itself; keep our own copy.
     await enqueue("call.fetch-recording", { attemptId }, { runAt: new Date(Date.now() + 60_000), idempotencyKey: `recording:${attemptId}`, maxAttempts: 5 });
   }
-  // Driver card (or a "no answer" note) to the owner's Telegram; a short delay lets the late summary arrive first.
-  if (telegramConfigured() && !lead.isDemo) {
+  // Driver card to the owner's Telegram; a short delay lets the late summary arrive first.
+  if (telegramConfigured() && a.startedAt && !lead.isDemo) {
     await enqueue("notify.telegram-call-report", { attemptId }, { runAt: new Date(Date.now() + (fetchTranscript ? 6 * 60_000 : 45_000)), idempotencyKey: `telegram:${attemptId}`, maxAttempts: 3 });
   }
 }
