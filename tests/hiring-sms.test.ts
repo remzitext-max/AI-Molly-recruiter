@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { addLead, drain, resetDb, seedBase, setPersona } from "./helpers";
 import { setHireStage, syncHiringFromSheet } from "@/lib/hiring";
 import { smsSenderFor } from "@/lib/messaging";
+import { attemptCallJob } from "@/lib/calls";
 import { mockSmsOutbox } from "@/adapters/mock";
 import { setAdapterOverride } from "@/adapters/registry";
 import type { SmsProvider, SmsSender } from "@/adapters/types";
@@ -139,10 +140,31 @@ describe("hiring and good outcomes from the recruiters' lead sheet", () => {
       expect(sent.map((e) => e.event_name).sort()).toEqual(["Application", "Interested", "Qualified"]);
       expect(await db.job.count({ where: { type: "meta.send-event" } })).toBe(1);
       expect(await syncHiringFromSheet()).toEqual({ tabs: 3, updated: 0, sent: 0 });
+      // The sheet changes later: a "No answer" driver was reached by a recruiter.
+      tabs.Molly[2][1] = "Call back";
+      expect(await syncHiringFromSheet()).toMatchObject({ sent: 1 });
+      expect(sent.at(-1)!.event_name).toBe("Interested");
+      expect(await db.sheetLeadStatus.findUniqueOrThrow({ where: { phoneE164: "+13125550101" } })).toMatchObject({ tab: "Molly", status: "Call back" });
+      expect(await db.sheetLeadStatus.findUniqueOrThrow({ where: { phoneE164: "+13125550100" } })).toMatchObject({ status: "Need to bring" });
     } finally {
       spy.mockRestore();
       for (const k of Object.keys(env)) delete process.env[k];
       process.env.APP_MODE = "demo";
     }
+  });
+});
+
+describe("follow-up call a month later", () => {
+  it("is not placed when a recruiter has talked to the driver since", async () => {
+    const base = await seedBase();
+    const r = await addLead(base, { phone: "(214) 555-0188" });
+    if (r.result !== "created") throw new Error("no lead");
+    await db.job.deleteMany({});
+    await db.lead.update({ where: { id: r.leadId }, data: { isDemo: false, reengagedAt: new Date(), pipelineStatus: "QUEUED" } });
+    await db.sheetLeadStatus.create({ data: { phoneE164: "+12145550188", tab: "Molly", status: "Not qualified" } });
+    await attemptCallJob({ payload: { leadId: r.leadId } } as never);
+    expect(await db.callAttempt.count({ where: { leadId: r.leadId } })).toBe(0);
+    const l = await db.lead.findUniqueOrThrow({ where: { id: r.leadId } });
+    expect(l.queueReason).toBe("Recruiter already talked to the driver (sheet Molly tab: Not qualified)");
   });
 });

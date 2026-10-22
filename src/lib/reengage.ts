@@ -1,12 +1,14 @@
 // Follow-up round for leads Crystal could not reach, or who said no, once a
 // campaign's reengageAfterDays have passed since their last call. Each lead gets
 // this once; opted-out, stopped (CLOSED) and progressing leads are never touched, nor
-// leads a recruiter is working (hiring result set, or a good status in the lead sheet).
+// leads a recruiter has worked (hiring result set, or a status other than "No answer"
+// in the lead sheet).
 import type { PipelineStatus } from "@prisma/client";
 import { db } from "./db";
 import { recordEvent } from "./activity";
 import { scheduleLeadCall } from "./leads";
 import { enqueue } from "./jobs/queue";
+import { recruiterWorkedStatus } from "./hiring";
 
 const FOLLOW_UP_CALLS = 2;
 // Leads still waiting on Crystal (all attempts used) or who said no.
@@ -27,8 +29,8 @@ export async function reengageScan(now = new Date()) {
     });
     for (const l of leads) {
       if (await db.suppression.findUnique({ where: { phoneE164: l.phoneE164 } })) continue;
-      // A recruiter is already talking to this driver (good status in the lead sheet).
-      if (await db.metaSheetEvent.findFirst({ where: { phoneE164: l.phoneE164 } })) continue;
+      // A recruiter has talked to this driver since (any status but "No answer" in the lead sheet).
+      if (await recruiterWorkedStatus(l.phoneE164)) continue;
       await db.lead.update({
         where: { id: l.id },
         data: { reengagedAt: now, attemptCount: Math.max(0, c.maxAttempts - FOLLOW_UP_CALLS), pipelineStatus: "QUEUED", queueReason: `Follow-up after ${c.reengageAfterDays} days` },

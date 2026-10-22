@@ -22,6 +22,7 @@ import { personaByKey } from "./conversation/personas";
 import { mockCalls } from "../adapters/mock";
 import { SHEETS_SOURCE } from "./import";
 import { writeBackLeadStatus } from "./sheets-sync";
+import { recruiterWorkedStatus } from "./hiring";
 
 export const STATUS_RANK: Record<CallStatus, number> = {
   SCHEDULED: 0, UNKNOWN: 0, DIALING: 1, RINGING: 2, IN_PROGRESS: 3,
@@ -43,6 +44,15 @@ export async function attemptCallJob(job: Job) {
   const settings = await getSettings();
   const lead = await db.lead.findUnique({ where: { id: leadId }, include: { permissions: true, campaign: true } });
   if (!lead) return;
+
+  // Follow-up calls a month later: a recruiter may have reached the driver in the meantime.
+  const worked = lead.reengagedAt && !lead.isDemo ? await recruiterWorkedStatus(lead.phoneE164) : null;
+  if (worked) {
+    const msg = `Recruiter already talked to the driver (sheet ${worked.tab} tab: ${worked.status})`;
+    await db.lead.update({ where: { id: leadId }, data: { queueReason: msg, nextContactAt: null } });
+    await recordEvent({ leadId, actorType: "SYSTEM", type: "CALL_BLOCKED", message: `Call not placed: ${msg}` });
+    return;
+  }
 
   const gate = await evaluateContactGate({ lead, settings, channel: "CALL", now });
   if (!gate.ok) {

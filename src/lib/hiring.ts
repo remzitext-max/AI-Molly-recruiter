@@ -61,6 +61,7 @@ export async function syncHiringFromSheet(now = new Date()) {
   if (!src.listTabs || !config.googleSheets.spreadsheetId) return { tabs: 0, updated: 0, sent: 0 };
   const meta = metaEventsConfigured() && config.mode === "live";
   let tabs = 0, updated = 0, sent = 0;
+  const latest = new Map<string, { tab: string; status: string }>();
   for (const title of await src.listTabs()) {
     const snap = await src.readSheet(title).catch(() => null);
     if (!snap) continue;
@@ -70,8 +71,11 @@ export async function syncHiringFromSheet(now = new Date()) {
     tabs++;
     for (const row of snap.rows) {
       const status = (row[statusI] ?? "").trim();
+      const rowPhone = normalizePhone(row[phoneI] ?? "");
+      // A phone in two tabs: the one a recruiter has worked wins over "No answer".
+      if (rowPhone && (!latest.has(rowPhone) || !OPEN_STATUS.test(status))) latest.set(rowPhone, { tab: title.slice(0, 100), status: status.slice(0, 100) });
       const hit = SHEET_STATUS.find((s) => s.re.test(status));
-      const phone = hit && normalizePhone(row[phoneI] ?? "");
+      const phone = hit && rowPhone;
       if (!hit || !phone) continue;
       const lead = await db.lead.findFirst({ where: { phoneE164: phone, isDemo: false }, orderBy: { createdAt: "desc" } });
       // Only moves forward: a recruiter's choice on the site, or a later stage, is never undone.
@@ -92,7 +96,22 @@ export async function syncHiringFromSheet(now = new Date()) {
       sent++;
     }
   }
+  const known = new Map((await db.sheetLeadStatus.findMany()).map((r) => [r.phoneE164, r]));
+  for (const [phoneE164, v] of latest) {
+    const k = known.get(phoneE164);
+    if (k && k.tab === v.tab && k.status === v.status) continue;
+    await db.sheetLeadStatus.upsert({ where: { phoneE164 }, create: { phoneE164, ...v }, update: { ...v, seenAt: new Date() } });
+  }
   return { tabs, updated, sent };
+}
+
+// Statuses that still mean "nobody has talked to this driver".
+const OPEN_STATUS = /^(|no answer|no response|new)$/i;
+
+/** The sheet row that says a recruiter has already talked to this driver, if any. */
+export async function recruiterWorkedStatus(phoneE164: string) {
+  const r = await db.sheetLeadStatus.findUnique({ where: { phoneE164 } });
+  return r && !OPEN_STATUS.test(r.status) ? r : null;
 }
 
 /** Called by the worker every minute; reads the sheet's recruiter tabs every 15 minutes. */

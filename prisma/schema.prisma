@@ -622,3 +622,11 @@ model MetaSheetEvent {
 
   @@id([phoneE164, eventName])
 }
+
+/// Latest Status of each phone in the recruiters' lead sheet (read every 15 minutes).
+model SheetLeadStatus {
+  phoneE164 String   @id
+  tab       String
+  status    String
+  seenAt    DateTime @default(now())
+}

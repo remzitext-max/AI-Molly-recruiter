@@ -92,10 +92,13 @@ describe("follow-up round for old leads", () => {
     const hired = await mk({ attemptCount: 3, pipelineStatus: "QUEUED", hireStage: "HIRED" });
     const working = await mk({ attemptCount: 3, pipelineStatus: "QUEUED" });
     const w = await db.lead.findUniqueOrThrow({ where: { id: working } });
-    await db.metaSheetEvent.create({ data: { phoneE164: w.phoneE164, eventName: "Interested", tab: "Molly", status: "Call back" } });
+    await db.sheetLeadStatus.create({ data: { phoneE164: w.phoneE164, tab: "Molly", status: "Not interested" } });
+    const stillNoAnswer = await mk({ attemptCount: 3, pipelineStatus: "QUEUED" });
+    const n = await db.lead.findUniqueOrThrow({ where: { id: stillNoAnswer } });
+    await db.sheetLeadStatus.create({ data: { phoneE164: n.phoneE164, tab: "Ben", status: "No answer" } });
 
-    expect(await reengageScan()).toEqual({ queued: 2 });
-    for (const id of [unreached, saidNo]) {
+    expect(await reengageScan()).toEqual({ queued: 3 });
+    for (const id of [unreached, saidNo, stillNoAnswer]) {
       const l = await db.lead.findUniqueOrThrow({ where: { id } });
       expect(l.reengagedAt).not.toBeNull();
       expect(l.attemptCount).toBe(1);
