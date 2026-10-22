@@ -34,6 +34,9 @@ async function saveCampaign(fd: FormData) {
       paused: fd.get("paused") === "on", contactWindowStart: time(fd.get("start")), contactWindowEnd: time(fd.get("end")), contactDays: days,
       hotCallMinutes: Math.min(120, Math.max(0, Math.round(Number(fd.get("hotCallMinutes")) || 0))),
       reengageAfterDays: Math.min(365, Math.max(0, Math.round(Number(fd.get("reengageAfterDays")) || 0))),
+      recallMinDays: Math.min(365, Math.max(0, Math.round(Number(fd.get("recallMinDays")) || 0))),
+      recallMaxDays: Math.min(365, Math.max(1, Math.round(Number(fd.get("recallMaxDays")) || 60))),
+      recallPerDay: Math.min(200, Math.max(1, Math.round(Number(fd.get("recallPerDay")) || 25))),
       maxAttempts: Math.min(10, Math.max(1, Number(fd.get("maxAttempts")) || 3)), retryDelayMinutes: Math.min(10080, Math.max(1, Number(fd.get("retryDelay")) || 240)),
       assignmentMode: fd.get("assignmentMode") === "MANUAL" ? "MANUAL" : "ROUND_ROBIN", offerId: String(fd.get("offerId") || "") || null,
     },
@@ -158,6 +161,12 @@ export default async function Settings({ searchParams }: { searchParams: Promise
             </div>
             <div className="row">
               <span className="small">Call unreached and not-interested leads one more time</span><input type="number" name="reengageAfterDays" defaultValue={c.reengageAfterDays} min={0} max={365} style={{ width: 60 }} /><span className="small">days after their last call (0 = off; once per lead, up to 2 calls; never for opted-out or stopped leads)</span>
+            </div>
+            <div className="row">
+              <span className="small">Call drivers marked &quot;No answer&quot; in the recruiters&apos; sheet tabs who applied</span><input type="number" name="recallMinDays" defaultValue={c.recallMinDays} min={0} max={365} style={{ width: 60 }} />
+              <span className="small">to</span><input type="number" name="recallMaxDays" defaultValue={c.recallMaxDays} min={1} max={365} style={{ width: 60 }} />
+              <span className="small">days ago, at most</span><input type="number" name="recallPerDay" defaultValue={c.recallPerDay} min={1} max={200} style={{ width: 60 }} />
+              <span className="small">new per day (0 = off; up to 2 calls each; skipped if a recruiter has changed the status)</span>
             </div>
             <div className="row">
               <span className="small">Max AI attempts</span><input type="number" name="maxAttempts" defaultValue={c.maxAttempts} min={1} max={10} style={{ width: 60 }} />

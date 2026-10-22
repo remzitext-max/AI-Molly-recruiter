@@ -108,11 +108,11 @@ export class GoogleSheetsSource implements SheetLeadSource {
     return quote(title);
   }
 
-  async listTabs(): Promise<string[]> {
-    const url = `${API}/${encodeURIComponent(config.googleSheets.spreadsheetId!)}?fields=sheets.properties(title)`;
+  async listTabs(): Promise<{ title: string; gid: string }[]> {
+    const url = `${API}/${encodeURIComponent(config.googleSheets.spreadsheetId!)}?fields=sheets.properties(sheetId,title)`;
     const res = await providerFetch(url, { headers: { authorization: `Bearer ${await this.token()}` } });
-    const j = (await res.json()) as { sheets?: { properties: { title: string } }[] };
-    return (j.sheets ?? []).map((s) => s.properties.title);
+    const j = (await res.json()) as { sheets?: { properties: { title: string; sheetId: number } }[] };
+    return (j.sheets ?? []).map((s) => ({ title: s.properties.title, gid: String(s.properties.sheetId) }));
   }
 
   private async getValues(r?: string) {

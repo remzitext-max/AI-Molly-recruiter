@@ -121,7 +121,7 @@ describe("hiring and good outcomes from the recruiters' lead sheet", () => {
     };
     setAdapterOverride({ sheets: {
       status: () => ({ kind: "lead_source", provider: "test", state: "configured", isMock: true, detail: "" }),
-      listTabs: async () => Object.keys(tabs),
+      listTabs: async () => Object.keys(tabs).map((title, i) => ({ title, gid: String(i) })),
       readSheet: async (t?: string) => ({ title: t!, headers: t === "Notes" ? ["Note"] : ["Phone", "Status"], rows: tabs[t!] ?? [], warnings: [] }),
     } as never });
     const sent: { event_name: string }[] = [];
@@ -131,7 +131,7 @@ describe("hiring and good outcomes from the recruiters' lead sheet", () => {
     });
     Object.assign(process.env, env);
     try {
-      expect(await syncHiringFromSheet()).toEqual({ tabs: 3, updated: 1, sent: 3 });
+      expect(await syncHiringFromSheet()).toEqual({ tabs: 3, updated: 1, sent: 3, recalled: 0 });
       const l = await db.lead.findUniqueOrThrow({ where: { id: r.leadId } });
       expect(l.hireStage).toBe("HIRED");
       const ev = await db.activityEvent.findFirstOrThrow({ where: { leadId: r.leadId, type: "HIRE_STAGE" } });
@@ -139,7 +139,7 @@ describe("hiring and good outcomes from the recruiters' lead sheet", () => {
       // Our lead's "Hired" goes through the lead's own Meta job; sheet-only drivers go directly.
       expect(sent.map((e) => e.event_name).sort()).toEqual(["Application", "Interested", "Qualified"]);
       expect(await db.job.count({ where: { type: "meta.send-event" } })).toBe(1);
-      expect(await syncHiringFromSheet()).toEqual({ tabs: 3, updated: 0, sent: 0 });
+      expect(await syncHiringFromSheet()).toEqual({ tabs: 3, updated: 0, sent: 0, recalled: 0 });
       // The sheet changes later: a "No answer" driver was reached by a recruiter.
       tabs.Molly[2][1] = "Call back";
       expect(await syncHiringFromSheet()).toMatchObject({ sent: 1 });
@@ -166,5 +166,50 @@ describe("follow-up call a month later", () => {
     expect(await db.callAttempt.count({ where: { leadId: r.leadId } })).toBe(0);
     const l = await db.lead.findUniqueOrThrow({ where: { id: r.leadId } });
     expect(l.queueReason).toBe("Recruiter already talked to the driver (sheet Molly tab: Not qualified)");
+  });
+});
+
+describe("re-calling sheet leads the recruiters could not reach", () => {
+  it("calls 'No answer' drivers who applied 7-60 days ago, newest first, a few per day", async () => {
+    const base = await seedBase();
+    await db.campaign.update({ where: { id: base.campaign.id }, data: { recallMinDays: 7, recallMaxDays: 60, recallPerDay: 2, maxAttempts: 5, isDemo: false } });
+    await db.sourceConnection.create({ data: { id: "google-sheets", orgId: base.campaign.orgId, campaignId: base.campaign.id, mapping: { phone: "Phone", fullName: "Name" } } });
+    const day = (n: number) => new Date(Date.now() - n * 86400_000).toISOString();
+    const known = await addLead(base, { phone: "(312) 555-0109" });
+    if (known.result !== "created") throw new Error("no lead");
+    const rows = [
+      [day(3), "Too New", "(312) 555-0101", "No answer"],
+      [day(10), "Ten Days", "(312) 555-0102", "No answer"],
+      [day(20), "Twenty Days", "(312) 555-0103", "No Answer"],
+      [day(30), "Thirty Days", "(312) 555-0104", "No answer"],
+      [day(90), "Too Old", "(312) 555-0105", "No answer"],
+      [day(15), "Talked", "(312) 555-0106", "Not interested"],
+      [day(12), "Already Ours", "(312) 555-0109", "No answer"],
+    ];
+    setAdapterOverride({ sheets: {
+      idColumn: "Phone",
+      status: () => ({ kind: "lead_source", provider: "test", state: "configured", isMock: true, detail: "" }),
+      listTabs: async () => [{ title: "Ben", gid: "77" }],
+      readSheet: async () => ({ title: "Ben", headers: ["Applied", "Name", "Phone", "Status"], rows, warnings: [] }),
+    } as never });
+    Object.assign(process.env, { APP_MODE: "live", GOOGLE_SHEETS_SPREADSHEET_ID: "SHEET" });
+    try {
+      expect(await syncHiringFromSheet()).toMatchObject({ recalled: 2 });
+      expect(await syncHiringFromSheet()).toMatchObject({ recalled: 0 }); // 2 per day
+      const leads = await db.lead.findMany({ where: { sourceRecords: { some: { sourceRecordId: { startsWith: "recall:" } } } }, include: { permissions: true } });
+      expect(leads.map((l) => l.firstName).sort()).toEqual(["Ten", "Twenty"]);
+      for (const l of leads) {
+        expect(l).toMatchObject({ attemptCount: 3, isDemo: false });
+        expect(l.reengagedAt).toBeInstanceOf(Date);
+        expect(l.permissions[0].scope).toBe("AI_CALL");
+        expect(await db.job.count({ where: { type: "lead.attempt-call", payload: { path: ["leadId"], equals: l.id } } })).toBe(1);
+      }
+      // Next day the next newest; the recruiter changing the status first stops the call.
+      rows[3][3] = "Call back";
+      expect(await syncHiringFromSheet(new Date(Date.now() + 86400_000))).toMatchObject({ recalled: 0 });
+    } finally {
+      delete process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+      process.env.APP_MODE = "demo";
+    }
   });
 });

@@ -25,7 +25,7 @@ export async function isSuppressed(phoneE164: string) {
 /** A driver who just applied is awake right now: the first call, its double dial, and the CDL text they agree to on it may skip the hours. Later retries keep to the hours. */
 function isHotApplicant({ lead, channel, now, verbalSmsConsent }: GateInput) {
   const mins = lead.campaign.hotCallMinutes;
-  if (!mins) return false;
+  if (!mins || lead.reengagedAt) return false;
   const age = now.getTime() - lead.createdAt.getTime();
   if (channel === "CALL") return lead.attemptCount === 0 ? age <= mins * 60_000 : lead.attemptCount === 1 && age <= (mins + 10) * 60_000;
   return !!verbalSmsConsent && age <= (mins + 60) * 60_000;

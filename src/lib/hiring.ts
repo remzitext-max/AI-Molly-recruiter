@@ -10,6 +10,7 @@ import { sendLeadEvent } from "../adapters/live/meta";
 import { getAdapters } from "../adapters/registry";
 import { normalizePhone } from "./phone";
 import { config } from "./config";
+import { recallNoAnswerLeads, type SheetTab } from "./sheet-recall";
 
 export const HIRE_STAGES: HireStage[] = ["NONE", "APPLICATION", "ORIENTATION", "HIRED", "NOT_HIRED"];
 export const HIRE_LABEL: Record<HireStage, string> = {
@@ -58,17 +59,19 @@ const RANK: Record<HireStage, number> = { NONE: 0, NOT_HIRED: 0, APPLICATION: 1,
 
 export async function syncHiringFromSheet(now = new Date()) {
   const src = getAdapters().sheets;
-  if (!src.listTabs || !config.googleSheets.spreadsheetId) return { tabs: 0, updated: 0, sent: 0 };
+  if (!src.listTabs || !config.googleSheets.spreadsheetId) return { tabs: 0, updated: 0, sent: 0, recalled: 0 };
   const meta = metaEventsConfigured() && config.mode === "live";
   let tabs = 0, updated = 0, sent = 0;
   const latest = new Map<string, { tab: string; status: string }>();
-  for (const title of await src.listTabs()) {
+  const read: SheetTab[] = [];
+  for (const { title, gid } of await src.listTabs()) {
     const snap = await src.readSheet(title).catch(() => null);
     if (!snap) continue;
     const phoneI = snap.headers.findIndex((h) => /^phone$/i.test(h));
     const statusI = snap.headers.findIndex((h) => /^status$/i.test(h));
     if (phoneI < 0 || statusI < 0) continue;
     tabs++;
+    read.push({ title, gid, snap });
     for (const row of snap.rows) {
       const status = (row[statusI] ?? "").trim();
       const rowPhone = normalizePhone(row[phoneI] ?? "");
@@ -102,7 +105,8 @@ export async function syncHiringFromSheet(now = new Date()) {
     if (k && k.tab === v.tab && k.status === v.status) continue;
     await db.sheetLeadStatus.upsert({ where: { phoneE164 }, create: { phoneE164, ...v }, update: { ...v, seenAt: new Date() } });
   }
-  return { tabs, updated, sent };
+  const recalled = await recallNoAnswerLeads(read, now);
+  return { tabs, updated, sent, recalled };
 }
 
 // Statuses that still mean "nobody has talked to this driver".

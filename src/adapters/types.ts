@@ -53,8 +53,8 @@ export interface SheetLeadSource {
   status(): IntegrationStatus;
   /** range: another tab ("gid:<id>" or A1); defaults to the configured one. */
   readSheet(range?: string): Promise<SheetSnapshot>;
-  /** Titles of every tab in the spreadsheet (live sheets only). */
-  listTabs?(): Promise<string[]>;
+  /** Every tab in the spreadsheet (live sheets only). */
+  listTabs?(): Promise<{ title: string; gid: string }[]>;
   /** sourceRecordId "phone:+1..." matches the row by phone number in `phoneColumn`. */
   writeStatus(sourceRecordId: string, text: string, phoneColumn?: string): Promise<"written" | "row_not_found" | "ambiguous_id" | "not_enabled">;
 }
