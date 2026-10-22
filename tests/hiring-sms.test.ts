@@ -167,6 +167,18 @@ describe("follow-up call a month later", () => {
     const l = await db.lead.findUniqueOrThrow({ where: { id: r.leadId } });
     expect(l.queueReason).toBe("Recruiter already talked to the driver (sheet Molly tab: Not qualified)");
   });
+
+  it("retries stop too once the recruiter's status changes; the first call does not wait for it", async () => {
+    const base = await seedBase();
+    const r = await addLead(base, { phone: "(214) 555-0189" });
+    if (r.result !== "created") throw new Error("no lead");
+    await db.job.deleteMany({});
+    await db.lead.update({ where: { id: r.leadId }, data: { isDemo: false, attemptCount: 2, pipelineStatus: "QUEUED" } });
+    await db.sheetLeadStatus.create({ data: { phoneE164: "+12145550189", tab: "Dennis", status: "Need to talk" } });
+    await attemptCallJob({ payload: { leadId: r.leadId } } as never);
+    expect(await db.callAttempt.count({ where: { leadId: r.leadId } })).toBe(0);
+    expect((await db.lead.findUniqueOrThrow({ where: { id: r.leadId } })).queueReason).toMatch(/Dennis tab: Need to talk/);
+  });
 });
 
 describe("re-calling sheet leads the recruiters could not reach", () => {

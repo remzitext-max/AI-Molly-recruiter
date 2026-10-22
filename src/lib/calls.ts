@@ -45,8 +45,9 @@ export async function attemptCallJob(job: Job) {
   const lead = await db.lead.findUnique({ where: { id: leadId }, include: { permissions: true, campaign: true } });
   if (!lead) return;
 
-  // Follow-up calls a month later: a recruiter may have reached the driver in the meantime.
-  const worked = lead.reengagedAt && !lead.isDemo ? await recruiterWorkedStatus(lead.phoneE164) : null;
+  // Retries and follow-ups: a recruiter may have reached the driver in the meantime
+  // (status other than "No answer" in the lead sheet). The first call never waits for this.
+  const worked = (lead.reengagedAt || lead.attemptCount > 0) && !lead.isDemo ? await recruiterWorkedStatus(lead.phoneE164) : null;
   if (worked) {
     const msg = `Recruiter already talked to the driver (sheet ${worked.tab} tab: ${worked.status})`;
     await db.lead.update({ where: { id: leadId }, data: { queueReason: msg, nextContactAt: null } });
