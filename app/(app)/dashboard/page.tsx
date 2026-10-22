@@ -131,7 +131,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
   const [
     newLeads, prevLeads, placed, prevPlaced, answeredCalls, prevAnswered, interestedLeads, prevInterested,
-    docsLeads, prevDocs, chartCalls, outcomes, rangeLeads, bySource, attention, openTasks, recent, pendingJobs,
+    docsLeads, prevDocs, chartCalls, outcomes, rangeLeads, bySource, attention, openTasks, recent, pendingJobs, hiredNow, hiredPrev,
   ] = await Promise.all([
     db.lead.count({ where: { ...scope, createdAt: inRange } }),
     db.lead.count({ where: { ...scope, createdAt: inPrev } }),
@@ -147,7 +147,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     db.callAttempt.groupBy({ by: ["outcome"], where: { lead: scope, status: PLACED, createdAt: inRange }, _count: true }),
     db.lead.findMany({
       where: { ...scope, createdAt: inRange },
-      select: { createdAt: true, pipelineStatus: true, documentStatus: true, assignedTo: { select: { id: true, name: true } }, calls: { where: { status: PLACED }, orderBy: { createdAt: "asc" }, select: { createdAt: true, status: true, outcome: true, startedAt: true, endedAt: true } } },
+      select: { createdAt: true, pipelineStatus: true, documentStatus: true, hireStage: true, assignedTo: { select: { id: true, name: true } }, calls: { where: { status: PLACED }, orderBy: { createdAt: "asc" }, select: { createdAt: true, status: true, outcome: true, startedAt: true, endedAt: true } } },
     }),
     db.leadSourceRecord.groupBy({ by: ["sourceSystem"], where: { lead: { ...scope, createdAt: inRange } }, _count: true }),
     db.lead.findMany({
@@ -157,6 +157,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     db.task.count({ where: { status: "OPEN", lead: scope, ...(user.role === "ADMIN" ? {} : { assignedToId: user.id }) } }),
     db.activityEvent.findMany({ where: { lead: scope }, orderBy: { createdAt: "desc" }, take: 12, include: { lead: true } }),
     db.job.count({ where: { status: "PENDING", runAt: { lte: new Date() } } }),
+    db.lead.count({ where: { ...scope, hireStage: "HIRED", hiredAt: inRange } }),
+    db.lead.count({ where: { ...scope, hireStage: "HIRED", hiredAt: inPrev } }),
   ]);
 
   const pickedUp = answeredCalls.length;
@@ -187,7 +189,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     { label: "Interested", n: rangeLeads.filter((l) => INTERESTED_UP.includes(l.pipelineStatus)).length },
     { label: "CDL received", n: rangeLeads.filter((l) => l.documentStatus === "RECEIVED").length },
     { label: "Handed off", n: rangeLeads.filter((l) => ["HANDOFF_READY", "HANDED_OFF"].includes(l.pipelineStatus)).length },
+    { label: "Orientation", n: rangeLeads.filter((l) => ["ORIENTATION", "HIRED"].includes(l.hireStage)).length },
+    { label: "Hired", n: rangeLeads.filter((l) => l.hireStage === "HIRED").length },
   ];
+  const cohortHired = rangeLeads.filter((l) => l.hireStage === "HIRED").length;
   const fMax = Math.max(1, ...funnel.map((f) => f.n));
 
   const outcomeRows = outcomes
@@ -195,17 +200,18 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     .sort((a, b) => b.n - a.n);
   const oMax = Math.max(1, ...outcomeRows.map((o) => o.n));
 
-  const team = new Map<string, { name: string; leads: number; interested: number; docs: number; handed: number }>();
+  const team = new Map<string, { name: string; leads: number; interested: number; docs: number; handed: number; hired: number }>();
   for (const l of rangeLeads) {
     const k = l.assignedTo?.id ?? "none";
-    const r = team.get(k) ?? { name: l.assignedTo?.name ?? "Unassigned", leads: 0, interested: 0, docs: 0, handed: 0 };
+    const r = team.get(k) ?? { name: l.assignedTo?.name ?? "Unassigned", leads: 0, interested: 0, docs: 0, handed: 0, hired: 0 };
     r.leads++;
     if (INTERESTED_UP.includes(l.pipelineStatus)) r.interested++;
     if (l.documentStatus === "RECEIVED") r.docs++;
     if (["HANDOFF_READY", "HANDED_OFF"].includes(l.pipelineStatus)) r.handed++;
+    if (l.hireStage === "HIRED") r.hired++;
     team.set(k, r);
   }
-  const teamRows = [...team.values()].sort((a, b) => b.interested - a.interested || b.leads - a.leads);
+  const teamRows = [...team.values()].sort((a, b) => b.hired - a.hired || b.interested - a.interested || b.leads - a.leads);
   const sourceRows = bySource.map((s) => ({ label: sourceLabel(s.sourceSystem), n: s._count })).sort((a, b) => b.n - a.n);
   const sMax = Math.max(1, ...sourceRows.map((s) => s.n));
   const hello = now.hour < 12 ? "Good morning" : now.hour < 18 ? "Good afternoon" : "Good evening";
@@ -222,13 +228,15 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     <>
       <PageHead title={`${hello}, ${user.name.split(" ")[0]}`} sub={`Recruiting overview · ${RANGES[range].toLowerCase()} · ${now.toFormat("ccc, MMM d")} (Central time)`} right={rangeTabs} />
 
-      <div className="stats">
+      <div className="stats four">
         <Stat label="New leads" icon="leads" tone="blue" n={newLeads} sub={<Delta now={newLeads} prev={prevLeads} />} />
         <Stat label="AI calls placed" icon="phone" tone="violet" n={placed} sub={<Delta now={placed} prev={prevPlaced} />} />
         <Stat label="Talked to driver" icon="voice" tone="teal" n={`${pct(answered, placed)}%`} sub={<>{answered} of {placed} calls · {pickedUp - answered} voicemail or under {TALK_SECONDS}s · <Delta now={answered} prev={prevAnswered} /></>} />
         <Stat label="Interested drivers" icon="star" tone="green" n={interestedLeads} sub={<Delta now={interestedLeads} prev={prevInterested} />} />
         <Stat label="CDL / med card received" icon="doc" tone="amber" n={docsLeads} sub={<Delta now={docsLeads} prev={prevDocs} />} />
         <Stat label="Speed to first call" icon="clock" tone="rose" n={mins(speed)} sub="median, lead in → first AI call" />
+        <Stat label="Hired" icon="check" tone="green" n={hiredNow} sub={<>marked hired in this period · <Delta now={hiredNow} prev={hiredPrev} /></>} />
+        <Stat label="Lead → hire" icon="jobs" tone="violet" n={`${pct(cohortHired, newLeads)}%`} sub={<>{cohortHired} of {newLeads} leads from this period hired so far · goal 6-10%</>} />
       </div>
 
       <div className="grid wide-left section">
@@ -276,6 +284,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <tr><td className="muted">Per conversation ({TALK_SECONDS}s+)</td><td className="num">{answered ? `$${(cost / answered).toFixed(2)}` : "—"}</td></tr>
             <tr><td className="muted">Per interested driver</td><td className="num">{interestedLeads ? `$${(cost / interestedLeads).toFixed(2)}` : "—"}</td></tr>
             <tr><td className="muted">Per CDL received</td><td className="num">{docsLeads ? `$${(cost / docsLeads).toFixed(2)}` : "—"}</td></tr>
+            <tr><td className="muted">Per hire</td><td className="num">{hiredNow ? `$${(cost / hiredNow).toFixed(2)}` : "—"}</td></tr>
           </tbody></table>
           <p className="small muted" style={{ margin: "8px 0 0" }}>At ~${COST_PER_MIN.toFixed(2)}/min, every picked-up call (voicemail too). Check Telnyx billing for exact spend.</p>
         </Card>
@@ -284,15 +293,15 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <div className="grid two section">
         <Card title="Recruiter leaderboard" flush>
           <table>
-            <thead><tr><th>Recruiter</th><th className="num">Leads</th><th className="num">Interested</th><th className="num">CDL in</th><th className="num">Handed off</th></tr></thead>
+            <thead><tr><th>Recruiter</th><th className="num">Leads</th><th className="num">Interested</th><th className="num">CDL in</th><th className="num">Handed off</th><th className="num">Hired</th></tr></thead>
             <tbody>
               {teamRows.map((r) => (
                 <tr key={r.name}>
                   <td><div className="person"><div className="avatar">{initialsOf(r.name)}</div>{r.name}</div></td>
-                  <td className="num">{r.leads}</td><td className="num">{r.interested}</td><td className="num">{r.docs}</td><td className="num">{r.handed}</td>
+                  <td className="num">{r.leads}</td><td className="num">{r.interested}</td><td className="num">{r.docs}</td><td className="num">{r.handed}</td><td className="num">{r.hired}</td>
                 </tr>
               ))}
-              {!teamRows.length && <tr><td colSpan={5} className="muted">No new leads in this period.</td></tr>}
+              {!teamRows.length && <tr><td colSpan={6} className="muted">No new leads in this period.</td></tr>}
             </tbody>
           </table>
         </Card>

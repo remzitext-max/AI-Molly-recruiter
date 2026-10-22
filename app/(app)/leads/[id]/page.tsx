@@ -22,6 +22,8 @@ import { answersOf, fitRulesFrom, fitScore, fitTone } from "@/lib/fit-score";
 import { endedByText, whoEnded } from "@/lib/call-end";
 import { ConfirmButton } from "@/components/confirm-button";
 import { flash } from "@/lib/flash";
+import { HIRE_LABEL, HIRE_STAGES, setHireStage } from "@/lib/hiring";
+import type { HireStage } from "@prisma/client";
 
 type Turn = { speaker: string; text: string; latencyMs?: number };
 
@@ -61,6 +63,16 @@ async function stopCalls(fd: FormData) {
   const u = await guard(id);
   await stopAiCalls(id, { id: u.id, name: u.name });
   await flash("AI calls stopped for this lead");
+  revalidatePath(`/leads/${id}`);
+}
+
+async function setHire(fd: FormData) {
+  "use server";
+  const id = String(fd.get("leadId"));
+  const u = await guard(id);
+  const stage = String(fd.get("hireStage")) as HireStage;
+  const r = await setHireStage(id, stage, String(fd.get("hireNote") || ""), { id: u.id, name: u.name });
+  await flash(r.changed ? `Hiring result saved: ${HIRE_LABEL[stage]}` : "Nothing changed");
   revalidatePath(`/leads/${id}`);
 }
 
@@ -206,6 +218,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         <div className="row">
           <Badge v={lead.pipelineStatus} /> <span className="small muted">pipeline</span>
           <Badge v={lead.documentStatus} /> <span className="small muted">CDL</span>
+          {lead.hireStage !== "NONE" && <><Badge v={HIRE_LABEL[lead.hireStage]} tone={lead.hireStage === "HIRED" ? "ok" : lead.hireStage === "NOT_HIRED" ? "bad" : "info"} /> <span className="small muted">hiring</span></>}
         </div>
       </div>
       {lead.optedOutAt && <div className="alert error">Opted out on {fmt(lead.optedOutAt)}. No automated calls or texts will be sent; the number is suppressed for future imports.</div>}
@@ -261,6 +274,15 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
           </form>
         </Card>
       </div>
+
+      <Card title="Hiring result" right={lead.hireStageAt ? <span className="small muted">updated {fmt(lead.hireStageAt)}{lead.hiredAt ? ` · hired ${fmt(lead.hiredAt)}` : ""}</span> : undefined}>
+        <form action={setHire} className="inline">{hidden}
+          <select name="hireStage" defaultValue={lead.hireStage}>{HIRE_STAGES.map((h) => <option key={h} value={h}>{HIRE_LABEL[h]}</option>)}</select>
+          <input name="hireNote" defaultValue={lead.hireNote ?? ""} placeholder="Note (optional), e.g. orientation date or why not" size={40} maxLength={500} />
+          <button>Save</button>
+        </form>
+        <p className="small muted" style={{ margin: "6px 0 0" }}>Set by the recruiter as the driver moves on. &ldquo;Hired&rdquo; counts on the dashboard (lead to hire, cost per hire) and posts to Telegram.</p>
+      </Card>
 
       <Card title="Fit score" right={<span className={`badge ${fitTone(fit)}`} style={{ fontSize: 13 }}>{fit.score === null ? fit.label : `${fit.score}/100 · ${fit.label}`}</span>}>
         {fit.reasons.length > 0 && <ul style={{ margin: "0 0 6px", paddingLeft: 18 }}>{fit.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}

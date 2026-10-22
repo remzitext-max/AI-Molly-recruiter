@@ -38,6 +38,7 @@ Legend: **Implemented** = code exists and is covered by tests against mocks. **U
 ### RingCentral setup (when ready)
 1. Developer Console app with **JWT** auth. Scopes: `SMS`, `RingOut`, `ReadAccounts`, `ReadCallLog`, `SubscriptionWebhook` (`CallControl` only if needed; it requires review).
 2. Env: `RINGCENTRAL_CLIENT_ID`, `RINGCENTRAL_CLIENT_SECRET`, `RINGCENTRAL_JWT`, `RINGCENTRAL_SMS_FROM`.
+3. Optional per-recruiter lines: `RINGCENTRAL_TAB_SENDERS=<sheet tab gid>=<their RC number>` plus `RINGCENTRAL_JWT_<gid>` (that recruiter creates a JWT credential in the RingCentral developer console for the same app). Texts to leads from that tab (CDL request, missed-call text) go from their number, and replies to it are read every minute.
 3. SMS number must be linked to a **Confirmed TCR brand and campaign**.
 4. Webhook subscription with event filter `/restapi/v1.0/account/~/extension/~/message-store/instant?type=SMS`, address `https://<your-domain>/api/webhooks/ringcentral`, and a `verificationToken` equal to `RINGCENTRAL_WEBHOOK_VERIFICATION_TOKEN`. The endpoint echoes `Validation-Token` on creation. Confirm during the account test that deliveries carry the `Verification-Token` header (the research marked the per-delivery header as unconfirmed).
 

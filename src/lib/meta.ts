@@ -16,11 +16,13 @@ export const metaSpendConfigured = () => !!(config.meta.accessToken && config.me
 export const metaEventsConfigured = () => !!(config.meta.accessToken && config.meta.datasetId);
 
 /** Stage names sent to Meta as CRM events. */
-export const META_STAGE_EVENTS: Partial<Record<PipelineStatus, string>> = {
+export type MetaStage = PipelineStatus | "HIRED";
+export const META_STAGE_EVENTS: Partial<Record<MetaStage, string>> = {
   INTERESTED: "Interested",
   DOCS_RECEIVED: "Documents received",
   HANDOFF_READY: "Qualified",
   HANDED_OFF: "Qualified",
+  HIRED: "Hired",
 };
 
 /** Pulls recent Facebook leads and stores campaign / ad / form on matching leads. */
@@ -61,12 +63,12 @@ export async function scheduleMetaSync(now = Date.now()) {
 }
 
 /** Queues the Meta event for a pipeline stage (from advancePipeline). */
-export async function queueMetaStageEvent(leadId: string, to: PipelineStatus, tx: Tx | typeof db) {
+export async function queueMetaStageEvent(leadId: string, to: MetaStage, tx: Tx | typeof db) {
   if (!META_STAGE_EVENTS[to] || !metaEventsConfigured() || config.mode !== "live") return;
   await enqueue("meta.send-event", { leadId, stage: to }, { idempotencyKey: `meta:${leadId}:${META_STAGE_EVENTS[to]}`, maxAttempts: 4 }, tx);
 }
 
-export async function sendMetaStageEvent(leadId: string, stage: PipelineStatus, now = new Date()): Promise<void | { rescheduleAt: Date; reason: string }> {
+export async function sendMetaStageEvent(leadId: string, stage: MetaStage, now = new Date()): Promise<void | { rescheduleAt: Date; reason: string }> {
   const lead = await db.lead.findUnique({ where: { id: leadId } });
   const eventName = META_STAGE_EVENTS[stage];
   if (!lead || lead.isDemo || !eventName) return;

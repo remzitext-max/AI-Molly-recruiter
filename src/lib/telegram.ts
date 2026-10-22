@@ -122,6 +122,15 @@ export async function sendSmsReplyToTelegram(leadId: string, text: string) {
   return { sent: true };
 }
 
+/** Celebrates a hire Crystal's lead turned into (set by a recruiter on the lead page). */
+export async function sendHiredToTelegram(leadId: string, by: string) {
+  const l = await db.lead.findUnique({ where: { id: leadId } });
+  if (!l || l.isDemo) return { sent: false };
+  const name = esc([l.firstName, l.lastName].filter(Boolean).join(" ") || "A driver");
+  await sendTelegram([...(await recruiterTags(l.id)), `🎉 ${name} was HIRED (marked by ${esc(by)})`, `Lead from ${config.agentPersona.name} AI, came in ${l.createdAt.toISOString().slice(0, 10)}`].join("\n"));
+  return { sent: true };
+}
+
 /** Tells the group a driver signed the record check authorization. */
 export async function sendConsentToTelegram(consentId: string) {
   if (!telegramConfigured()) return { sent: false, reason: "not configured" };

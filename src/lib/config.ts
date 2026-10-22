@@ -61,6 +61,18 @@ export const config = {
     get clientSecret() { return env("RINGCENTRAL_CLIENT_SECRET"); },
     get jwt() { return env("RINGCENTRAL_JWT"); },
     get smsFromNumber() { return env("RINGCENTRAL_SMS_FROM"); },
+    /**
+     * Recruiters' own numbers for the leads of their sheet tab: "1759604612=+18151234567" (tab gid=number).
+     * Each needs that recruiter's JWT in RINGCENTRAL_JWT_<gid>; tabs without one are skipped.
+     */
+    get tabSenders(): { gid: string; from: string; jwt: string; label: string }[] {
+      return (env("RINGCENTRAL_TAB_SENDERS") ?? "").split(",").map((p) => p.trim().match(/^(\d+)\s*=\s*(\+?\d{10,15})$/)).filter((m): m is RegExpMatchArray => !!m)
+        .map((m) => {
+          const tag = config.googleSheets.extraTabs.find((t) => t.gid === m[1])?.tag;
+          return { gid: m[1], from: m[2].startsWith("+") ? m[2] : `+${m[2]}`, jwt: env(`RINGCENTRAL_JWT_${m[1]}`) ?? "", label: tag ? `${tag}'s number` : `tab ${m[1]} number` };
+        })
+        .filter((s) => s.jwt);
+    },
   },
   /** Optional Telegram bot that posts a driver card after each answered AI call. */
   /** Facebook / Meta: lead ad details, ad spend per campaign (admin only) and Conversions API events. */

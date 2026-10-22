@@ -274,3 +274,6 @@ button.secondary.is-busy::after { border-color: #cbd5e1; border-top-color: var(-
   h1 { font-size: 24px; }
 }
 [hidden] { display: none !important; }
+
+/* Dashboard KPI row: two even rows of four on wide screens. */
+@media (min-width: 1100px) { .stats.four { grid-template-columns: repeat(4, 1fr); } }

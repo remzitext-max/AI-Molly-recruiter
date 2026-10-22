@@ -2,13 +2,15 @@
 // RingOut/Call Control do not provide AI audio; see docs/INTEGRATIONS.md.
 import { config } from "../../lib/config";
 import { providerFetch } from "./http";
-import { LiveContactBlockedError, type IntegrationStatus, type SmsProvider, type TelephonyProvider } from "../types";
+import { LiveContactBlockedError, type IntegrationStatus, type SmsProvider, type SmsSender, type TelephonyProvider } from "../types";
 
-let cached: { token: string; exp: number } | null = null;
+// One token per RingCentral user: the company default (RINGCENTRAL_JWT) and each recruiter's own JWT.
+const cache = new Map<string, { token: string; exp: number }>();
 
-async function accessToken(): Promise<string> {
+async function accessToken(jwt = config.ringcentral.jwt): Promise<string> {
   const c = config.ringcentral;
-  if (!c.clientId || !c.clientSecret || !c.jwt) throw new LiveContactBlockedError("RingCentral credentials not configured");
+  if (!c.clientId || !c.clientSecret || !jwt) throw new LiveContactBlockedError("RingCentral credentials not configured");
+  const cached = cache.get(jwt);
   if (cached && cached.exp > Date.now() + 60_000) return cached.token;
   const res = await providerFetch(`${c.serverUrl}/restapi/oauth/token`, {
     method: "POST",
@@ -16,19 +18,19 @@ async function accessToken(): Promise<string> {
       Authorization: `Basic ${Buffer.from(`${c.clientId}:${c.clientSecret}`).toString("base64")}`,
       "Content-Type": "application/x-www-form-urlencoded",
     },
-    body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: c.jwt }).toString(),
+    body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: jwt }).toString(),
   });
   const j = (await res.json()) as { access_token: string; expires_in: number };
-  cached = { token: j.access_token, exp: Date.now() + j.expires_in * 1000 };
-  return cached.token;
+  cache.set(jwt, { token: j.access_token, exp: Date.now() + j.expires_in * 1000 });
+  return j.access_token;
 }
 
 export type RcInbound = { id: string; from: string; to: string[]; text: string; attachments: { uri: string; contentType: string }[] };
 
 /** Inbound texts (SMS/MMS) to this extension since a time. Needs the app's "Read Messages" permission. */
-export async function listInboundRcMessages(since: Date): Promise<RcInbound[]> {
+export async function listInboundRcMessages(since: Date, jwt?: string): Promise<RcInbound[]> {
   const q = new URLSearchParams({ direction: "Inbound", messageType: "SMS", dateFrom: since.toISOString(), perPage: "100" });
-  const res = await providerFetch(`${config.ringcentral.serverUrl}/restapi/v1.0/account/~/extension/~/message-store?${q}`, { headers: { Authorization: `Bearer ${await accessToken()}` } });
+  const res = await providerFetch(`${config.ringcentral.serverUrl}/restapi/v1.0/account/~/extension/~/message-store?${q}`, { headers: { Authorization: `Bearer ${await accessToken(jwt)}` } });
   const j = (await res.json()) as { records?: { id: string | number; from?: { phoneNumber?: string }; to?: { phoneNumber?: string }[]; subject?: string; attachments?: { uri?: string; type?: string; contentType?: string }[] }[] };
   return (j.records ?? []).map((r) => ({
     id: String(r.id),
@@ -40,9 +42,9 @@ export async function listInboundRcMessages(since: Date): Promise<RcInbound[]> {
 }
 
 /** Downloads one MMS attachment. */
-export async function downloadRcAttachment(uri: string): Promise<Buffer> {
+export async function downloadRcAttachment(uri: string, jwt?: string): Promise<Buffer> {
   if (!uri.startsWith(config.ringcentral.serverUrl.replace("platform.", "media.")) && !uri.startsWith(config.ringcentral.serverUrl)) throw new Error("Unexpected attachment host");
-  const res = await providerFetch(uri, { headers: { Authorization: `Bearer ${await accessToken()}` }, timeoutMs: 60_000 });
+  const res = await providerFetch(uri, { headers: { Authorization: `Bearer ${await accessToken(jwt)}` }, timeoutMs: 60_000 });
   return Buffer.from(await res.arrayBuffer());
 }
 
@@ -64,10 +66,10 @@ export class RingCentralSms implements SmsProvider {
     s.capabilities = { send_sms: "unverified", inbound_sms_webhook: "implemented", tcr_10dlc_registration: "blocked" };
     return s;
   }
-  async send(to: string, body: string) {
-    const from = config.ringcentral.smsFromNumber;
+  async send(to: string, body: string, _idempotencyKey: string, sender?: SmsSender | null) {
+    const from = sender?.from ?? config.ringcentral.smsFromNumber;
     if (!from) throw new LiveContactBlockedError("RINGCENTRAL_SMS_FROM not configured");
-    const token = await accessToken();
+    const token = await accessToken(sender?.jwt);
     const res = await providerFetch(`${config.ringcentral.serverUrl}/restapi/v1.0/account/~/extension/~/sms`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },

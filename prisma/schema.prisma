@@ -33,6 +33,15 @@ enum PipelineStatus {
   CLOSED
 }
 
+/// Hiring result, set by recruiters after Crystal hands the driver over.
+enum HireStage {
+  NONE
+  APPLICATION
+  ORIENTATION
+  HIRED
+  NOT_HIRED
+}
+
 enum DocumentStatus {
   NONE
   REQUESTED
@@ -249,6 +258,11 @@ model Lead {
   fbCampaign         String?
   fbAd               String?
   fbForm             String?
+  /// Hiring result set by a recruiter (Crystal never sets it).
+  hireStage          HireStage       @default(NONE)
+  hireStageAt        DateTime?
+  hiredAt            DateTime?
+  hireNote           String?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
   sourceRecords      LeadSourceRecord[]
@@ -268,6 +282,7 @@ model Lead {
   @@unique([orgId, phoneE164])
   @@index([pipelineStatus])
   @@index([assignedToId])
+  @@index([hireStage])
 }
 
 model LeadSourceRecord {

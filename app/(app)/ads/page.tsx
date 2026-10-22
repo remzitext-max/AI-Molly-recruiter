@@ -28,7 +28,7 @@ export default async function Ads({ searchParams }: { searchParams: Promise<Reco
 
   const leads = await db.lead.findMany({
     where: { isDemo: false, createdAt: { gte: start.toJSDate(), lte: end.toJSDate() } },
-    select: { fbCampaign: true, fbLeadId: true, pipelineStatus: true, documentStatus: true, _count: { select: { calls: { where: { status: "COMPLETED" } } } } },
+    select: { fbCampaign: true, fbLeadId: true, pipelineStatus: true, documentStatus: true, hireStage: true, _count: { select: { calls: { where: { status: "COMPLETED" } } } } },
   });
   let spend: CampaignSpend[] = [];
   let spendError: string | null = null;
@@ -55,6 +55,7 @@ export default async function Ads({ searchParams }: { searchParams: Promise<Reco
       interested: ls.filter((l) => INTERESTED_UP.includes(l.pipelineStatus)).length,
       docs: ls.filter((l) => l.documentStatus === "RECEIVED").length,
       qualified: ls.filter((l) => ["HANDOFF_READY", "HANDED_OFF"].includes(l.pipelineStatus)).length,
+      hired: ls.filter((l) => l.hireStage === "HIRED").length,
       ours: cpl !== null ? cpl * ls.length : null,
     };
   }).sort((a, b) => (b.spend ?? -1) - (a.spend ?? -1) || b.leads - a.leads);
@@ -63,6 +64,7 @@ export default async function Ads({ searchParams }: { searchParams: Promise<Reco
     ours: spend.length ? rows.reduce((n, r) => n + (r.ours ?? 0), 0) : null,
     leads: leads.length, interested: leads.filter((l) => INTERESTED_UP.includes(l.pipelineStatus)).length,
     docs: leads.filter((l) => l.documentStatus === "RECEIVED").length, qualified: leads.filter((l) => ["HANDOFF_READY", "HANDED_OFF"].includes(l.pipelineStatus)).length,
+    hired: leads.filter((l) => l.hireStage === "HIRED").length,
   };
 
   return (
@@ -72,27 +74,28 @@ export default async function Ads({ searchParams }: { searchParams: Promise<Reco
         sub={`Spend and cost per lead and driver by campaign · ${start.toFormat("MMM d")} – ${end.toFormat("MMM d")} · admins only, never sent to Telegram`}
         right={<div className="tabs" style={{ margin: 0 }}>{(Object.keys(RANGES) as Range[]).map((r) => <Link key={r} href={`/ads?range=${r}`} className={`tab ${r === range ? "on" : ""}`}>{RANGES[r]}</Link>)}</div>}
       />
-      <div className="stats">
+      <div className="stats four">
         <div className="stat"><div className="l">Ad spend (all teams)</div><div className="n">{money(total.spend)}</div><div className="d">{metaSpendConfigured() ? `${fb.leads} Facebook leads` : "connect Meta to see spend"}</div></div>
         <div className="stat"><div className="l">Cost per lead</div><div className="n">{money(fbCpl)}</div><div className="d">as in Ads Manager</div></div>
         <div className="stat"><div className="l">This team&apos;s leads</div><div className="n">{total.leads}</div><div className="d">{total.ours !== null ? `${money(total.ours)} of the spend` : "leads Crystal received"}</div></div>
         <div className="stat"><div className="l">Cost per interested driver</div><div className="n">{money(per(total.ours, total.interested))}</div><div className="d">{total.interested} interested</div></div>
         <div className="stat"><div className="l">Cost per CDL received</div><div className="n">{money(per(total.ours, total.docs))}</div><div className="d">{total.docs} sent CDL</div></div>
         <div className="stat"><div className="l">Cost per qualified driver</div><div className="n">{money(per(total.ours, total.qualified))}</div><div className="d">{total.qualified} handed to recruiter</div></div>
+        <div className="stat"><div className="l">Cost per hire</div><div className="n">{money(per(total.ours, total.hired))}</div><div className="d">{total.hired} hired from leads in this period (marked on the lead page)</div></div>
       </div>
       {spendError && <div className="alert error">Could not read spend from Meta: {spendError}</div>}
       <Card title="By campaign" flush>
         <table>
-          <thead><tr><th>Campaign</th><th className="num">Spend</th><th className="num">FB leads</th><th className="num">CPL</th><th className="num">Our leads</th><th className="num">Answered</th><th className="num">Interested</th><th className="num">CDL in</th><th className="num">Qualified</th><th className="num">Per interested</th><th className="num">Per CDL</th></tr></thead>
+          <thead><tr><th>Campaign</th><th className="num">Spend</th><th className="num">FB leads</th><th className="num">CPL</th><th className="num">Our leads</th><th className="num">Answered</th><th className="num">Interested</th><th className="num">CDL in</th><th className="num">Qualified</th><th className="num">Hired</th><th className="num">Per interested</th><th className="num">Per CDL</th><th className="num">Per hire</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.name}>
                 <td>{r.name}</td><td className="num">{money(r.spend)}</td><td className="num">{r.fbLeads ?? "—"}</td><td className="num">{money(r.cpl)}</td>
-                <td className="num">{r.leads}</td><td className="num">{r.answered}</td><td className="num">{r.interested}</td><td className="num">{r.docs}</td><td className="num">{r.qualified}</td>
-                <td className="num">{money(per(r.ours, r.interested))}</td><td className="num">{money(per(r.ours, r.docs))}</td>
+                <td className="num">{r.leads}</td><td className="num">{r.answered}</td><td className="num">{r.interested}</td><td className="num">{r.docs}</td><td className="num">{r.qualified}</td><td className="num">{r.hired}</td>
+                <td className="num">{money(per(r.ours, r.interested))}</td><td className="num">{money(per(r.ours, r.docs))}</td><td className="num">{money(per(r.ours, r.hired))}</td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan={11} className="muted">No leads or spend in this period.</td></tr>}
+            {!rows.length && <tr><td colSpan={13} className="muted">No leads or spend in this period.</td></tr>}
           </tbody>
         </table>
       </Card>
@@ -100,7 +103,7 @@ export default async function Ads({ searchParams }: { searchParams: Promise<Reco
         <table className="kv"><tbody>
           <tr><th>Lead ad details</th><td>{metaLeadsConfigured() ? <Badge v="configured" /> : <Badge v="missing_credentials" />} <span className="small muted">META_ACCESS_TOKEN + META_PAGE_ID · matches each lead to its campaign by phone every 15 min{sync?.lastSyncAt ? ` · last sync ${fmt(sync.lastSyncAt)}` : ""}{sync?.lastError ? ` · error: ${sync.lastError}` : ""}</span></td></tr>
           <tr><th>Ad spend</th><td>{metaSpendConfigured() ? <Badge v="configured" /> : <Badge v="missing_credentials" />} <span className="small muted">META_AD_ACCOUNT_ID</span></td></tr>
-          <tr><th>Send results to Facebook</th><td>{metaEventsConfigured() ? <Badge v="configured" /> : <Badge v="missing_credentials" />} <span className="small muted">META_DATASET_ID · sends Interested, Documents received and Qualified for each lead so Facebook finds more drivers like them</span></td></tr>
+          <tr><th>Send results to Facebook</th><td>{metaEventsConfigured() ? <Badge v="configured" /> : <Badge v="missing_credentials" />} <span className="small muted">META_DATASET_ID · sends Interested, Documents received, Qualified and Hired for each lead so Facebook finds more drivers like them</span></td></tr>
         </tbody></table>
         <p className="small muted" style={{ marginBottom: 0 }}>Graph API {config.meta.graphVersion}. The token needs leads_retrieval, ads_read, pages_show_list, pages_read_engagement, pages_manage_ads and ads_management (for the dataset).</p>
       </Card>

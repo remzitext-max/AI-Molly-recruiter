@@ -24,6 +24,7 @@ export type JobType =
   | "call.fetch-recording"
   | "sms.missed-call"
   | "notify.telegram-sms-reply"
+  | "notify.telegram-hired"
   | "lead.reengage-scan"
   | "document.read"
   | "meta.sync-leads"

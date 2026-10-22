@@ -180,7 +180,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <label><input type="checkbox" name="recordingEnabled" defaultChecked={s.recordingEnabled} /> Calls are recorded (the notice below is spoken at the start)</label>
           <label>Recording notice</label><input name="recordingNotice" defaultValue={s.recordingNotice} style={{ width: "100%" }} />
           <label>Call opening (spoken first; must include {"{company}"}; may not claim to be a person. If a driver asks, the AI always says it is an AI.)</label><textarea name="aiDisclosure" rows={2} defaultValue={s.aiDisclosure} />
-          <label><input type="checkbox" name="missedCallSms" defaultChecked={s.missedCallSms} /> Text the driver once when the AI call is not answered (replies show up as a task and in Telegram)</label>
+          <label><input type="checkbox" name="missedCallSms" defaultChecked={s.missedCallSms} /> Text the driver once when the AI call is not answered, from the recruiter&apos;s own number (RINGCENTRAL_TAB_SENDERS); replies show up as a task and in Telegram</label>
           <label>Missed-call text ({"{company}"}, {"{first}"} = driver’s first name, {"{persona}"} = {config.agentPersona.name})</label><textarea name="missedCallSmsText" rows={2} defaultValue={s.missedCallSmsText} />
           <label>Voicemail message</label><textarea name="voicemailMessage" rows={2} defaultValue={s.voicemailMessage} />
           <div className="row">

@@ -9,8 +9,20 @@ import { recordEvent } from "./activity";
 import { enqueue } from "./jobs/queue";
 import { advancePipeline, optOutLead } from "./leads";
 import { getAdapters } from "../adapters/registry";
-import { LiveContactBlockedError } from "../adapters/types";
+import { LiveContactBlockedError, type SmsSender } from "../adapters/types";
 import { telegramConfigured } from "./telegram";
+
+/**
+ * The recruiter's own texting line for a lead from their sheet tab (RINGCENTRAL_TAB_SENDERS),
+ * so the driver's reply or call-back reaches that recruiter. Null = company default number.
+ */
+export async function smsSenderFor(leadId: string): Promise<SmsSender | null> {
+  const senders = config.ringcentral.tabSenders;
+  if (!senders.length) return null;
+  const recs = await db.leadSourceRecord.findMany({ where: { leadId, sourceSystem: { in: senders.map((s) => `GOOGLE_SHEETS:${s.gid}`) } }, select: { sourceSystem: true } });
+  const s = senders.find((x) => recs.some((r) => r.sourceSystem === `GOOGLE_SHEETS:${x.gid}`));
+  return s ? { from: s.from, jwt: s.jwt, label: s.label } : null;
+}
 
 const STOP_WORDS = /^\s*(stop|stopall|unsubscribe|cancel|end|quit|revoke|opt ?out)\s*$/i;
 
@@ -48,9 +60,10 @@ export async function sendCdlLink(leadId: string, attemptId: string | null, opts
     ? `${lead.org.name} recruiting team: can you send your CDL and medical card here please: ${link.url} . Link expires in ${ttl >= 60 ? `${Math.round(ttl / 60)} hr` : `${ttl} min`}. Reply STOP to opt out.`
     : `${lead.org.name} recruiting team: ${hi}Can you send a photo of your CDL and medical card here please? Just reply to this text. Reply STOP to opt out.`;
   const stored = link ? body.replace(link.token, "[link-token]") : body;
+  const sender = await smsSenderFor(leadId);
   const msg = await db.message.create({ data: { leadId, isDemo: lead.isDemo, direction: "OUTBOUND", purpose: "CDL_LINK", body: stored, provider: getAdapters().sms.key, idempotencyKey: idem, status: "SENDING" } });
   try {
-    const r = await getAdapters().sms.send(lead.phoneE164, body, idem);
+    const r = await getAdapters().sms.send(lead.phoneE164, body, idem, sender);
     await db.message.update({ where: { id: msg.id }, data: { status: "SENT", providerMessageId: r.providerMessageId } });
   } catch (e) {
     await db.message.update({ where: { id: msg.id }, data: { status: e instanceof LiveContactBlockedError ? "BLOCKED" : "FAILED" } });
@@ -59,13 +72,15 @@ export async function sendCdlLink(leadId: string, attemptId: string | null, opts
   }
   await db.lead.update({ where: { id: leadId }, data: { documentStatus: "REQUESTED" } });
   await advancePipeline(leadId, "DOCS_REQUESTED");
-  await recordEvent({ leadId, actorType: "AI", type: "SMS_SENT", message: `${link ? "Secure CDL upload link" : "CDL and medical card request"} sent by text${getAdapters().sms.isMock ? " (MOCK, not delivered to a phone)" : ""}` });
+  await recordEvent({ leadId, actorType: "AI", type: "SMS_SENT", message: `${link ? "Secure CDL upload link" : "CDL and medical card request"} sent by text${sender ? ` from ${sender.label}` : ""}${getAdapters().sms.isMock ? " (MOCK, not delivered to a phone)" : ""}` });
   return { sent: true, messageId: msg.id, uploadUrl: link?.url };
 }
 
 /**
  * One text after an unanswered AI call, asking when to call back. Sent at most
- * once per lead, only where an automated text is allowed right now.
+ * once per lead, only where an automated text is allowed right now. On a live
+ * line it goes only from a recruiter's own number (the driver may call it back);
+ * MISSED_CALL_SMS_MAIN_NUMBER=1 also allows the company default number.
  */
 export async function sendMissedCallText(leadId: string, attemptId: string, now = new Date()) {
   const settings = await getSettings();
@@ -74,6 +89,8 @@ export async function sendMissedCallText(leadId: string, attemptId: string, now 
   if (await db.message.findUnique({ where: { idempotencyKey: idem } })) return { sent: false, reason: "already sent" };
   const lead = await db.lead.findUniqueOrThrow({ where: { id: leadId }, include: { permissions: true, campaign: true, org: true } });
   if (lead.optedOutAt || ["OPTED_OUT", "CLOSED"].includes(lead.pipelineStatus)) return { sent: false, reason: "lead closed" };
+  const sender = await smsSenderFor(leadId);
+  if (!sender && !getAdapters().sms.isMock && process.env.MISSED_CALL_SMS_MAIN_NUMBER !== "1") return { sent: false, reason: "no recruiter number for this lead" };
   const gate = await evaluateContactGate({ lead, settings, channel: "SMS", now, verbalSmsConsent: false });
   if (!gate.ok) {
     await recordEvent({ leadId, actorType: "SYSTEM", type: "SMS_BLOCKED", message: `Missed-call text not sent: ${gate.message}` });
@@ -87,14 +104,14 @@ export async function sendMissedCallText(leadId: string, attemptId: string, now 
     .slice(0, 480);
   const msg = await db.message.create({ data: { leadId, isDemo: lead.isDemo, direction: "OUTBOUND", purpose: "MISSED_CALL", body, provider: getAdapters().sms.key, idempotencyKey: idem, status: "SENDING" } });
   try {
-    const r = await getAdapters().sms.send(lead.phoneE164, body, idem);
+    const r = await getAdapters().sms.send(lead.phoneE164, body, idem, sender);
     await db.message.update({ where: { id: msg.id }, data: { status: "SENT", providerMessageId: r.providerMessageId } });
   } catch (e) {
     await db.message.update({ where: { id: msg.id }, data: { status: e instanceof LiveContactBlockedError ? "BLOCKED" : "FAILED" } });
     await recordEvent({ leadId, actorType: "SYSTEM", type: "SMS_FAILED", message: `Missed-call text failed: ${(e as Error).message}` });
     return { sent: false, reason: (e as Error).message };
   }
-  await recordEvent({ leadId, actorType: "AI", type: "SMS_SENT", message: `Missed-call text sent${getAdapters().sms.isMock ? " (MOCK, not delivered to a phone)" : ""}`, data: { attemptId } });
+  await recordEvent({ leadId, actorType: "AI", type: "SMS_SENT", message: `Missed-call text sent${sender ? ` from ${sender.label}` : ""}${getAdapters().sms.isMock ? " (MOCK, not delivered to a phone)" : ""}`, data: { attemptId } });
   return { sent: true, messageId: msg.id };
 }
 
@@ -125,8 +142,19 @@ export async function handleInboundSms(fromE164: string, body: string, providerM
  * lead's phone are kept; photos and PDFs are saved as the lead's documents.
  */
 export async function pollRingCentralInbound(now = new Date()) {
-  const ours = normalizePhone(config.ringcentral.smsFromNumber);
-  const msgs = await listInboundRcMessages(new Date(now.getTime() - 24 * 3600_000));
+  // The company line plus each recruiter's own line (their drivers reply there).
+  const lines = [{ number: config.ringcentral.smsFromNumber, jwt: undefined as string | undefined }, ...config.ringcentral.tabSenders.map((s) => ({ number: s.from, jwt: s.jwt }))];
+  let checked = 0, docs = 0;
+  for (const line of lines) {
+    const r = await pollRcLine(line.number, line.jwt, now);
+    checked += r.checked; docs += r.docs;
+  }
+  return { checked, docs };
+}
+
+async function pollRcLine(number: string | undefined, jwt: string | undefined, now: Date) {
+  const ours = normalizePhone(number);
+  const msgs = await listInboundRcMessages(new Date(now.getTime() - 24 * 3600_000), jwt);
   let docs = 0;
   for (const m of msgs) {
     const from = normalizePhone(m.from);
@@ -136,7 +164,7 @@ export async function pollRingCentralInbound(now = new Date()) {
     if (await db.message.findUnique({ where: { providerMessageId: `rc_${m.id}` } })) continue;
     const files: { data: Buffer; mime: string }[] = [];
     for (const a of m.attachments) {
-      const data = await downloadRcAttachment(a.uri);
+      const data = await downloadRcAttachment(a.uri, jwt);
       const mime = detectMime(data);
       if (mime) files.push({ data, mime });
     }

@@ -4,15 +4,14 @@ import { pollRingCentralInbound, sendCdlLink, sendMissedCallText } from "../mess
 import { runRetentionSweep } from "../documents";
 import { pollGoogleSheet } from "../sheets-sync";
 import { db } from "../db";
-import { sendCallReport, sendConsentToTelegram, sendDocumentToTelegram, sendSmsReplyToTelegram } from "../telegram";
+import { sendCallReport, sendConsentToTelegram, sendDocumentToTelegram, sendHiredToTelegram, sendSmsReplyToTelegram } from "../telegram";
 import { fetchTelnyxTranscript } from "../telnyx-transcript";
 import { fillScreeningFromTranscript } from "../transcript-extract";
 import { log } from "../redact";
 import { fetchRecording } from "../recordings";
 import { reengageScan } from "../reengage";
 import { readDocument } from "../document-read";
-import { sendMetaStageEvent, syncMetaLeads } from "../meta";
-import type { PipelineStatus } from "@prisma/client";
+import { sendMetaStageEvent, syncMetaLeads, type MetaStage } from "../meta";
 
 export const handlers: Record<string, JobHandler> = {
   "lead.attempt-call": attemptCallJob,
@@ -48,6 +47,10 @@ export const handlers: Record<string, JobHandler> = {
     const { leadId, text } = job.payload as { leadId: string; text: string };
     await sendSmsReplyToTelegram(leadId, text);
   },
+  "notify.telegram-hired": async (job) => {
+    const { leadId, by } = job.payload as { leadId: string; by: string };
+    await sendHiredToTelegram(leadId, by);
+  },
   "lead.reengage-scan": async () => { await reengageScan(); },
   "document.read": async (job) => {
     const { documentId } = job.payload as { documentId: string };
@@ -55,7 +58,7 @@ export const handlers: Record<string, JobHandler> = {
   },
   "meta.sync-leads": async () => { await syncMetaLeads(); },
   "meta.send-event": async (job) => {
-    const { leadId, stage } = job.payload as { leadId: string; stage: PipelineStatus };
+    const { leadId, stage } = job.payload as { leadId: string; stage: MetaStage };
     return sendMetaStageEvent(leadId, stage);
   },
   "call.fetch-recording": async (job) => {

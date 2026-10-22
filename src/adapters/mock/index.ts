@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../../lib/config";
 import type {
-  DocumentExtractor, IntegrationStatus, ProviderCallStatus, SheetLeadSource, SheetSnapshot, SmsProvider, StartCallRequest,
+  DocumentExtractor, IntegrationStatus, ProviderCallStatus, SheetLeadSource, SheetSnapshot, SmsProvider, SmsSender, StartCallRequest,
   TelephonyProvider, VoiceAgentProvider, VoiceSynthesizer,
 } from "../types";
 import { enqueue } from "../../lib/jobs/queue";
@@ -36,18 +36,18 @@ export class MockVoiceAgent implements VoiceAgentProvider {
   supportsLiveTransfer() { return true; }
 }
 
-export const mockSmsOutbox: { to: string; body: string; id: string }[] = [];
+export const mockSmsOutbox: { to: string; body: string; id: string; from?: string }[] = [];
 export class MockSms implements SmsProvider {
   key = "mock-sms";
   isMock = true;
   private sent = new Map<string, string>();
   status() { return mockStatus("sms", "Mock SMS", "Messages are stored in the app only; nothing is sent to a phone."); }
-  async send(to: string, body: string, idempotencyKey: string) {
+  async send(to: string, body: string, idempotencyKey: string, sender?: SmsSender | null) {
     const prior = this.sent.get(idempotencyKey);
     if (prior) return { providerMessageId: prior };
     const id = `mock_sms_${crypto.randomUUID()}`;
     this.sent.set(idempotencyKey, id);
-    mockSmsOutbox.push({ to, body, id });
+    mockSmsOutbox.push({ to, body, id, from: sender?.from });
     // Demo-only "simulated phone" so testers can open the texted link.
     try {
       const dir = path.resolve(config.storageDir, "demo-outbox");

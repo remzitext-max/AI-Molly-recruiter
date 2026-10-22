@@ -91,11 +91,15 @@ export interface TelephonyProvider {
 }
 
 // ---------- SMS ----------
+/** A recruiter's own texting line (RingCentral number + that user's JWT), used for their leads. */
+export type SmsSender = { from: string; jwt: string; label: string };
+
 export interface SmsProvider {
   key: string;
   isMock: boolean;
   status(): IntegrationStatus;
-  send(toE164: string, body: string, idempotencyKey: string): Promise<{ providerMessageId: string }>;
+  /** `sender` = a recruiter's own number; without it the company default number is used. */
+  send(toE164: string, body: string, idempotencyKey: string, sender?: SmsSender | null): Promise<{ providerMessageId: string }>;
 }
 
 // ---------- Document storage ----------
