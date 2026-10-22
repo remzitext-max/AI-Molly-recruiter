@@ -18,12 +18,34 @@ function lastDriverLines(transcript: unknown): string[] {
   return (transcript as { speaker?: string; text?: string }[]).filter((t) => t.speaker === "driver" && t.text).slice(-2).map((t) => `🗣 Driver: "${esc(String(t.text).slice(0, 200))}"`);
 }
 
-/** "@user" lines for the recruiters whose sheet tab this lead came from (GOOGLE_SHEETS_EXTRA_TABS). */
+/** "Molly = @molly_tbt" lines from Settings, by tab name in lower case ("" = not in the group). */
+export function parseRecruiterTelegram(text: string): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const line of text.split("\n")) {
+    const [tab, user] = line.split("=").map((x) => x?.trim() ?? "");
+    if (tab) m.set(tab.toLowerCase(), /^@?[A-Za-z0-9_]{3,64}$/.test(user) ? (user.startsWith("@") ? user : `@${user}`) : "");
+  }
+  return m;
+}
+
+/**
+ * Who to tag on this lead's cards: the recruiter of the sheet tab the lead came from
+ * (GOOGLE_SHEETS_EXTRA_TABS, a re-called "No answer" row, or the tab a recruiter moved
+ * it to from the Pool). A recruiter no longer in the group is named instead.
+ */
 export async function recruiterTags(leadId: string): Promise<string[]> {
-  const tabs = config.googleSheets.extraTabs.filter((t) => t.tag);
-  if (!tabs.length) return [];
-  const recs = await db.leadSourceRecord.findMany({ where: { leadId, sourceSystem: { in: tabs.map((t) => `GOOGLE_SHEETS:${t.gid}`) } }, select: { sourceSystem: true } });
-  return [...new Set(tabs.filter((t) => recs.some((r) => r.sourceSystem === `GOOGLE_SHEETS:${t.gid}`)).map((t) => t.tag))];
+  const extra = config.googleSheets.extraTabs.filter((t) => t.tag);
+  const lead = await db.lead.findUnique({ where: { id: leadId }, select: { phoneE164: true, sourceRecords: { select: { sourceSystem: true, raw: true } } } });
+  if (!lead) return [];
+  const tags = extra.filter((t) => lead.sourceRecords.some((r) => r.sourceSystem === `GOOGLE_SHEETS:${t.gid}`)).map((t) => t.tag);
+  const recallTab = lead.sourceRecords.map((r) => (r.raw as { tab?: string } | null)?.tab).find(Boolean);
+  const tab = recallTab ?? (await db.sheetLeadStatus.findUnique({ where: { phoneE164: lead.phoneE164 } }))?.tab;
+  if (tab && !/pool/i.test(tab)) {
+    const who = parseRecruiterTelegram((await getSettings()).recruiterTelegram).get(tab.toLowerCase());
+    if (who) tags.push(who);
+    else if (!tags.length) tags.push(`👤 Before processed by ${esc(tab)}`);
+  }
+  return [...new Set(tags)];
 }
 
 export function telegramConfigured() {

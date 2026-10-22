@@ -198,6 +198,8 @@ model SystemSetting {
   missedCallSmsText          String    @default("{company} recruiting team: Hi {first}, it's {persona}. We just tried to call you about the truck driving job you applied for. When is a good time to call you back? Reply STOP to opt out.")
   /// Optional second missed-call text sent right after the first (the offer). Empty = none.
   missedCallSmsOffer         String    @default("")
+  /// One line per recruiter sheet tab: "Molly = @username". No @username: the card says "Before processed by Molly".
+  recruiterTelegram          String    @default("")
   /// Fit score rules (see src/lib/fit-score.ts); empty = the company's published requirements.
   fitRules                   Json?
   aiDisclosure               String    @default("Hi, this is the AI recruiting assistant for {company}, calling on behalf of Molly, one of our recruiters.")

@@ -63,6 +63,7 @@ async function savePolicy(fd: FormData) {
       uploadLinkTtlMinutes: n("ttl", 60, 5, 1440), maxUploadBytes: n("maxMb", 10, 1, 25) * 1048576,
       missedCallSms: fd.get("missedCallSms") === "on", missedCallSmsText: String(fd.get("missedCallSmsText") || "").trim().slice(0, 480) || undefined,
       missedCallSmsOffer: String(fd.get("missedCallSmsOffer") || "").replace(/\r\n/g, "\n").trim().slice(0, 1000),
+      recruiterTelegram: String(fd.get("recruiterTelegram") || "").replace(/\r\n/g, "\n").trim().slice(0, 2000),
     },
   });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "POLICY", message: "Contact policy settings updated" });
@@ -193,6 +194,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <label><input type="checkbox" name="missedCallSms" defaultChecked={s.missedCallSms} /> Text the driver once when the AI call is not answered, from the recruiter&apos;s own number (RINGCENTRAL_TAB_SENDERS); replies show up as a task and in Telegram</label>
           <label>Missed-call text ({"{company}"}, {"{name}"} = driver’s full name, {"{first}"} = first name, {"{position}"} = solo driver / team driver, {"{persona}"} = {config.agentPersona.name})</label><textarea name="missedCallSmsText" rows={7} defaultValue={s.missedCallSmsText} />
           <label>Second text right after it, e.g. the offer (empty = none; up to 1000 characters; plain dashes keep it cheaper than • bullets)</label><textarea name="missedCallSmsOffer" rows={12} defaultValue={s.missedCallSmsOffer} />
+          <label>Telegram: recruiter of each sheet tab, tagged on that tab&apos;s driver cards (one per line, e.g. Molly = @molly_tbt; a tab with no @username shows &quot;Before processed by Molly&quot;)</label><textarea name="recruiterTelegram" rows={6} defaultValue={s.recruiterTelegram} />
           <label>Voicemail message</label><textarea name="voicemailMessage" rows={2} defaultValue={s.voicemailMessage} />
           <div className="row">
             <span className="small">Keep CDL files</span><input type="number" name="retention" defaultValue={s.documentRetentionDays} style={{ width: 70 }} /><span className="small">days</span>

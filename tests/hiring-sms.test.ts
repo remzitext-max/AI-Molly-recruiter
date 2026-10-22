@@ -4,6 +4,7 @@ import { addLead, drain, resetDb, seedBase, setPersona } from "./helpers";
 import { setHireStage, syncHiringFromSheet } from "@/lib/hiring";
 import { smsSenderFor } from "@/lib/messaging";
 import { attemptCallJob } from "@/lib/calls";
+import { recruiterTags } from "@/lib/telegram";
 import { mockSmsOutbox } from "@/adapters/mock";
 import { setAdapterOverride } from "@/adapters/registry";
 import type { SmsProvider, SmsSender } from "@/adapters/types";
@@ -223,5 +224,24 @@ describe("re-calling sheet leads the recruiters could not reach", () => {
       delete process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
       process.env.APP_MODE = "demo";
     }
+  });
+});
+
+describe("Telegram tags the recruiter of the lead's sheet tab", () => {
+  it("tags a recruiter in the group, names one who left", async () => {
+    const base = await seedBase();
+    await db.systemSetting.update({ where: { id: "global" }, data: { recruiterTelegram: "Molly = @molly_tbt\nBen =\nPool = @nobody" } });
+    const mk = async (phone: string, tab: string, recall: boolean) => {
+      const r = await addLead(base, { phone });
+      if (r.result !== "created") throw new Error("no lead");
+      const p = (await db.lead.findUniqueOrThrow({ where: { id: r.leadId } })).phoneE164;
+      if (recall) await db.leadSourceRecord.create({ data: { leadId: r.leadId, sourceSystem: "GOOGLE_SHEETS:5", sourceRecordId: `recall:${p}`, raw: { tab } } });
+      else await db.sheetLeadStatus.create({ data: { phoneE164: p, tab, status: "Call back" } });
+      return r.leadId;
+    };
+    expect(await recruiterTags(await mk("(214) 555-0191", "Molly", true))).toEqual(["@molly_tbt"]);
+    expect(await recruiterTags(await mk("(214) 555-0192", "Ben", true))).toEqual(["👤 Before processed by Ben"]);
+    expect(await recruiterTags(await mk("(214) 555-0193", "Luke", false))).toEqual(["👤 Before processed by Luke"]);
+    expect(await recruiterTags(await mk("(214) 555-0194", "📥 Pool", false))).toEqual([]);
   });
 });
