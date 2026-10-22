@@ -72,7 +72,7 @@ describe("missed-call text", () => {
 });
 
 describe("follow-up round for old leads", () => {
-  it("re-queues unreached and not-interested leads once, never stopped ones", async () => {
+  it("re-queues unreached and not-interested leads once, never stopped or recruiter-worked ones", async () => {
     const base = await seedBase();
     await db.campaign.update({ where: { id: base.campaign.id }, data: { reengageAfterDays: 30 } });
     const old = new Date(Date.now() - 40 * 86400_000);
@@ -89,6 +89,10 @@ describe("follow-up round for old leads", () => {
     const stopped = await mk({ attemptCount: 3, pipelineStatus: "CLOSED" });
     const recent = await mk({ attemptCount: 3, pipelineStatus: "QUEUED" });
     await db.callAttempt.create({ data: { leadId: recent, isDemo: true, provider: "mock", idempotencyKey: `new-${recent}`, status: "NO_ANSWER" } });
+    const hired = await mk({ attemptCount: 3, pipelineStatus: "QUEUED", hireStage: "HIRED" });
+    const working = await mk({ attemptCount: 3, pipelineStatus: "QUEUED" });
+    const w = await db.lead.findUniqueOrThrow({ where: { id: working } });
+    await db.metaSheetEvent.create({ data: { phoneE164: w.phoneE164, eventName: "Interested", tab: "Molly", status: "Call back" } });
 
     expect(await reengageScan()).toEqual({ queued: 2 });
     for (const id of [unreached, saidNo]) {
@@ -97,7 +101,7 @@ describe("follow-up round for old leads", () => {
       expect(l.attemptCount).toBe(1);
       expect(await db.job.count({ where: { type: "lead.attempt-call", status: "PENDING", payload: { path: ["leadId"], equals: id } } })).toBe(1);
     }
-    for (const id of [stopped, recent]) expect(await db.job.count({ where: { type: "lead.attempt-call", payload: { path: ["leadId"], equals: id } } })).toBe(0);
+    for (const id of [stopped, recent, hired, working]) expect(await db.job.count({ where: { type: "lead.attempt-call", payload: { path: ["leadId"], equals: id } } })).toBe(0);
     expect(await reengageScan()).toEqual({ queued: 0 });
   });
 });

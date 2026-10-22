@@ -1,6 +1,7 @@
 // Follow-up round for leads Crystal could not reach, or who said no, once a
 // campaign's reengageAfterDays have passed since their last call. Each lead gets
-// this once; opted-out, stopped (CLOSED) and progressing leads are never touched.
+// this once; opted-out, stopped (CLOSED) and progressing leads are never touched, nor
+// leads a recruiter is working (hiring result set, or a good status in the lead sheet).
 import type { PipelineStatus } from "@prisma/client";
 import { db } from "./db";
 import { recordEvent } from "./activity";
@@ -18,7 +19,7 @@ export async function reengageScan(now = new Date()) {
     const cutoff = new Date(now.getTime() - c.reengageAfterDays * 86400_000);
     const leads = await db.lead.findMany({
       where: {
-        campaignId: c.id, reengagedAt: null, optedOutAt: null, activeAttemptId: null, pipelineStatus: { in: ELIGIBLE },
+        campaignId: c.id, reengagedAt: null, optedOutAt: null, activeAttemptId: null, pipelineStatus: { in: ELIGIBLE }, hireStage: "NONE",
         OR: [{ pipelineStatus: "NOT_INTERESTED" }, { attemptCount: { gte: c.maxAttempts } }],
         calls: { some: {}, none: { createdAt: { gt: cutoff } } },
       },
@@ -26,6 +27,8 @@ export async function reengageScan(now = new Date()) {
     });
     for (const l of leads) {
       if (await db.suppression.findUnique({ where: { phoneE164: l.phoneE164 } })) continue;
+      // A recruiter is already talking to this driver (good status in the lead sheet).
+      if (await db.metaSheetEvent.findFirst({ where: { phoneE164: l.phoneE164 } })) continue;
       await db.lead.update({
         where: { id: l.id },
         data: { reengagedAt: now, attemptCount: Math.max(0, c.maxAttempts - FOLLOW_UP_CALLS), pipelineStatus: "QUEUED", queueReason: `Follow-up after ${c.reengageAfterDays} days` },
