@@ -52,14 +52,28 @@ export function telegramConfigured() {
   return !!(config.telegram.botToken && config.telegram.chatId);
 }
 
-export async function sendTelegram(text: string, chatId = config.telegram.chatId) {
-  const token = config.telegram.botToken;
+/**
+ * Posts to the group. With a lead, every message after the first about that driver is a
+ * reply to the first one, so the group can open one driver's whole history (calls,
+ * texts, CDL photos) from a single message.
+ */
+async function postToGroup(method: string, body: Record<string, string | Blob>, leadId?: string, timeoutMs?: number) {
+  const token = config.telegram.botToken, chatId = config.telegram.chatId;
   if (!token || !chatId) throw new Error("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not configured");
-  await providerFetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true }),
-  });
+  const lead = leadId ? await db.lead.findUnique({ where: { id: leadId }, select: { telegramThread: true } }) : null;
+  const [threadChat, threadMsg] = (lead?.telegramThread ?? "").split(":");
+  const form = new FormData();
+  for (const [k, v] of Object.entries({ chat_id: chatId, ...body })) form.set(k, v);
+  if (threadMsg && threadChat === chatId) form.set("reply_parameters", JSON.stringify({ message_id: Number(threadMsg), allow_sending_without_reply: true }));
+  const res = await providerFetch(`https://api.telegram.org/bot${token}/${method}`, { method: "POST", body: form, timeoutMs });
+  const sent = (await res.json().catch(() => null)) as { result?: { message_id?: number } } | null;
+  if (leadId && !threadMsg && sent?.result?.message_id) {
+    await db.lead.updateMany({ where: { id: leadId, telegramThread: null }, data: { telegramThread: `${chatId}:${sent.result.message_id}` } });
+  }
+}
+
+export async function sendTelegram(text: string, leadId?: string) {
+  await postToGroup("sendMessage", { text, parse_mode: "HTML", disable_web_page_preview: "true" }, leadId);
 }
 
 const MISSED: Record<string, string> = { NO_ANSWER: "no answer", BUSY: "line busy", VOICEMAIL: "voicemail, hung up", FAILED: "call did not go through", CANCELED: "call canceled" };
@@ -122,16 +136,12 @@ export async function sendCallReport(attemptId: string) {
   if (a?.recordingKey) {
     // The card goes as the caption of the call recording.
     const data = await getAdapters().storage.get(a.recordingKey);
-    const form = new FormData();
-    form.set("chat_id", config.telegram.chatId!);
-    form.set("caption", text.slice(0, 1024));
-    form.set("parse_mode", "HTML");
     const who = [a.lead.firstName, a.lead.lastName].filter(Boolean).join(" ") || "driver";
-    form.set("audio", new Blob([new Uint8Array(data)], { type: recordingMime(a.recordingKey) }), `${who.replace(/[^A-Za-z0-9]+/g, "_")}_call.${a.recordingKey.split(".").pop()}`);
-    await providerFetch(`https://api.telegram.org/bot${config.telegram.botToken}/sendAudio`, { method: "POST", body: form, timeoutMs: 120_000 });
+    const audio = new File([new Uint8Array(data)], `${who.replace(/[^A-Za-z0-9]+/g, "_")}_call.${a.recordingKey.split(".").pop()}`, { type: recordingMime(a.recordingKey) });
+    await postToGroup("sendAudio", { caption: text.slice(0, 1024), parse_mode: "HTML", audio }, a.leadId, 120_000);
     return { sent: true, withRecording: true };
   }
-  await sendTelegram(text);
+  await sendTelegram(text, a?.leadId);
   return { sent: true };
 }
 
@@ -140,7 +150,7 @@ export async function sendSmsReplyToTelegram(leadId: string, text: string) {
   const l = await db.lead.findUnique({ where: { id: leadId } });
   if (!l || l.isDemo) return { sent: false };
   const name = esc([l.firstName, l.lastName].filter(Boolean).join(" ") || "A driver");
-  await sendTelegram([...(await recruiterTags(l.id)), `💬 ${name} replied by text:`, `"${esc(text)}"`, `☎️ ${esc(l.phoneE164)}`].join("\n"));
+  await sendTelegram([...(await recruiterTags(l.id)), `💬 ${name} replied by text:`, `"${esc(text)}"`, `☎️ ${esc(l.phoneE164)}`].join("\n"), l.id);
   return { sent: true };
 }
 
@@ -149,7 +159,7 @@ export async function sendHiredToTelegram(leadId: string, by: string) {
   const l = await db.lead.findUnique({ where: { id: leadId } });
   if (!l || l.isDemo) return { sent: false };
   const name = esc([l.firstName, l.lastName].filter(Boolean).join(" ") || "A driver");
-  await sendTelegram([...(await recruiterTags(l.id)), `🎉 ${name} was HIRED (marked by ${esc(by)})`, `Lead from ${config.agentPersona.name} AI, came in ${l.createdAt.toISOString().slice(0, 10)}`].join("\n"));
+  await sendTelegram([...(await recruiterTags(l.id)), `🎉 ${name} was HIRED (marked by ${esc(by)})`, `Lead from ${config.agentPersona.name} AI, came in ${l.createdAt.toISOString().slice(0, 10)}`].join("\n"), l.id);
   return { sent: true };
 }
 
@@ -166,7 +176,7 @@ export async function sendConsentToTelegram(consentId: string) {
     `☎️ ${esc(c.lead.phoneE164)}`,
     `✍️ Signed as: ${esc(c.fullName)}`,
     `🕒 ${c.createdAt.toISOString().replace("T", " ").slice(0, 16)} UTC`,
-  ].join("\n"));
+  ].join("\n"), c.leadId);
   return { sent: true };
 }
 
@@ -179,10 +189,8 @@ export async function sendDocumentToTelegram(documentId: string) {
   if (!d || d.deletedAt || d.lead.isDemo) return { sent: false, reason: "nothing to send" };
   const data = await getAdapters().storage.get(d.storageKey);
   const name = [d.lead.firstName, d.lead.lastName].filter(Boolean).join(" ");
-  const form = new FormData();
-  form.set("chat_id", chatId);
-  form.set("caption", [...(await recruiterTags(d.leadId)), `📎 CDL / medical card`, `🗒 ${name}`, `☎️ ${d.lead.phoneE164}`].join("\n"));
-  form.set("document", new Blob([new Uint8Array(data)], { type: d.mimeType }), `${(name || "driver").replace(/[^A-Za-z0-9]+/g, "_")}.${d.storageKey.split(".").pop()}`);
-  await providerFetch(`https://api.telegram.org/bot${token}/sendDocument`, { method: "POST", body: form, timeoutMs: 60000 });
+  const caption = [...(await recruiterTags(d.leadId)), `📎 CDL / medical card`, `🗒 ${name}`, `☎️ ${d.lead.phoneE164}`].join("\n");
+  const document = new File([new Uint8Array(data)], `${(name || "driver").replace(/[^A-Za-z0-9]+/g, "_")}.${d.storageKey.split(".").pop()}`, { type: d.mimeType });
+  await postToGroup("sendDocument", { caption, document }, d.leadId, 60_000);
   return { sent: true };
 }

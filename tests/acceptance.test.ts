@@ -862,7 +862,7 @@ describe("Driving record check consent", () => {
       await drain();
       const sends = fetchSpy.mock.calls.filter(([u]) => String(u).includes("/sendMessage"));
       expect(sends).toHaveLength(1);
-      const body = JSON.parse(String(sends[0][1]!.body));
+      const body = { text: String((sends[0][1]!.body as FormData).get("text")) };
       expect(body.text).toContain("Record check consent: AGREED");
       expect(body.text).toContain("Signed as: Ray Doe");
       await expect(saveRecordCheckConsent("x".repeat(40), { fullName: "Ray Doe" })).rejects.toThrow(/expired/);

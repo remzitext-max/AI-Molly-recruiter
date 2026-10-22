@@ -33,6 +33,19 @@ const TERMINAL = 10;
 // ---------------------------------------------------------------------------
 // 1. Attempt a call (job handler for "lead.attempt-call")
 // ---------------------------------------------------------------------------
+/** First call (and the double dial) of someone who applied in the last 2 hours: they go before retries and re-calls. */
+function isNewApplicant(l: { reengagedAt: Date | null; attemptCount: number; createdAt: Date }, now: Date) {
+  return !l.reengagedAt && l.attemptCount <= 1 && now.getTime() - l.createdAt.getTime() < 2 * 3600_000;
+}
+
+async function newApplicantWaiting(leadId: string, now: Date) {
+  const due = await db.job.findMany({ where: { type: "lead.attempt-call", status: "PENDING", runAt: { lte: new Date(now.getTime() + 15_000) } }, select: { payload: true }, take: 200 });
+  const ids = due.map((j) => (j.payload as { leadId?: string }).leadId).filter((id): id is string => !!id && id !== leadId);
+  if (!ids.length) return false;
+  const leads = await db.lead.findMany({ where: { id: { in: ids }, isDemo: false, activeAttemptId: null }, select: { reengagedAt: true, attemptCount: true, createdAt: true } });
+  return leads.some((l) => isNewApplicant(l, now));
+}
+
 export async function attemptCallJob(job: Job) {
   const { leadId } = job.payload as { leadId: string; personaKey?: string | null };
   let personaKey = (job.payload as { personaKey?: string | null }).personaKey ?? null;
@@ -90,7 +103,12 @@ export async function attemptCallJob(job: Job) {
   // instead of all dialing at once (extra calls fail at the carrier).
   if (!provider.isMock && (await realCallsInProgress(now)) >= config.maxConcurrentCalls) {
     await db.lead.update({ where: { id: leadId }, data: { queueReason: "Waiting for a free line (another call in progress)" } });
-    return { rescheduleAt: new Date(Date.now() + 45_000), reason: "LINE_BUSY" };
+    // A new applicant checks back sooner, so it gets the line as soon as it frees up.
+    return { rescheduleAt: new Date(Date.now() + (isNewApplicant(lead, now) ? 10_000 : 45_000)), reason: "LINE_BUSY" };
+  }
+  if (!provider.isMock && !isNewApplicant(lead, now) && (await newApplicantWaiting(leadId, now))) {
+    await db.lead.update({ where: { id: leadId }, data: { queueReason: "Waiting: a new applicant is called first" } });
+    return { rescheduleAt: new Date(Date.now() + 45_000), reason: "NEW_APPLICANT_FIRST" };
   }
 
   // Acquire the per-lead call lock atomically. activeAttemptId is UNIQUE and is

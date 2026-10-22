@@ -4,7 +4,7 @@ import { addLead, drain, resetDb, seedBase, setPersona } from "./helpers";
 import { setHireStage, syncHiringFromSheet } from "@/lib/hiring";
 import { smsSenderFor } from "@/lib/messaging";
 import { attemptCallJob } from "@/lib/calls";
-import { recruiterTags } from "@/lib/telegram";
+import { recruiterTags, sendTelegram } from "@/lib/telegram";
 import { mockSmsOutbox } from "@/adapters/mock";
 import { setAdapterOverride } from "@/adapters/registry";
 import type { SmsProvider, SmsSender } from "@/adapters/types";
@@ -243,5 +243,31 @@ describe("Telegram tags the recruiter of the lead's sheet tab", () => {
     expect(await recruiterTags(await mk("(214) 555-0192", "Ben", true))).toEqual(["👤 Before processed by Ben"]);
     expect(await recruiterTags(await mk("(214) 555-0193", "Luke", false))).toEqual(["👤 Before processed by Luke"]);
     expect(await recruiterTags(await mk("(214) 555-0194", "📥 Pool", false))).toEqual([]);
+  });
+});
+
+describe("one Telegram thread per driver", () => {
+  it("sends later messages about a lead as replies to the first one", async () => {
+    process.env.TELEGRAM_BOT_TOKEN = "t"; process.env.TELEGRAM_CHAT_ID = "-100";
+    const base = await seedBase();
+    const r = await addLead(base);
+    if (r.result !== "created") throw new Error("no lead");
+    const forms: FormData[] = [];
+    let n = 76;
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_u, init) => {
+      forms.push(init!.body as FormData);
+      return new Response(JSON.stringify({ ok: true, result: { message_id: ++n } }));
+    });
+    try {
+      await sendTelegram("first", r.leadId);
+      await sendTelegram("second", r.leadId);
+      await sendTelegram("not about a lead");
+      expect(forms[0].get("reply_parameters")).toBeNull();
+      expect(JSON.parse(String(forms[1].get("reply_parameters")))).toEqual({ message_id: 77, allow_sending_without_reply: true });
+      expect(forms[2].get("reply_parameters")).toBeNull();
+      expect((await db.lead.findUniqueOrThrow({ where: { id: r.leadId } })).telegramThread).toBe("-100:77");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

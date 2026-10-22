@@ -58,7 +58,7 @@ export async function readDocument(documentId: string, now = new Date()) {
       ...warnings.filter((w) => /expire/i.test(w)).map((w) => `⚠️ ${esc(w)}`),
       "(AI read, please check the photo)",
     ].filter(Boolean);
-    await sendTelegram(lines.join("\n"));
+    await sendTelegram(lines.join("\n"), d.leadId);
   }
   return { read: true, fields: f };
 }

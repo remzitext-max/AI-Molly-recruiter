@@ -259,6 +259,8 @@ model Lead {
   callbackAt         DateTime?
   queueReason        String?
   lastOfferVersionId String?
+  /// First Telegram message about this lead; later ones go as replies to it ("chatId:messageId").
+  telegramThread String?
   reengagedAt        DateTime?
   /// Facebook lead ad details, matched by phone from the Meta Lead Ads API (admin only).
   fbLeadId           String?
