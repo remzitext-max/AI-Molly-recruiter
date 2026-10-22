@@ -216,3 +216,14 @@ describe("Google Sheets live adapter (HTTP contract, no network)", () => {
   });
 });
 
+
+describe("fast sheet polling", () => {
+  it("'every 1 minute' reads the sheet every 15 seconds", async () => {
+    const { base, b } = await firstImport();
+    await commitBatch(b.id, base.admin);
+    await db.sourceConnection.update({ where: { id: "google-sheets" }, data: { autoSync: true, pollMinutes: 1 } });
+    const t = Math.floor(Date.now() / 60_000) * 60_000;
+    for (const s of [0, 5, 16, 31, 46]) await scheduleSheetPoll(t + s * 1000);
+    expect(await db.job.count({ where: { type: "source.google-sheets.poll" } })).toBe(4);
+  });
+});
