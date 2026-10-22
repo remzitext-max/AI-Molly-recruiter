@@ -26,14 +26,18 @@ export default async function Ads({ searchParams }: { searchParams: Promise<Reco
     range === "month" ? [now.startOf("month"), now] :
     [now.minus({ months: 1 }).startOf("month"), now.startOf("month").minus({ milliseconds: 1 })];
 
+  // Spend before Crystal received her first sheet lead would inflate cost per lead, so it starts there.
+  const first = await db.leadSourceRecord.findFirst({ where: { sourceSystem: { startsWith: "GOOGLE_SHEETS" }, lead: { isDemo: false } }, orderBy: { createdAt: "asc" }, select: { createdAt: true } });
+  const firstDay = first ? DateTime.fromJSDate(first.createdAt).setZone(ZONE).startOf("day") : null;
+  const from = firstDay && firstDay > start ? firstDay : start;
   const leads = await db.lead.findMany({
-    where: { isDemo: false, createdAt: { gte: start.toJSDate(), lte: end.toJSDate() } },
+    where: { isDemo: false, createdAt: { gte: from.toJSDate(), lte: end.toJSDate() } },
     select: { fbCampaign: true, fbLeadId: true, pipelineStatus: true, documentStatus: true, _count: { select: { calls: { where: { status: "COMPLETED" } } } } },
   });
   let spend: CampaignSpend[] = [];
   let spendError: string | null = null;
   if (metaSpendConfigured()) {
-    try { spend = await campaignSpend(start.toISODate()!, end.toISODate()!); } catch (e) { spendError = (e as Error).message.slice(0, 300); }
+    try { spend = await campaignSpend(from.toISODate()!, end.toISODate()!); } catch (e) { spendError = (e as Error).message.slice(0, 300); }
   }
   const sync = await db.sourceConnection.findUnique({ where: { id: "meta-leads" } });
 
@@ -60,7 +64,7 @@ export default async function Ads({ searchParams }: { searchParams: Promise<Reco
     <>
       <PageHead
         title="Facebook ads"
-        sub={`Spend and cost per lead and driver by campaign · ${start.toFormat("MMM d")} – ${end.toFormat("MMM d")} · admins only, never sent to Telegram`}
+        sub={`Spend and cost per lead and driver by campaign · ${from.toFormat("MMM d")} – ${end.toFormat("MMM d")}${from > start ? " (from Crystal\u2019s first lead)" : ""} · admins only, never sent to Telegram`}
         right={<div className="tabs" style={{ margin: 0 }}>{(Object.keys(RANGES) as Range[]).map((r) => <Link key={r} href={`/ads?range=${r}`} className={`tab ${r === range ? "on" : ""}`}>{RANGES[r]}</Link>)}</div>}
       />
       <div className="stats">
