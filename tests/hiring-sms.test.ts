@@ -80,3 +80,27 @@ describe("texts from the recruiter's own number", () => {
     expect(await db.message.count({ where: { leadId: r.leadId, purpose: "MISSED_CALL" } })).toBe(0);
   });
 });
+
+describe("missed-call texts: greeting + offer", () => {
+  it("fills the driver's name and position, then sends the offer as a second text", async () => {
+    const base = await seedBase();
+    await db.systemSetting.update({ where: { id: "global" }, data: {
+      requireSmsPermission: false, requireCallPermission: false,
+      missedCallSmsText: "Good part of the day {name}\nIt is {persona}\nYou have applied for {position} position",
+      missedCallSmsOffer: "Requirements:\n- Minimum 2 year of CDL Class A",
+    } });
+    const csv = Buffer.from("Name,Phone,Source\nDerrick Johnson,(214) 555-0177,TEAM\n");
+    const { createImportPreview, commitBatch } = await import("@/lib/import");
+    const b = await createImportPreview({ fileName: "leads.csv", data: csv, campaignId: base.campaign.id, userId: base.admin.id, orgId: base.org.id, isDemo: true });
+    await commitBatch(b.id, base.admin);
+    const lead = await db.lead.findFirstOrThrow({ where: { phoneE164: "+12145550177" } });
+    expect((await db.leadSourceRecord.findFirstOrThrow({ where: { leadId: lead.id } })).raw).toMatchObject({ position: "team" });
+    await setPersona(lead.id, "no_answer");
+    await drain();
+    const msgs = await db.message.findMany({ where: { leadId: lead.id, purpose: "MISSED_CALL" }, orderBy: { createdAt: "asc" } });
+    expect(msgs.map((m) => m.body)).toEqual([
+      "Good part of the day Derrick Johnson\nIt is Crystal\nYou have applied for team driver position",
+      "Requirements:\n- Minimum 2 year of CDL Class A",
+    ]);
+  });
+});

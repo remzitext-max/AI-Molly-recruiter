@@ -76,6 +76,28 @@ export async function sendCdlLink(leadId: string, attemptId: string | null, opts
   return { sent: true, messageId: msg.id, uploadUrl: link?.url };
 }
 
+/** "team driver" / "solo driver" from the driver's answer or the sheet's Source column; "driver" if unknown. */
+export async function driverPosition(leadId: string): Promise<string> {
+  const said = await db.screeningField.findUnique({ where: { leadId_key: { leadId, key: "driving_type" } } });
+  const recs = await db.leadSourceRecord.findMany({ where: { leadId }, select: { raw: true } });
+  const fromSheet = recs.map((r) => (r.raw as { position?: string } | null)?.position).find(Boolean);
+  const v = said?.verifiedValue || said?.reportedValue || fromSheet || "";
+  return /team/i.test(v) ? "team driver" : /solo/i.test(v) ? "solo driver" : "driver";
+}
+
+/** Fills {company} {persona} {name} {first} {position} in a text the admin wrote in Settings. */
+export function fillSmsTemplate(t: string, v: { company: string; persona: string; first: string | null; last: string | null; position: string }) {
+  const name = [v.first, v.last].filter(Boolean).join(" ");
+  return t
+    .replace(/\{company\}/g, v.company)
+    .replace(/\{persona\}/g, v.persona)
+    .replace(/Hi \{first\}/g, v.first ? `Hi ${v.first}` : "Hi")
+    .replace(/ \{name\}/g, name ? ` ${name}` : "")
+    .replace(/\{name\}/g, name)
+    .replace(/\{first\}/g, v.first ?? "")
+    .replace(/\{position\}/g, v.position);
+}
+
 /**
  * One text after an unanswered AI call, asking when to call back. Sent at most
  * once per lead, only where an automated text is allowed right now. On a live
@@ -96,12 +118,8 @@ export async function sendMissedCallText(leadId: string, attemptId: string, now 
     await recordEvent({ leadId, actorType: "SYSTEM", type: "SMS_BLOCKED", message: `Missed-call text not sent: ${gate.message}` });
     return { sent: false, reason: gate.message };
   }
-  const body = settings.missedCallSmsText
-    .replace(/\{company\}/g, lead.org.name)
-    .replace(/\{persona\}/g, config.agentPersona.name)
-    .replace(/Hi \{first\}/g, lead.firstName ? `Hi ${lead.firstName}` : "Hi")
-    .replace(/\{first\}/g, lead.firstName ?? "")
-    .slice(0, 480);
+  const vars = { company: lead.org.name, persona: config.agentPersona.name, first: lead.firstName, last: lead.lastName, position: await driverPosition(leadId) };
+  const body = fillSmsTemplate(settings.missedCallSmsText, vars).slice(0, 480);
   const msg = await db.message.create({ data: { leadId, isDemo: lead.isDemo, direction: "OUTBOUND", purpose: "MISSED_CALL", body, provider: getAdapters().sms.key, idempotencyKey: idem, status: "SENDING" } });
   try {
     const r = await getAdapters().sms.send(lead.phoneE164, body, idem, sender);
@@ -112,6 +130,20 @@ export async function sendMissedCallText(leadId: string, attemptId: string, now 
     return { sent: false, reason: (e as Error).message };
   }
   await recordEvent({ leadId, actorType: "AI", type: "SMS_SENT", message: `Missed-call text sent${sender ? ` from ${sender.label}` : ""}${getAdapters().sms.isMock ? " (MOCK, not delivered to a phone)" : ""}`, data: { attemptId } });
+  // The offer goes as a second text right after (RingCentral takes up to 1000 characters per text).
+  const offer = fillSmsTemplate(settings.missedCallSmsOffer, vars).trim().slice(0, 1000);
+  if (offer) {
+    const idem2 = `missed-call-offer:${leadId}`;
+    const m2 = await db.message.create({ data: { leadId, isDemo: lead.isDemo, direction: "OUTBOUND", purpose: "MISSED_CALL", body: offer, provider: getAdapters().sms.key, idempotencyKey: idem2, status: "SENDING" } });
+    try {
+      const r2 = await getAdapters().sms.send(lead.phoneE164, offer, idem2, sender);
+      await db.message.update({ where: { id: m2.id }, data: { status: "SENT", providerMessageId: r2.providerMessageId } });
+      await recordEvent({ leadId, actorType: "AI", type: "SMS_SENT", message: `Offer text sent${sender ? ` from ${sender.label}` : ""}`, data: { attemptId } });
+    } catch (e) {
+      await db.message.update({ where: { id: m2.id }, data: { status: e instanceof LiveContactBlockedError ? "BLOCKED" : "FAILED" } });
+      await recordEvent({ leadId, actorType: "SYSTEM", type: "SMS_FAILED", message: `Offer text failed: ${(e as Error).message}` });
+    }
+  }
   return { sent: true, messageId: msg.id };
 }
 

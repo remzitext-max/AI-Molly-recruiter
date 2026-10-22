@@ -93,6 +93,8 @@ const GUESS: Record<TargetField, RegExp> = {
 
 // Optional Facebook lead-ad columns (e.g. added by Make.com). Read by header name,
 // outside the reviewed mapping, so adding them to a sheet needs no re-setup.
+const POSITION_HEADER = /^(source|position|driver ?type|solo ?\/ ?team)$/i;
+
 const FB_COLUMNS = {
   fbLeadId: /^((fb|facebook) ?lead ?id|leadgen ?id)$/i,
   fbCampaign: /^((fb|facebook) )?campaign( name)?$/i,
@@ -123,6 +125,9 @@ export async function buildPreview(sheet: ParsedSheet, mapping: Mapping, sourceS
   const col = (row: string[], f: TargetField) => (mapping[f] ? row[sheet.headers.indexOf(mapping[f]!)] ?? "" : "").trim();
   const fbIdx = Object.fromEntries(Object.entries(FB_COLUMNS).map(([k, re]) => [k, sheet.headers.findIndex((h) => re.test(h.trim()))]));
   const fbCol = (row: string[], k: keyof typeof FB_COLUMNS) => (fbIdx[k] >= 0 ? row[fbIdx[k]] ?? "" : "").trim();
+  // Solo or team, from a "Source" / "Position" column (the lead board writes SOLO or TEAM there).
+  const posIdx = sheet.headers.findIndex((h) => POSITION_HEADER.test(h.trim()));
+  const position = (row: string[]) => { const v = posIdx >= 0 ? row[posIdx] ?? "" : ""; return /team/i.test(v) ? "team" : /solo/i.test(v) ? "solo" : ""; };
   const seenPhones = new Map<string, number>();
   const seenIds = new Set<string>();
   const out: PreviewRow[] = [];
@@ -159,7 +164,7 @@ export async function buildPreview(sheet: ParsedSheet, mapping: Mapping, sourceS
     const values: Record<string, string> = { firstName: first, lastName: last, phone: col(r, "phone"), email, state, zip,
       callPermissionSource: col(r, "callPermissionSource"), callPermissionDate: col(r, "callPermissionDate"),
       smsPermissionSource: col(r, "smsPermissionSource"), smsPermissionDate: col(r, "smsPermissionDate"),
-      fbLeadId: fbCol(r, "fbLeadId"), fbCampaign: fbCol(r, "fbCampaign"), fbAd: fbCol(r, "fbAd"), fbForm: fbCol(r, "fbForm") };
+      fbLeadId: fbCol(r, "fbLeadId"), fbCampaign: fbCol(r, "fbCampaign"), fbAd: fbCol(r, "fbAd"), fbForm: fbCol(r, "fbForm"), position: position(r) };
     out.push({ rowNumber: i + 2, values, phoneE164: phone, sourceRecordId: sid, errors, warnings, disposition });
   }
   return out;
@@ -205,7 +210,7 @@ export async function commitBatch(batchId: string, user: { id: string | null; or
     if (v.smsPermissionSource && v.smsPermissionDate && !isNaN(new Date(v.smsPermissionDate).getTime())) permission.push({ scope: "SMS", source: v.smsPermissionSource, grantedAt: new Date(v.smsPermissionDate).toISOString() });
     const r = await ingestLead(
       { sourceSystem: b.sourceSystem, sourceRecordId: row.sourceRecordId, firstName: v.firstName, lastName: v.lastName, phone: v.phone, email: v.email, state: v.state, zip: v.zip, permission,
-        fb: { leadId: v.fbLeadId, campaign: v.fbCampaign, ad: v.fbAd, form: v.fbForm }, raw: { row: row.rowNumber, file: b.fileName } },
+        fb: { leadId: v.fbLeadId, campaign: v.fbCampaign, ad: v.fbAd, form: v.fbForm }, raw: { row: row.rowNumber, file: b.fileName, ...(v.position ? { position: v.position } : {}) } },
       { orgId: user.orgId, campaignId: b.campaignId, isDemo: b.isDemo, importBatchId: b.id, actorId: user.id },
     );
     if (r.result === "invalid") counts.skipped_errors++; else counts[r.result]++;
