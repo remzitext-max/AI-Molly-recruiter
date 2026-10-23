@@ -289,4 +289,27 @@ describe("one Telegram thread per driver", () => {
       spy.mockRestore();
     }
   });
+
+  it("follows the group to its new id when Telegram upgrades it to a supergroup", async () => {
+    process.env.TELEGRAM_BOT_TOKEN = "t"; process.env.TELEGRAM_CHAT_ID = "-555";
+    const base = await seedBase();
+    const r = await addLead(base);
+    if (r.result !== "created") throw new Error("no lead");
+    await db.lead.update({ where: { id: r.leadId }, data: { telegramThread: "-555:10" } });
+    const chats: string[] = [];
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_u, init) => {
+      const chat = String((init!.body as FormData).get("chat_id"));
+      chats.push(chat);
+      if (chat === "-555") return new Response(JSON.stringify({ ok: false, error_code: 400, description: "Bad Request: group chat was upgraded to a supergroup chat", parameters: { migrate_to_chat_id: -1004397263565 } }), { status: 400 });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 5 } }));
+    });
+    try {
+      await sendTelegram("card", r.leadId);
+      await sendTelegram("next card", r.leadId);
+      expect(chats).toEqual(["-555", "-1004397263565", "-1004397263565"]);
+      expect((await db.lead.findUniqueOrThrow({ where: { id: r.leadId } })).telegramThread).toBe("-1004397263565:5");
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

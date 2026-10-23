@@ -10,6 +10,7 @@ import { getSettings } from "./settings";
 import { answersOf, fitRulesFrom, fitScore, fitText } from "./fit-score";
 import { endedByText, whoEnded } from "./call-end";
 import { leadSheetTab } from "./recruiter-tab";
+import { log } from "./redact";
 import type { CallNotes } from "./transcript-extract";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -59,19 +60,38 @@ export function telegramConfigured() {
  * texts, CDL photos) from a single message.
  */
 async function postToGroup(method: string, body: Record<string, string | Blob>, leadId?: string, timeoutMs?: number) {
-  const token = config.telegram.botToken, chatId = config.telegram.chatId;
-  if (!token || !chatId) throw new Error("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not configured");
+  const token = config.telegram.botToken, configured = config.telegram.chatId;
+  if (!token || !configured) throw new Error("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not configured");
   const lead = leadId ? await db.lead.findUnique({ where: { id: leadId }, select: { telegramThread: true } }) : null;
   const [threadChat, threadMsg] = (lead?.telegramThread ?? "").split(":");
-  const form = new FormData();
-  for (const [k, v] of Object.entries({ chat_id: chatId, ...body })) form.set(k, v);
-  if (threadMsg && threadChat === chatId) form.set("reply_parameters", JSON.stringify({ message_id: Number(threadMsg), allow_sending_without_reply: true }));
-  const res = await providerFetch(`https://api.telegram.org/bot${token}/${method}`, { method: "POST", body: form, timeoutMs });
+  const post = async (chatId: string) => {
+    const form = new FormData();
+    for (const [k, v] of Object.entries({ chat_id: chatId, ...body })) form.set(k, v);
+    if (threadMsg && threadChat === chatId) form.set("reply_parameters", JSON.stringify({ message_id: Number(threadMsg), allow_sending_without_reply: true }));
+    return providerFetch(`https://api.telegram.org/bot${token}/${method}`, { method: "POST", body: form, timeoutMs });
+  };
+  let chatId = movedChats.get(configured) ?? configured;
+  let res;
+  try {
+    res = await post(chatId);
+  } catch (e) {
+    // The group became a supergroup (Telegram does this when some group settings change) and has a new id.
+    const moved = (e as Error).message.match(/"migrate_to_chat_id":\s*(-?\d+)/)?.[1];
+    if (!moved) throw e;
+    movedChats.set(configured, moved);
+    log.warn("Telegram group moved to a new chat id; set TELEGRAM_CHAT_ID to it", { from: configured, to: moved });
+    chatId = moved;
+    res = await post(chatId);
+  }
   const sent = (await res.json().catch(() => null)) as { result?: { message_id?: number } } | null;
-  if (leadId && !threadMsg && sent?.result?.message_id) {
-    await db.lead.updateMany({ where: { id: leadId, telegramThread: null }, data: { telegramThread: `${chatId}:${sent.result.message_id}` } });
+  // A lead's first message in this chat starts its thread (a thread from the old chat id cannot be replied to).
+  if (leadId && !(threadMsg && threadChat === chatId) && sent?.result?.message_id) {
+    await db.lead.updateMany({ where: { id: leadId, telegramThread: lead?.telegramThread ?? null }, data: { telegramThread: `${chatId}:${sent.result.message_id}` } });
   }
 }
+
+/** Old group chat id -> the supergroup id Telegram moved it to, until TELEGRAM_CHAT_ID is updated. */
+const movedChats = new Map<string, string>();
 
 export async function sendTelegram(text: string, leadId?: string) {
   await postToGroup("sendMessage", { text, parse_mode: "HTML", disable_web_page_preview: "true" }, leadId);
