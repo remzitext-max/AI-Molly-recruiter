@@ -9,6 +9,7 @@ import { recordingMime } from "./recordings";
 import { getSettings } from "./settings";
 import { answersOf, fitRulesFrom, fitScore, fitText } from "./fit-score";
 import { endedByText, whoEnded } from "./call-end";
+import type { CallNotes } from "./transcript-extract";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -76,6 +77,25 @@ export async function sendTelegram(text: string, leadId?: string) {
   await postToGroup("sendMessage", { text, parse_mode: "HTML", disable_web_page_preview: "true" }, leadId);
 }
 
+/**
+ * The call's result, the reason a driver said no, the questions left unanswered, and the
+ * short notes of the conversation, read from the transcript after the call.
+ */
+function notesLines(a: { outcome: string | null; summary: string | null; metrics: unknown }): string[] {
+  const n = ((a.metrics as { callNotes?: CallNotes } | null)?.callNotes ?? {}) as CallNotes;
+  const no = a.outcome === "NOT_INTERESTED" || n.result === "not_interested";
+  const out: string[] = [];
+  if (no) out.push(`🔴 Not interested${n.reason ? `: ${esc(n.reason)}` : ""}`);
+  else if (a.outcome === "INTERESTED" || n.result === "interested") out.push("🟢 Interested");
+  else if (a.outcome === "CALLBACK" || n.result === "call_later") out.push("🕒 Asked to call later");
+  else if (n.result === "unclear") out.push("⚪ Result unclear");
+  if (!no && n.unanswered) out.push(`❓ Not answered: ${esc(n.unanswered)}`);
+  if (a.summary) out.push(NOTES_MARK, esc(a.summary));
+  return out;
+}
+
+const NOTES_MARK = "📝 Notes:";
+
 const MISSED: Record<string, string> = { NO_ANSWER: "no answer", BUSY: "line busy", VOICEMAIL: "voicemail, hung up", FAILED: "call did not go through", CANCELED: "call canceled" };
 
 /** The owner's driver card for one finished call: a full card when the driver talked, a one-line note otherwise, or null for demo records. */
@@ -105,7 +125,8 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
       `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}${secs !== null ? ` (${secs} sec)` : ""}: ${transferred ? "driver asked for a person" : "no answers collected"}`,
       `☎️ ${v(l.phoneE164)}`,
       ...(endLine ? [endLine] : []),
-      ...lastDriverLines(a.transcript),
+      ...(a.summary ? [] : lastDriverLines(a.transcript)),
+      ...notesLines(a),
       retryLine,
     ].join("\n");
   }
@@ -125,6 +146,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
     `☎️Phone number : ${v(l.phoneE164)}`,
     `⭐ Fit: ${v(fitText(fit))}`,
     ...(endLine ? [endLine] : []),
+    ...notesLines(a),
   ].join("\n");
 }
 
@@ -138,7 +160,11 @@ export async function sendCallReport(attemptId: string) {
     const data = await getAdapters().storage.get(a.recordingKey);
     const who = [a.lead.firstName, a.lead.lastName].filter(Boolean).join(" ") || "driver";
     const audio = new File([new Uint8Array(data)], `${who.replace(/[^A-Za-z0-9]+/g, "_")}_call.${a.recordingKey.split(".").pop()}`, { type: recordingMime(a.recordingKey) });
-    await postToGroup("sendAudio", { caption: text.slice(0, 1024), parse_mode: "HTML", audio }, a.leadId, 120_000);
+    // A caption holds 1024 characters: a long card's notes follow as a reply.
+    const cut = text.length > 1024 ? text.indexOf(NOTES_MARK) : -1;
+    const caption = cut > 0 ? text.slice(0, cut).trimEnd() : text.slice(0, 1024);
+    await postToGroup("sendAudio", { caption, parse_mode: "HTML", audio }, a.leadId, 120_000);
+    if (cut > 0) await sendTelegram(text.slice(cut).slice(0, 4000), a.leadId);
     return { sent: true, withRecording: true };
   }
   await sendTelegram(text, a?.leadId);

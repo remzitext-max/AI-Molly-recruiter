@@ -602,6 +602,7 @@ describe("Telegram driver card", () => {
       "✅ Ready date: Next Monday",
       "☎️Phone number : +12145550111",
       "⭐ Fit: Not enough answers",
+      "🟢 Interested",
     ].join("\n"));
 
     const demo = await lead(base, "interested");
@@ -663,16 +664,20 @@ describe("Call that ended before the agent saved the driver's decision", () => {
     process.env.TELNYX_API_KEY = "KEY";
     let result = "not_interested";
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      const content = JSON.stringify({ experience_years: "twelve years", call_result: result, decline_reason: "home time too low" });
+      const content = JSON.stringify({ experience_years: "twelve years", call_result: result, decline_reason: "home time too low", unanswered: "start date, medical card",
+        call_summary: "Crystal offered the OTR solo job.\n• 12 years Class A\n• Wants 4 weeks out, 7 days home" });
       return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
     });
+    const cards: string[] = [];
     try {
       const mk = async (phone: string) => {
         const l = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Maurys", lastName: "J", phoneE164: phone, attemptCount: 1, pipelineStatus: "QUEUED" } });
         const a = await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: `inc-${phone}`, status: "COMPLETED", outcome: "INCOMPLETE",
+          startedAt: new Date(Date.now() - 236_000), endedAt: new Date(),
           transcript: [{ speaker: "agent", text: "Which home time works?" }, { speaker: "driver", text: "That's way too low." }] } });
         await db.job.create({ data: { type: "lead.attempt-call", payload: { leadId: l.id }, runAt: new Date(Date.now() + 4 * 3600_000) } });
         await fillScreeningFromTranscript(a.id);
+        cards.push((await buildCallReport(a.id)) ?? "");
         return l.id;
       };
       const no = await mk("+17864867007");
@@ -686,6 +691,13 @@ describe("Call that ended before the agent saved the driver's decision", () => {
       result = "unclear";
       const unsure = await mk("+17864867009");
       expect(await db.job.count({ where: { type: "lead.attempt-call", status: "PENDING", payload: { path: ["leadId"], equals: unsure } } })).toBe(1);
+      // The card says why the driver said no, which questions were left, and the call notes.
+      expect(cards[0]).toContain("🔴 Not interested: home time too low");
+      expect(cards[0]).not.toContain("❓");
+      expect(cards[1]).toContain("🟢 Interested");
+      expect(cards[2]).toContain("⚪ Result unclear");
+      expect(cards[2]).toContain("❓ Not answered: start date, medical card");
+      expect(cards[2]).toContain("📝 Notes:\nCrystal offered the OTR solo job.\n• 12 years Class A");
     } finally {
       fetchSpy.mockRestore();
       delete process.env.TELNYX_API_KEY;

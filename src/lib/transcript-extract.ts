@@ -1,6 +1,7 @@
 // Fills the driver's screening answers from the call transcript when the live
 // agent heard them but did not save them with record_screening_answer.
 // Uses Telnyx's OpenAI-compatible inference endpoint with the same API key.
+import type { Prisma } from "@prisma/client";
 import { config } from "./config";
 import { db } from "./db";
 import { providerFetch } from "../adapters/live/http";
@@ -35,7 +36,12 @@ const FIELDS: Record<string, string> = {
 const RESULT_KEYS: Record<string, string> = {
   call_result: "the driver's decision in this call, one of: interested, not_interested, call_later, unclear",
   decline_reason: "if not_interested: why, short, in the driver's words",
+  unanswered: "screening questions (experience, location, CDL class, SAP, accidents, home time, miles, start date, medical card) the driver did not answer or answered unclearly, including ones never reached because the call ended; short names, comma separated",
+  call_summary: "notes for the recruiter in English: one or two sentences on how the call went, then 3 to 6 short lines each starting with '• ' recapping what the driver said (experience, location, home time, miles, start, concerns, decision). Say 'unclear' where the driver's answer was unclear. Under 700 characters",
 };
+
+/** What the transcript reader concluded about one call, kept on CallAttempt.metrics.callNotes for the Telegram card. */
+export type CallNotes = { result?: string; reason?: string; unanswered?: string };
 
 type Turn = { speaker: string; text: string };
 
@@ -47,7 +53,7 @@ export function parseAnswers(content: string): Record<string, string> {
   try { obj = JSON.parse(m[0]); } catch { return {}; }
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(obj)) {
-    if ((k in FIELDS || k in RESULT_KEYS) && typeof v === "string" && v.trim() && !/^(unknown|n\/a|none|null)$/i.test(v.trim())) out[k] = v.trim().slice(0, 200);
+    if ((k in FIELDS || k in RESULT_KEYS) && typeof v === "string" && v.trim() && !/^(unknown|n\/a|none|null)$/i.test(v.trim())) out[k] = v.trim().slice(0, k === "call_summary" ? 900 : 200);
   }
   return out;
 }
@@ -100,6 +106,16 @@ export async function fillScreeningFromTranscript(attemptId: string): Promise<st
     });
     filled.push(k);
   }
+  const result = (answers.call_result ?? "").toLowerCase().replace(/[^a-z_]/g, "");
+  const notes: CallNotes = {
+    result: result || undefined,
+    reason: answers.decline_reason ? redactText(answers.decline_reason) : undefined,
+    unanswered: answers.unanswered ? redactText(answers.unanswered) : undefined,
+  };
+  await db.callAttempt.update({ where: { id: a.id }, data: {
+    metrics: { ...((a.metrics as Record<string, unknown> | null) ?? {}), callNotes: notes } as Prisma.InputJsonValue,
+    summary: answers.call_summary && !a.summary ? redactText(answers.call_summary) : undefined,
+  } });
   await recordEvent({ leadId: a.leadId, actorType: "SYSTEM", type: "TRANSCRIPT_ANSWERS", message: filled.length ? `Answers read from the call text: ${filled.join(", ")}` : "No new answers found in the call text" });
   if (a.outcome === "INCOMPLETE") await settleUnfinishedCall(a.id, a.leadId, answers.call_result, answers.decline_reason);
   return filled;
