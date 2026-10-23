@@ -338,6 +338,14 @@ describe("No AI repeat calls once the driver talked or a recruiter set a status"
     expect(card).not.toContain("❓");
     expect(card).not.toContain("📝");
     expect(card).toContain("⏹ No more AI calls: Talked with Crystal: recruiter continues");
+
+    // A retry queued before this rule existed is not placed either.
+    await db.lead.update({ where: { id: l.id }, data: { queueReason: "Retry after incomplete" } });
+    await db.task.deleteMany({ where: { leadId: l.id } });
+    const calls = await db.callAttempt.count({ where: { leadId: l.id } });
+    await attemptCallJob({ payload: { leadId: l.id } } as never);
+    expect(await db.callAttempt.count({ where: { leadId: l.id } })).toBe(calls);
+    expect((await db.lead.findUniqueOrThrow({ where: { id: l.id } })).queueReason).toBe("Talked with Crystal: recruiter continues");
   });
 
   it("any recruiter status stops the queued AI calls", async () => {

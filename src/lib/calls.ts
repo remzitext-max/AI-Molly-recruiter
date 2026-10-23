@@ -69,6 +69,16 @@ export async function attemptCallJob(job: Job) {
     return;
   }
 
+  // A retry for a driver who already gave their details in an earlier call (queued before this
+  // rule existed, or a late transcript): the recruiter continues. A callback the driver asked for still goes.
+  if (lead.attemptCount > 0 && !lead.reengagedAt && !lead.isDemo && lead.pipelineStatus !== "CALLBACK_SCHEDULED") {
+    const talked = await callWhereDriverTalked(leadId);
+    if (talked) {
+      await handToRecruiterAfterTalk(leadId, talked.id);
+      return;
+    }
+  }
+
   const gate = await evaluateContactGate({ lead, settings, channel: "CALL", now });
   if (!gate.ok) {
     await db.lead.update({ where: { id: leadId }, data: { queueReason: gate.message, nextContactAt: gate.retryAt ?? null } });
@@ -175,6 +185,13 @@ const TALK_KEYS_SKIPPED = ["first_name", "english_level"];
 /** How many screening answers the driver gave in this call. */
 export async function answersInCall(attemptId: string) {
   return db.screeningField.count({ where: { callAttemptId: attemptId, reportedValue: { not: null }, key: { notIn: TALK_KEYS_SKIPPED } } });
+}
+
+/** An earlier call of this lead where the driver gave 2+ answers and no clear yes or no. */
+async function callWhereDriverTalked(leadId: string) {
+  const byCall = await db.screeningField.groupBy({ by: ["callAttemptId"], where: { leadId, callAttemptId: { not: null }, reportedValue: { not: null }, key: { notIn: TALK_KEYS_SKIPPED } }, _count: true });
+  const ids = byCall.filter((g) => g._count >= 2).map((g) => g.callAttemptId!);
+  return ids.length ? db.callAttempt.findFirst({ where: { id: { in: ids }, outcome: "INCOMPLETE" }, select: { id: true } }) : null;
 }
 
 /**
