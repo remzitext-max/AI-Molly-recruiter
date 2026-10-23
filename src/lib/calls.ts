@@ -23,7 +23,7 @@ import { mockCalls } from "../adapters/mock";
 import { SHEETS_SOURCE } from "./import";
 import { writeBackLeadStatus } from "./sheets-sync";
 import { tabRecruiterPhone, transferTargetName } from "./recruiter-tab";
-import { recruiterWorkedStatus } from "./hiring";
+import { HIRE_LABEL, recruiterWorkedStatus } from "./hiring";
 
 export const STATUS_RANK: Record<CallStatus, number> = {
   SCHEDULED: 0, UNKNOWN: 0, DIALING: 1, RINGING: 2, IN_PROGRESS: 3,
@@ -62,8 +62,8 @@ export async function attemptCallJob(job: Job) {
   // Retries and follow-ups: a recruiter may have reached the driver in the meantime
   // (status other than "No answer" in the lead sheet). The first call never waits for this.
   const worked = (lead.reengagedAt || lead.attemptCount > 0) && !lead.isDemo ? await recruiterWorkedStatus(lead.phoneE164) : null;
-  if (worked) {
-    const msg = `Recruiter already talked to the driver (sheet ${worked.tab} tab: ${worked.status})`;
+  if (worked || lead.hireStage !== "NONE") {
+    const msg = worked ? `Recruiter already talked to the driver (sheet ${worked.tab} tab: ${worked.status})` : `Recruiter is working with the driver (status: ${HIRE_LABEL[lead.hireStage]})`;
     await db.lead.update({ where: { id: leadId }, data: { queueReason: msg, nextContactAt: null } });
     await recordEvent({ leadId, actorType: "SYSTEM", type: "CALL_BLOCKED", message: `Call not placed: ${msg}` });
     return;
@@ -168,6 +168,30 @@ async function upsertTask(leadId: string, type: Prisma.TaskCreateInput["type"], 
     update: { status: "OPEN", notes, dueAt },
   });
 }
+
+// Answers that show the driver really talked in a call (not a first-name check or an English rating).
+const TALK_KEYS_SKIPPED = ["first_name", "english_level"];
+
+/** How many screening answers the driver gave in this call. */
+export async function answersInCall(attemptId: string) {
+  return db.screeningField.count({ where: { callAttemptId: attemptId, reportedValue: { not: null }, key: { notIn: TALK_KEYS_SKIPPED } } });
+}
+
+/**
+ * The driver talked with Crystal and gave their details, but the call ended without a
+ * clear yes or no (often the driver hung up). Recruiters take it from here: no more
+ * AI retries (Remzi: a driver who already gave their info is never called again by AI).
+ */
+export async function handToRecruiterAfterTalk(leadId: string, attemptId: string) {
+  const lead = await db.lead.findUnique({ where: { id: leadId }, select: { assignedToId: true, queueReason: true } });
+  if (!lead) return;
+  await db.$executeRaw`UPDATE "Job" SET status = 'CANCELED', "updatedAt" = now() WHERE status = 'PENDING' AND type = 'lead.attempt-call' AND payload->>'leadId' = ${leadId}`;
+  if (lead.queueReason === TALKED_REASON) return;
+  await db.lead.update({ where: { id: leadId }, data: { nextContactAt: null, queueReason: TALKED_REASON } });
+  await upsertTask(leadId, "CALLBACK", "Driver gave their details to Crystal: call to continue", lead.assignedToId, "Call ended before a clear yes or no. No more AI calls.");
+  await recordEvent({ leadId, actorType: "SYSTEM", type: "CALL_RESULT", message: "Driver gave their details in the call; no more AI calls, the recruiter continues.", data: { attemptId } });
+}
+const TALKED_REASON = "Talked with Crystal: recruiter continues";
 
 // ---------------------------------------------------------------------------
 // 2. Provider events (webhooks or simulator). Idempotent and order-tolerant.
@@ -299,6 +323,7 @@ async function postCallWorkflow(attemptId: string) {
       // No contact / voicemail / incomplete: bounded retry, progress untouched.
       // First call rang out: ring again in a minute; a second call from the same number is picked up far more often.
       if (a.status === "NO_ANSWER" && lead.attemptCount === 1) await maybeRetry(lead.id, 1, lead.campaign.maxAttempts, "Double dial after no answer");
+      else if (outcome === "INCOMPLETE" && !lead.isDemo && (await answersInCall(attemptId)) >= 2) await handToRecruiterAfterTalk(lead.id, attemptId);
       else await maybeRetry(lead.id, lead.campaign.retryDelayMinutes, lead.campaign.maxAttempts, `Retry after ${(outcome ?? a.status).toLowerCase().replace(/_/g, " ")}`);
   }
   // Sync results back to the source system when a connector supports it.

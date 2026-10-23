@@ -3,6 +3,7 @@
 import type { HireStage } from "@prisma/client";
 import { db } from "./db";
 import { recordEvent } from "./activity";
+import { cancelPendingOutreach } from "./leads";
 import { enqueue } from "./jobs/queue";
 import { telegramConfigured } from "./telegram";
 import { metaEventsConfigured, queueMetaStageEvent } from "./meta";
@@ -12,12 +13,14 @@ import { normalizePhone } from "./phone";
 import { config } from "./config";
 import { recallNoAnswerLeads, type SheetTab } from "./sheet-recall";
 
-export const HIRE_STAGES: HireStage[] = ["NONE", "APPLICATION", "ORIENTATION", "HIRED", "NOT_HIRED"];
+export const HIRE_STAGES: HireStage[] = ["NONE", "PROCESSING", "APPLICATION", "ORIENTATION", "HIRED", "SAFETY_DECLINED", "NOT_HIRED"];
 export const HIRE_LABEL: Record<HireStage, string> = {
   NONE: "Not set",
+  PROCESSING: "Processing by recruiter",
   APPLICATION: "Application in",
   ORIENTATION: "Orientation booked",
   HIRED: "Hired",
+  SAFETY_DECLINED: "Declined by safety",
   NOT_HIRED: "Not hired",
 };
 
@@ -37,6 +40,11 @@ export async function setHireStage(leadId: string, stage: HireStage, note: strin
         hireNote: cleanNote,
       },
     });
+    // Any status means a recruiter has the driver: Crystal stops calling and texting them.
+    if (stage !== "NONE") {
+      await cancelPendingOutreach(leadId, tx);
+      await tx.lead.update({ where: { id: leadId }, data: { nextContactAt: null, queueReason: `Recruiter is working with the driver (status: ${HIRE_LABEL[stage]})` } });
+    }
     await recordEvent({ leadId, actorType: actor.id ? "USER" : "SYSTEM", actorId: actor.id, type: "HIRE_STAGE", message: `Hiring: ${HIRE_LABEL[lead.hireStage]} → ${HIRE_LABEL[stage]} (by ${actor.name})${cleanNote ? `: ${cleanNote}` : ""}` }, tx);
     if (stage === "HIRED" && lead.hireStage !== "HIRED") {
       await queueMetaStageEvent(leadId, "HIRED", tx);
@@ -55,7 +63,7 @@ const SHEET_STATUS: { re: RegExp; stage?: HireStage; event: string }[] = [
   { re: /^application$/i, stage: "APPLICATION", event: "Application" },
   { re: /^hired$/i, stage: "HIRED", event: "Hired" },
 ];
-const RANK: Record<HireStage, number> = { NONE: 0, NOT_HIRED: 0, APPLICATION: 1, ORIENTATION: 2, HIRED: 3 };
+const RANK: Record<HireStage, number> = { NONE: 0, NOT_HIRED: 0, SAFETY_DECLINED: 0, PROCESSING: 1, APPLICATION: 2, ORIENTATION: 3, HIRED: 4 };
 
 export async function syncHiringFromSheet(now = new Date()) {
   const src = getAdapters().sheets;

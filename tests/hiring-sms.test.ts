@@ -3,8 +3,8 @@ import { db } from "@/lib/db";
 import { addLead, drain, resetDb, seedBase, setPersona } from "./helpers";
 import { setHireStage, syncHiringFromSheet } from "@/lib/hiring";
 import { smsSenderFor } from "@/lib/messaging";
-import { attemptCallJob, callVariables } from "@/lib/calls";
-import { recruiterTags, sendTelegram } from "@/lib/telegram";
+import { attemptCallJob, callVariables, ingestVoiceEvent } from "@/lib/calls";
+import { buildCallReport, recruiterTags, sendTelegram } from "@/lib/telegram";
 import { mockSmsOutbox } from "@/adapters/mock";
 import { setAdapterOverride } from "@/adapters/registry";
 import type { SmsProvider, SmsSender } from "@/adapters/types";
@@ -311,5 +311,48 @@ describe("one Telegram thread per driver", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe("No AI repeat calls once the driver talked or a recruiter set a status", () => {
+  it("hands a driver who gave their details to the recruiter instead of calling again", async () => {
+    const base = await seedBase();
+    await db.campaign.update({ where: { id: base.campaign.id }, data: { isDemo: false } });
+    const l = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Irokalu", lastName: "O", phoneE164: "+17315069681", attemptCount: 1, pipelineStatus: "CONTACTING" } });
+    const t0 = new Date(Date.now() - 400_000);
+    const a = await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", providerCallId: "pc-iro", idempotencyKey: "iro-1", status: "IN_PROGRESS", statusRank: 3, startedAt: t0 } });
+    for (const [key, v] of [["experience_years", "almost three years"], ["home_time", "three weeks out"], ["english_level", "Fair"]]) {
+      await db.screeningField.create({ data: { leadId: l.id, key, reportedValue: v, callAttemptId: a.id } });
+    }
+    await ingestVoiceEvent({ provider: "telnyx", eventId: "iro-end", type: "call_ended", providerCallId: "pc-iro", status: "COMPLETED", outcome: "INCOMPLETE" });
+    expect(await db.job.count({ where: { type: "lead.attempt-call", status: "PENDING", payload: { path: ["leadId"], equals: l.id } } })).toBe(0);
+    const after = await db.lead.findUniqueOrThrow({ where: { id: l.id } });
+    expect(after.queueReason).toBe("Talked with Crystal: recruiter continues");
+    expect(await db.task.count({ where: { leadId: l.id, type: "CALLBACK", status: "OPEN" } })).toBe(1);
+
+    // A later voicemail on a driver who talked before gets the short note, not their old card.
+    const vm = await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "iro-2", status: "COMPLETED", outcome: "INCOMPLETE", startedAt: new Date(Date.now() - 17_000), endedAt: new Date(),
+      metrics: { callNotes: { result: "unclear", unanswered: "experience, location" } }, summary: "Call went to voicemail." } });
+    const card = (await buildCallReport(vm.id))!;
+    expect(card).toContain("no answers collected");
+    expect(card).not.toContain("❓");
+    expect(card).not.toContain("📝");
+    expect(card).toContain("⏹ No more AI calls: Talked with Crystal: recruiter continues");
+  });
+
+  it("any recruiter status stops the queued AI calls", async () => {
+    const base = await seedBase();
+    const r = await addLead(base);
+    if (r.result !== "created") throw new Error("no lead");
+    await db.job.create({ data: { type: "lead.attempt-call", payload: { leadId: r.leadId }, runAt: new Date(Date.now() + 3600_000) } });
+    await setHireStage(r.leadId, "PROCESSING", null, { id: base.admin.id, name: "Ben" });
+    expect(await db.job.count({ where: { type: "lead.attempt-call", status: "PENDING", payload: { path: ["leadId"], equals: r.leadId } } })).toBe(0);
+    const l = await db.lead.findUniqueOrThrow({ where: { id: r.leadId } });
+    expect(l.queueReason).toBe("Recruiter is working with the driver (status: Processing by recruiter)");
+    // A call already due is not placed either.
+    await attemptCallJob({ payload: { leadId: r.leadId } } as never);
+    expect(await db.callAttempt.count({ where: { leadId: r.leadId } })).toBe(0);
+    await setHireStage(r.leadId, "SAFETY_DECLINED", null, { id: base.admin.id, name: "Ben" });
+    expect((await db.lead.findUniqueOrThrow({ where: { id: r.leadId } })).hireStage).toBe("SAFETY_DECLINED");
   });
 });

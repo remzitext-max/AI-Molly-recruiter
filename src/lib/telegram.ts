@@ -101,8 +101,10 @@ export async function sendTelegram(text: string, leadId?: string) {
  * The call's result, the reason a driver said no, the questions left unanswered, and the
  * short notes of the conversation, read from the transcript after the call.
  */
-function notesLines(a: { outcome: string | null; summary: string | null; metrics: unknown }): string[] {
+function notesLines(a: { outcome: string | null; summary: string | null; metrics: unknown }, talked: boolean): string[] {
   const n = ((a.metrics as { callNotes?: CallNotes } | null)?.callNotes ?? {}) as CallNotes;
+  // Voicemail, call screening, a quick hang-up: nothing the driver said is worth a line.
+  if (!talked && !["interested", "not_interested", "call_later"].includes(n.result ?? "") && !["INTERESTED", "NOT_INTERESTED", "CALLBACK"].includes(a.outcome ?? "")) return [];
   const no = a.outcome === "NOT_INTERESTED" || n.result === "not_interested";
   const out: string[] = [];
   if (no) out.push(`🔴 Not interested${n.reason ? `: ${esc(n.reason)}` : ""}`);
@@ -128,7 +130,9 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
   const team = /team/i.test(slot("driving_type"));
   const name = v([l.firstName, l.lastName].filter(Boolean).join(" "));
   const tags = await recruiterTags(l.id);
-  const retryLine = l.attemptCount < l.campaign.maxAttempts ? `🔁 ${v(config.agentPersona.name)} will try again (attempt ${l.attemptCount} of ${l.campaign.maxAttempts})` : `⛔ No more AI attempts; call manually`;
+  const retryLine = l.attemptCount >= l.campaign.maxAttempts ? `⛔ No more AI attempts; call manually`
+    : l.nextContactAt ? `🔁 ${v(config.agentPersona.name)} will try again (attempt ${l.attemptCount} of ${l.campaign.maxAttempts})`
+    : `⏹ No more AI calls${l.queueReason ? `: ${v(l.queueReason)}` : ""}`;
   if (!a.startedAt || a.status === "VOICEMAIL") {
     // Nobody picked up: still tell the group the call was made, so a missing card is never a mystery.
     const why = MISSED[a.status] ?? a.status.toLowerCase().replace(/_/g, " ");
@@ -138,15 +142,19 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
   const ended = endedByText(whoEnded(a), config.agentPersona.name);
   const transferred = Array.isArray(a.transcript) && (a.transcript as { text?: string }[]).some((t) => /^\[transfer/.test(String(t.text ?? "")));
   const endLine = transferred ? `🔀 ${v(config.agentPersona.name)} transferred the driver to the manager${secs !== null ? ` (${secs} sec call)` : ""}` : ended ? `📴 ${v(ended)}${secs !== null ? ` (${secs} sec call)` : ""}` : null;
-  if (!l.screening.some((f) => f.reportedValue && f.key !== "english_level")) {
-    // Nothing was collected (driver hung up, short call; an English rating alone does not count): a one-line note instead of an empty card.
+  // The full card is for a call where the driver talked: answers saved in this call (an English
+  // rating or a name check alone does not count) or a decision. A later voicemail or call
+  // screening on a driver who talked before gets the short note, not their old card again.
+  const talked = l.screening.some((f) => f.callAttemptId === a.id && f.reportedValue && !["english_level", "first_name"].includes(f.key))
+    || ["INTERESTED", "NOT_INTERESTED", "CALLBACK", "HUMAN_REQUESTED"].includes(a.outcome ?? "");
+  if (!talked) {
     return [
       ...tags,
       `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}${secs !== null ? ` (${secs} sec)` : ""}: ${transferred ? "driver asked for a person" : "no answers collected"}`,
       `☎️ ${v(l.phoneE164)}`,
       ...(endLine ? [endLine] : []),
-      ...(a.summary ? [] : lastDriverLines(a.transcript)),
-      ...notesLines(a),
+      ...lastDriverLines(a.transcript),
+      ...notesLines(a, false),
       retryLine,
     ].join("\n");
   }
@@ -166,7 +174,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
     `☎️Phone number : ${v(l.phoneE164)}`,
     `⭐ Fit: ${v(fitText(fit))}`,
     ...(endLine ? [endLine] : []),
-    ...notesLines(a),
+    ...notesLines(a, true),
   ].join("\n");
 }
 

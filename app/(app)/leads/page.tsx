@@ -87,7 +87,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
                 <td><div className="person"><div className="avatar">{initials(l)}</div><div><Link href={`/leads/${l.id}`}>{name(l)}</Link> {l.isDemo && <Badge v="DEMO" tone="demo" />}<div className="small muted">{[l.state, l.zip].filter(Boolean).join(" ") || "—"}</div></div></div></td>
                 <td className="small">{l.phoneE164}</td>
                 <td>{(() => { const f = fitScore(answersOf(l.screening), rules); return <span className={`badge ${fitTone(f)}`} title={[...f.reasons, ...(f.missing.length ? [`Not asked yet: ${f.missing.join(", ")}`] : [])].join("\n") || f.label}>{f.score === null ? "—" : f.score}</span>; })()}</td>
-                <td><Badge v={l.pipelineStatus} />{l.hireStage !== "NONE" && <> <Badge v={HIRE_LABEL[l.hireStage]} tone={l.hireStage === "HIRED" ? "ok" : l.hireStage === "NOT_HIRED" ? "bad" : "info"} /></>}{l.queueReason && <div className="small muted">{l.queueReason}</div>}</td>
+                <td><Badge v={l.pipelineStatus} />{l.hireStage !== "NONE" && <> <Badge v={HIRE_LABEL[l.hireStage]} tone={l.hireStage === "HIRED" ? "ok" : ["NOT_HIRED", "SAFETY_DECLINED"].includes(l.hireStage) ? "bad" : "info"} /></>}{l.queueReason && <div className="small muted">{l.queueReason}</div>}</td>
                 <td>{l.calls[0] ? <><Badge v={l.calls[0].status} /> <span className="small muted">{l.calls[0].outcome?.toLowerCase().replace(/_/g, " ")}</span>{endedBy(l.calls[0]) && <div className="small muted">{endedBy(l.calls[0])}</div>}</> : <span className="muted">—</span>}</td>
                 <td><Badge v={l.documentStatus} /></td>
                 <td className="small">{l.assignedTo?.name ?? <span className="muted">unassigned</span>}</td>

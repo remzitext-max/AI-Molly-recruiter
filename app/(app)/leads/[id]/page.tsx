@@ -218,7 +218,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         <div className="row">
           <Badge v={lead.pipelineStatus} /> <span className="small muted">pipeline</span>
           <Badge v={lead.documentStatus} /> <span className="small muted">CDL</span>
-          {lead.hireStage !== "NONE" && <><Badge v={HIRE_LABEL[lead.hireStage]} tone={lead.hireStage === "HIRED" ? "ok" : lead.hireStage === "NOT_HIRED" ? "bad" : "info"} /> <span className="small muted">hiring</span></>}
+          {lead.hireStage !== "NONE" && <><Badge v={HIRE_LABEL[lead.hireStage]} tone={lead.hireStage === "HIRED" ? "ok" : ["NOT_HIRED", "SAFETY_DECLINED"].includes(lead.hireStage) ? "bad" : "info"} /> <span className="small muted">hiring</span></>}
         </div>
       </div>
       {lead.optedOutAt && <div className="alert error">Opted out on {fmt(lead.optedOutAt)}. No automated calls or texts will be sent; the number is suppressed for future imports.</div>}
@@ -261,7 +261,12 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                 <form action={clickToCall}>{hidden}<button className="secondary">Call from my phone</button></form>
                 <form action={stopCalls}>{hidden}<ConfirmButton className="secondary" title="Stop AI calls for this driver?" message="Crystal will not call this driver again. The lead stays on the site and you can still call or text them yourself." confirmLabel="Stop AI calls">Stop AI calls</ConfirmButton></form>
                 <form action={optOut}>{hidden}<ConfirmButton className="danger" danger title="Opt this driver out?" message="The number is blocked for good: no AI calls, no texts, and future imports of this number are skipped. Use this only if the driver asked not to be contacted." confirmLabel="Yes, opt out">Opt out / stop contact</ConfirmButton></form>
+                <form action={setHire} className="inline">{hidden}<input type="hidden" name="hireNote" value={lead.hireNote ?? ""} />
+                  <select name="hireStage" defaultValue={lead.hireStage} aria-label="Driver status">{HIRE_STAGES.map((h) => <option key={h} value={h}>{h === "NONE" ? "Status: not set" : HIRE_LABEL[h]}</option>)}</select>
+                  <button className="secondary">Set status</button>
+                </form>
               </div>
+              <p className="small muted">Any status (processing, application, hired, declined by safety) stops Crystal&apos;s calls and texts for this driver.</p>
             </>
           )}
           <h3>Timezone</h3>
@@ -281,7 +286,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
           <input name="hireNote" defaultValue={lead.hireNote ?? ""} placeholder="Note (optional), e.g. orientation date or why not" size={40} maxLength={500} />
           <button>Save</button>
         </form>
-        <p className="small muted" style={{ margin: "6px 0 0" }}>Set by the recruiter as the driver moves on. &ldquo;Hired&rdquo; counts on the dashboard (lead to hire, cost per hire) and posts to Telegram.</p>
+        <p className="small muted" style={{ margin: "6px 0 0" }}>Set by the recruiter as the driver moves on; any status stops Crystal&apos;s calls. &ldquo;Hired&rdquo; counts on the dashboard (lead to hire, cost per hire) and posts to Telegram.</p>
       </Card>
 
       <Card title="Fit score" right={<span className={`badge ${fitTone(fit)}`} style={{ fontSize: 13 }}>{fit.score === null ? fit.label : `${fit.score}/100 · ${fit.label}`}</span>}>

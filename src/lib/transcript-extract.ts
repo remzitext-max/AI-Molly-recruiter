@@ -9,6 +9,7 @@ import { redactText } from "./redact";
 import { recordEvent } from "./activity";
 import { advancePipeline } from "./leads";
 import { enqueue } from "./jobs/queue";
+import { answersInCall, handToRecruiterAfterTalk } from "./calls";
 
 const URL_ = "https://api.telnyx.com/v2/ai/openai/chat/completions";
 
@@ -129,9 +130,13 @@ export async function fillScreeningFromTranscript(attemptId: string): Promise<st
  */
 async function settleUnfinishedCall(attemptId: string, leadId: string, result?: string, reason?: string) {
   const r = (result ?? "").toLowerCase().replace(/[^a-z_]/g, "");
-  if (r !== "interested" && r !== "not_interested") return;
-  const lead = await db.lead.findUnique({ where: { id: leadId }, select: { pipelineStatus: true } });
-  if (!lead || !["NEW", "QUEUED", "CONTACTING"].includes(lead.pipelineStatus)) return;
+  const lead = await db.lead.findUnique({ where: { id: leadId }, select: { pipelineStatus: true, isDemo: true } });
+  if (!lead || lead.isDemo || !["NEW", "QUEUED", "CONTACTING"].includes(lead.pipelineStatus)) return;
+  if (r !== "interested" && r !== "not_interested") {
+    // No clear decision, but the driver gave their details (read from the transcript): the recruiter continues.
+    if (r !== "call_later" && (await answersInCall(attemptId)) >= 2) await handToRecruiterAfterTalk(leadId, attemptId);
+    return;
+  }
   await db.callAttempt.update({ where: { id: attemptId }, data: { outcome: r === "interested" ? "INTERESTED" : "NOT_INTERESTED" } });
   await db.$executeRaw`UPDATE "Job" SET status = 'CANCELED', "updatedAt" = now() WHERE status = 'PENDING' AND type = 'lead.attempt-call' AND payload->>'leadId' = ${leadId}`;
   if (r === "not_interested") {

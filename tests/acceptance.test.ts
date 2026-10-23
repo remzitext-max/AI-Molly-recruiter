@@ -607,6 +607,7 @@ describe("Telegram driver card", () => {
     await drain();
     expect(await buildCallReport((await lastCall(demo)).id)).toBeNull();
     const unanswered = await db.callAttempt.create({ data: { leadId: real.id, provider: "telnyx", idempotencyKey: "tg-2", status: "NO_ANSWER" } });
+    await db.lead.update({ where: { id: real.id }, data: { nextContactAt: new Date() } });
     // Nobody picked up: a one-line note so the group knows the call was made.
     const missed = await buildCallReport(unanswered.id);
     expect(missed).toContain("📞 Crystal AI called");
@@ -614,7 +615,7 @@ describe("Telegram driver card", () => {
     expect(missed).toMatch(/will try again|No more AI attempts/);
 
     // Answered but nothing collected: a short note, not an empty card.
-    const quiet = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Frank", lastName: "D", phoneE164: "+18124065861", attemptCount: 1 } });
+    const quiet = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Frank", lastName: "D", phoneE164: "+18124065861", attemptCount: 1, nextContactAt: new Date() } });
     const t0 = new Date("2026-10-21T00:36:00Z");
     const short = await db.callAttempt.create({ data: { leadId: quiet.id, provider: "telnyx", idempotencyKey: "tg-3", status: "COMPLETED", startedAt: t0, endedAt: new Date(t0.getTime() + 26_000) } });
     await db.screeningField.create({ data: { leadId: quiet.id, key: "english_level", reportedValue: "Good", callAttemptId: short.id } });
@@ -840,7 +841,7 @@ describe("Telnyx transcript fetch", () => {
       return new Response(JSON.stringify({ data: [{ id: "conv-1" }] }), { status: 200 });
     });
     try {
-      const l = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Frank", lastName: "D", phoneE164: "+18124065861", attemptCount: 1 } });
+      const l = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Frank", lastName: "D", phoneE164: "+18124065861", attemptCount: 1, nextContactAt: new Date() } });
       const t0 = new Date("2026-10-21T00:36:00Z");
       const a = await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "tx-1", status: "COMPLETED", startedAt: t0, endedAt: new Date(t0.getTime() + 26_000) } });
       expect(await fetchTelnyxTranscript(a.id)).toEqual({ saved: true, turns: 2 });

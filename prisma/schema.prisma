@@ -36,9 +36,11 @@ enum PipelineStatus {
 /// Hiring result, set by recruiters after Crystal hands the driver over.
 enum HireStage {
   NONE
+  PROCESSING
   APPLICATION
   ORIENTATION
   HIRED
+  SAFETY_DECLINED
   NOT_HIRED
 }
 
