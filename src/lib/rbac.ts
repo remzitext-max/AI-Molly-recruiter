@@ -6,10 +6,13 @@ export class ForbiddenError extends Error {
   constructor(msg = "Forbidden") { super(msg); }
 }
 
-/** Prisma filter restricting leads to what this user may see. */
+/**
+ * Prisma filter restricting leads to what this user may see: every lead of the company,
+ * for recruiters too (the team shares one lead sheet, so any recruiter may pick up any
+ * driver). Admin-only pages (Settings, Users, Facebook ads) stay admin-only.
+ */
 export function leadScope(user: Pick<User, "id" | "role" | "orgId">): Prisma.LeadWhereInput {
-  if (user.role === "ADMIN") return { orgId: user.orgId };
-  return { orgId: user.orgId, assignedToId: user.id };
+  return { orgId: user.orgId };
 }
 
 export async function canAccessLead(user: Pick<User, "id" | "role" | "orgId">, leadId: string) {

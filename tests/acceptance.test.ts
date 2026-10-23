@@ -312,16 +312,14 @@ describe("7/8. secure CDL upload and access", () => {
     const id = (r as { leadId: string }).leadId;
     const link = await createUploadLink(id);
     const { documentId } = await handleUpload(link.token, { data: JPEG });
-    const owner = (await db.lead.findUniqueOrThrow({ where: { id } })).assignedToId;
-    const other = owner === base.molly.id ? base.alex : base.molly;
-    await expect(readDocumentForUser(other, documentId)).rejects.toThrow(/No access/);
+    await expect(readDocumentForUser({ ...base.molly, orgId: "another-company" }, documentId)).rejects.toThrow(/No access/);
     const ok = await readDocumentForUser(base.admin, documentId);
     expect(ok.data.equals(JPEG)).toBe(true);
   });
 });
 
 describe("9. recruiter permissions", () => {
-  it("recruiters only see assigned candidates", async () => {
+  it("recruiters see every candidate of their company, not another company's", async () => {
     const base = await seedBase();
     const a = (await addLead(base)) as { leadId: string };
     const b = (await addLead(base)) as { leadId: string };
@@ -329,11 +327,11 @@ describe("9. recruiter permissions", () => {
     const lb = await db.lead.findUniqueOrThrow({ where: { id: b.leadId } });
     expect(la.assignedToId).not.toBe(lb.assignedToId); // round robin
     const mollyLeads = await db.lead.findMany({ where: leadScope(base.molly) });
-    expect(mollyLeads.length).toBe(1);
+    expect(mollyLeads.length).toBe(2);
     const mollyOwns = la.assignedToId === base.molly.id ? la.id : lb.id;
     const notMine = mollyOwns === la.id ? lb.id : la.id;
-    expect(await canAccessLead(base.molly, notMine)).toBe(false);
-    expect(await canAccessLead(base.admin, notMine)).toBe(true);
+    expect(await canAccessLead(base.molly, notMine)).toBe(true);
+    expect(await canAccessLead({ ...base.molly, orgId: "another-company" }, notMine)).toBe(false);
   });
 });
 
