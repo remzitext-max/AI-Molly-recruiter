@@ -6,6 +6,8 @@ import { db } from "./db";
 import { providerFetch } from "../adapters/live/http";
 import { redactText } from "./redact";
 import { recordEvent } from "./activity";
+import { advancePipeline } from "./leads";
+import { enqueue } from "./jobs/queue";
 
 const URL_ = "https://api.telnyx.com/v2/ai/openai/chat/completions";
 
@@ -28,6 +30,13 @@ const FIELDS: Record<string, string> = {
   concerns: "any concern or question the driver raised, short",
 };
 
+// Always asked: whether the driver said yes or no, for calls that ended before the
+// agent recorded an outcome (e.g. the driver hung up after saying no).
+const RESULT_KEYS: Record<string, string> = {
+  call_result: "the driver's decision in this call, one of: interested, not_interested, call_later, unclear",
+  decline_reason: "if not_interested: why, short, in the driver's words",
+};
+
 type Turn = { speaker: string; text: string };
 
 /** The JSON object from the model's reply, keeping only known keys with non-empty string values. Exported for tests. */
@@ -38,7 +47,7 @@ export function parseAnswers(content: string): Record<string, string> {
   try { obj = JSON.parse(m[0]); } catch { return {}; }
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(obj)) {
-    if (k in FIELDS && typeof v === "string" && v.trim() && !/^(unknown|n\/a|none|null)$/i.test(v.trim())) out[k] = v.trim().slice(0, 200);
+    if ((k in FIELDS || k in RESULT_KEYS) && typeof v === "string" && v.trim() && !/^(unknown|n\/a|none|null)$/i.test(v.trim())) out[k] = v.trim().slice(0, 200);
   }
   return out;
 }
@@ -50,12 +59,12 @@ export async function fillScreeningFromTranscript(attemptId: string): Promise<st
   if (!a || !config.telnyx.apiKey || !turns.some((t) => t.speaker === "driver")) return [];
   const have = new Set(a.lead.screening.filter((f) => f.reportedValue).map((f) => f.key));
   const wanted = Object.keys(FIELDS).filter((k) => !have.has(k));
-  if (!wanted.length) return [];
+  const asked = [...wanted.map((k) => `- ${k}: ${FIELDS[k]}`), ...Object.entries(RESULT_KEYS).map(([k, d]) => `- ${k}: ${d}`)];
 
   const text = turns.map((t) => `${t.speaker === "driver" ? "Driver" : "Recruiter"}: ${t.text.replace(/<[^>]+>/g, "")}`).join("\n").slice(0, 20_000);
   const messages = [
     { role: "system", content: "You read a phone call between a trucking recruiter and a truck driver and return ONLY a JSON object, no other text. Include a key only when the DRIVER actually gave that answer in the call; never guess, never copy what the recruiter offered. Use the driver's own words, short." },
-    { role: "user", content: `Keys:\n${wanted.map((k) => `- ${k}: ${FIELDS[k]}`).join("\n")}\n\nCall:\n${text}` },
+    { role: "user", content: `Keys:\n${asked.join("\n")}\n\nCall:\n${text}` },
   ];
   const ask = async (strict: boolean) => {
     const res = await providerFetch(URL_, {
@@ -92,5 +101,31 @@ export async function fillScreeningFromTranscript(attemptId: string): Promise<st
     filled.push(k);
   }
   await recordEvent({ leadId: a.leadId, actorType: "SYSTEM", type: "TRANSCRIPT_ANSWERS", message: filled.length ? `Answers read from the call text: ${filled.join(", ")}` : "No new answers found in the call text" });
+  if (a.outcome === "INCOMPLETE") await settleUnfinishedCall(a.id, a.leadId, answers.call_result, answers.decline_reason);
   return filled;
+}
+
+/**
+ * The driver answered and decided, but the call ended (often the driver hanging up)
+ * before the agent recorded it. Without this the lead stays queued and gets the
+ * whole pitch again hours later. A clear yes goes to the recruiter, a clear no stops
+ * the AI calls (the 30-day follow-up still applies); anything else keeps the retry.
+ */
+async function settleUnfinishedCall(attemptId: string, leadId: string, result?: string, reason?: string) {
+  const r = (result ?? "").toLowerCase().replace(/[^a-z_]/g, "");
+  if (r !== "interested" && r !== "not_interested") return;
+  const lead = await db.lead.findUnique({ where: { id: leadId }, select: { pipelineStatus: true } });
+  if (!lead || !["NEW", "QUEUED", "CONTACTING"].includes(lead.pipelineStatus)) return;
+  await db.$executeRaw`UPDATE "Job" SET status = 'CANCELED', "updatedAt" = now() WHERE status = 'PENDING' AND type = 'lead.attempt-call' AND payload->>'leadId' = ${leadId}`;
+  if (r === "not_interested") {
+    const why = reason ? `: ${redactText(reason).slice(0, 150)}` : "";
+    await db.lead.update({ where: { id: leadId }, data: { nextContactAt: null, queueReason: `Driver said no in the call${why}` } });
+    await advancePipeline(leadId, "NOT_INTERESTED");
+    await recordEvent({ leadId, actorType: "SYSTEM", type: "CALL_RESULT", message: `Driver said no in the call${why}. No more AI calls (call ended before the agent saved it).` });
+  } else {
+    await db.lead.update({ where: { id: leadId }, data: { nextContactAt: null, queueReason: "Interested in the call: for the recruiter" } });
+    await advancePipeline(leadId, "INTERESTED");
+    await enqueue("handoff.evaluate", { leadId }, { idempotencyKey: `handoff-eval:call:${attemptId}` });
+    await recordEvent({ leadId, actorType: "SYSTEM", type: "CALL_RESULT", message: "Driver was interested in the call; no repeat AI call, handed to the recruiter (call ended before the agent saved it)." });
+  }
 }

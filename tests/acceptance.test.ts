@@ -657,6 +657,42 @@ describe("Screening answers from the transcript", () => {
   });
 });
 
+describe("Call that ended before the agent saved the driver's decision", () => {
+  it("a clear no stops the retries; a clear yes goes to the recruiter instead of a repeat call", async () => {
+    const base = await seedBase();
+    process.env.TELNYX_API_KEY = "KEY";
+    let result = "not_interested";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      const content = JSON.stringify({ experience_years: "twelve years", call_result: result, decline_reason: "home time too low" });
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
+    });
+    try {
+      const mk = async (phone: string) => {
+        const l = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Maurys", lastName: "J", phoneE164: phone, attemptCount: 1, pipelineStatus: "QUEUED" } });
+        const a = await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: `inc-${phone}`, status: "COMPLETED", outcome: "INCOMPLETE",
+          transcript: [{ speaker: "agent", text: "Which home time works?" }, { speaker: "driver", text: "That's way too low." }] } });
+        await db.job.create({ data: { type: "lead.attempt-call", payload: { leadId: l.id }, runAt: new Date(Date.now() + 4 * 3600_000) } });
+        await fillScreeningFromTranscript(a.id);
+        return l.id;
+      };
+      const no = await mk("+17864867007");
+      expect((await db.lead.findUniqueOrThrow({ where: { id: no } })).pipelineStatus).toBe("NOT_INTERESTED");
+      expect(await db.job.count({ where: { type: "lead.attempt-call", status: "PENDING", payload: { path: ["leadId"], equals: no } } })).toBe(0);
+      expect((await db.activityEvent.findFirstOrThrow({ where: { leadId: no, type: "CALL_RESULT" } })).message).toContain("home time too low");
+      result = "interested";
+      const yes = await mk("+17864867008");
+      expect((await db.lead.findUniqueOrThrow({ where: { id: yes } })).pipelineStatus).toBe("INTERESTED");
+      expect(await db.job.count({ where: { type: "lead.attempt-call", status: "PENDING", payload: { path: ["leadId"], equals: yes } } })).toBe(0);
+      result = "unclear";
+      const unsure = await mk("+17864867009");
+      expect(await db.job.count({ where: { type: "lead.attempt-call", status: "PENDING", payload: { path: ["leadId"], equals: unsure } } })).toBe(1);
+    } finally {
+      fetchSpy.mockRestore();
+      delete process.env.TELNYX_API_KEY;
+    }
+  });
+});
+
 describe("Photos texted back to the RingCentral number", () => {
   it("saves a lead's MMS photo as a document and ignores numbers that are not leads", async () => {
     const base = await seedBase();
