@@ -19,15 +19,19 @@ const COST_PER_MIN = 0.06;
 const RANGES = { today: "Today", "7d": "Last 7 days", "30d": "Last 30 days" } as const;
 type Range = keyof typeof RANGES;
 const ANSWERED = ["COMPLETED"] as const;
-// Telnyx reports voicemail pickups and instant hang-ups as "completed" too, so a
-// real conversation is an answered call that lasted at least this long, or one
-// where the driver gave an answer Crystal recorded.
-const TALK_SECONDS = 30;
+// A real conversation is a call where the driver gave Crystal at least one screening
+// answer (English rating alone does not count), or made a clear decision. Voicemail,
+// iPhone call screening and quick hang-ups are "completed" calls too, so length alone
+// does not count.
 const TEST_LAST_NAMES = ["(owner test)", "Test", "test", "TEST"];
-const SPOKE = ["INTERESTED", "NOT_INTERESTED", "CALLBACK", "HUMAN_REQUESTED", "OPT_OUT", "WRONG_NUMBER"];
-const talked = (c: { status?: string; outcome: string | null; startedAt: Date | null; endedAt: Date | null }) =>
-  (c.status ?? "COMPLETED") === "COMPLETED" &&
-  (SPOKE.includes(c.outcome ?? "") || (!!c.startedAt && !!c.endedAt && c.endedAt.getTime() - c.startedAt.getTime() >= TALK_SECONDS * 1000));
+const OWNER_PHONES = ["+18162913808", "+18158461661"];
+const DECIDED = ["INTERESTED", "NOT_INTERESTED", "CALLBACK", "HUMAN_REQUESTED"];
+type CallRow = { id: string; status?: string; outcome: string | null };
+/** Ids of the calls in which the driver answered a screening question. */
+async function callsWithAnswers(ids: string[]) {
+  const rows = await db.screeningField.findMany({ where: { callAttemptId: { in: ids }, key: { not: "english_level" }, reportedValue: { not: null } }, select: { callAttemptId: true }, distinct: ["callAttemptId"] });
+  return new Set(rows.map((r) => r.callAttemptId!));
+}
 const PLACED = { notIn: ["CANCELED", "SCHEDULED"] as ("CANCELED" | "SCHEDULED")[] };
 
 async function loadDemo() {
@@ -99,7 +103,7 @@ function CallsChart({ days }: { days: { label: string; answered: number; other: 
           const showLabel = days.length <= 14 || i % 3 === 0 || i === days.length - 1;
           return (
             <g key={i}>
-              <title>{`${d.label}: ${d.answered + d.other} calls, ${d.answered} talked ${TALK_SECONDS}s+`}</title>
+              <title>{`${d.label}: ${d.answered + d.other} calls, ${d.answered} talked to a driver`}</title>
               <rect x={L + i * slot} y={T} width={slot} height={H - T - B} fill="transparent" />
               {d.other > 0 && <rect x={x} y={yo} width={bw} height={Math.max(0, ya - yo - (d.answered ? 2 : 0))} rx={3} fill="var(--series-muted)" />}
               {d.answered > 0 && <rect x={x} y={ya} width={bw} height={y(0) - ya} rx={3} fill="var(--series-1)" />}
@@ -118,7 +122,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const range: Range = sp.range && sp.range in RANGES ? (sp.range as Range) : "7d";
   const isDemo = config.mode === "demo";
   // Owner test calls (scripts/telnyx-test-call.ts, "Remzi Test" sheet rows) are not real results.
-  const scope = { ...leadScope(user), isDemo, OR: [{ lastName: null }, { lastName: { notIn: TEST_LAST_NAMES } }] };
+  const scope = { ...leadScope(user), isDemo, phoneE164: { notIn: OWNER_PHONES }, OR: [{ lastName: null }, { lastName: { notIn: TEST_LAST_NAMES } }] };
   const now = DateTime.now().setZone(ZONE);
   const start = range === "today" ? now.startOf("day") : now.startOf("day").minus({ days: range === "7d" ? 6 : 29 });
   const len = now.toMillis() - start.toMillis();
@@ -130,24 +134,24 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const chartStart = now.startOf("day").minus({ days: chartDays - 1 });
 
   const [
-    newLeads, prevLeads, placed, prevPlaced, answeredCalls, prevAnswered, interestedLeads, prevInterested,
+    newLeads, prevLeads, placed, prevPlaced, answeredCalls, prevAnsweredCalls, interestedLeads, prevInterested,
     docsLeads, prevDocs, chartCalls, outcomes, rangeLeads, bySource, attention, openTasks, recent, pendingJobs, hiredNow, hiredPrev,
   ] = await Promise.all([
     db.lead.count({ where: { ...scope, createdAt: inRange } }),
     db.lead.count({ where: { ...scope, createdAt: inPrev } }),
     db.callAttempt.count({ where: { lead: scope, status: PLACED, createdAt: inRange } }),
     db.callAttempt.count({ where: { lead: scope, status: PLACED, createdAt: inPrev } }),
-    db.callAttempt.findMany({ where: { lead: scope, status: { in: [...ANSWERED] }, createdAt: inRange }, select: { outcome: true, startedAt: true, endedAt: true } }),
-    db.callAttempt.findMany({ where: { lead: scope, status: { in: [...ANSWERED] }, createdAt: inPrev }, select: { outcome: true, startedAt: true, endedAt: true } }).then((x) => x.filter(talked).length),
+    db.callAttempt.findMany({ where: { lead: scope, status: { in: [...ANSWERED] }, createdAt: inRange }, select: { id: true, outcome: true, startedAt: true, endedAt: true } }),
+    db.callAttempt.findMany({ where: { lead: scope, status: { in: [...ANSWERED] }, createdAt: inPrev }, select: { id: true, outcome: true } }),
     db.callAttempt.findMany({ where: { lead: scope, outcome: "INTERESTED", createdAt: inRange }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
     db.callAttempt.findMany({ where: { lead: scope, outcome: "INTERESTED", createdAt: inPrev }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
     db.document.findMany({ where: { lead: scope, uploadedAt: inRange }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
     db.document.findMany({ where: { lead: scope, uploadedAt: inPrev }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
-    db.callAttempt.findMany({ where: { lead: scope, status: PLACED, createdAt: { gte: chartStart.toJSDate() } }, select: { createdAt: true, status: true, outcome: true, startedAt: true, endedAt: true } }),
+    db.callAttempt.findMany({ where: { lead: scope, status: PLACED, createdAt: { gte: chartStart.toJSDate() } }, select: { id: true, createdAt: true, status: true, outcome: true } }),
     db.callAttempt.groupBy({ by: ["outcome"], where: { lead: scope, status: PLACED, createdAt: inRange }, _count: true }),
     db.lead.findMany({
       where: { ...scope, createdAt: inRange },
-      select: { createdAt: true, pipelineStatus: true, documentStatus: true, hireStage: true, assignedTo: { select: { id: true, name: true } }, calls: { where: { status: PLACED }, orderBy: { createdAt: "asc" }, select: { createdAt: true, status: true, outcome: true, startedAt: true, endedAt: true } } },
+      select: { createdAt: true, pipelineStatus: true, documentStatus: true, hireStage: true, assignedTo: { select: { id: true, name: true } }, calls: { where: { status: PLACED }, orderBy: { createdAt: "asc" }, select: { id: true, createdAt: true, status: true, outcome: true } } },
     }),
     db.leadSourceRecord.groupBy({ by: ["sourceSystem"], where: { lead: { ...scope, createdAt: inRange } }, _count: true }),
     db.lead.findMany({
@@ -161,6 +165,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     db.lead.count({ where: { ...scope, hireStage: "HIRED", hiredAt: inPrev } }),
   ]);
 
+  const gaveAnswers = await callsWithAnswers([...answeredCalls, ...prevAnsweredCalls, ...chartCalls, ...rangeLeads.flatMap((l) => l.calls)].map((c) => c.id));
+  const talked = (c: CallRow) => (c.status ?? "COMPLETED") === "COMPLETED" && (DECIDED.includes(c.outcome ?? "") || gaveAnswers.has(c.id));
+  const prevAnswered = prevAnsweredCalls.filter(talked).length;
   const pickedUp = answeredCalls.length;
   const answered = answeredCalls.filter(talked).length;
   const talkMins = answeredCalls.map((c) => (c.startedAt && c.endedAt ? Math.max(0, (c.endedAt.getTime() - c.startedAt.getTime()) / 60000) : 0));
@@ -185,7 +192,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const funnel = [
     { label: "New leads", n: newLeads },
     { label: "Called", n: calledLeads },
-    { label: `Talked (${TALK_SECONDS}s+)`, n: rangeLeads.filter((l) => l.calls.some(talked)).length },
+    { label: "Talked to driver", n: rangeLeads.filter((l) => l.calls.some(talked)).length },
     { label: "Interested", n: rangeLeads.filter((l) => INTERESTED_UP.includes(l.pipelineStatus)).length },
     { label: "CDL received", n: rangeLeads.filter((l) => l.documentStatus === "RECEIVED").length },
     { label: "Handed off", n: rangeLeads.filter((l) => ["HANDOFF_READY", "HANDED_OFF"].includes(l.pipelineStatus)).length },
@@ -231,7 +238,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <div className="stats four">
         <Stat label="New leads" icon="leads" tone="blue" n={newLeads} sub={<Delta now={newLeads} prev={prevLeads} />} />
         <Stat label="AI calls placed" icon="phone" tone="violet" n={placed} sub={<Delta now={placed} prev={prevPlaced} />} />
-        <Stat label="Talked to driver" icon="voice" tone="teal" n={`${pct(answered, placed)}%`} sub={<>{answered} of {placed} calls · {pickedUp - answered} voicemail or under {TALK_SECONDS}s · <Delta now={answered} prev={prevAnswered} /></>} />
+        <Stat label="Talked to driver" icon="voice" tone="teal" n={`${pct(answered, placed)}%`} sub={<>{answered} of {placed} calls · {pickedUp - answered} picked up without a real talk (voicemail, call screening, hang-up) · <Delta now={answered} prev={prevAnswered} /></>} />
         <Stat label="Interested drivers" icon="star" tone="green" n={interestedLeads} sub={<Delta now={interestedLeads} prev={prevInterested} />} />
         <Stat label="CDL / med card received" icon="doc" tone="amber" n={docsLeads} sub={<Delta now={docsLeads} prev={prevDocs} />} />
         <Stat label="Speed to first call" icon="clock" tone="rose" n={mins(speed)} sub="median, lead in → first AI call" />
@@ -240,7 +247,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       </div>
 
       <div className="grid wide-left section">
-        <Card title="Calls per day" right={<div className="legend"><span><i style={{ background: "var(--series-1)" }} />Talked {TALK_SECONDS}s+</span><span><i style={{ background: "var(--series-muted)" }} />No answer, voicemail or short</span></div>}>
+        <Card title="Calls per day" right={<div className="legend"><span><i style={{ background: "var(--series-1)" }} />Talked to driver</span><span><i style={{ background: "var(--series-muted)" }} />No answer, voicemail or no real talk</span></div>}>
           <CallsChart days={days} />
           <p className="small muted" style={{ margin: "8px 0 0" }}>Last {chartDays} days, Central time. Hover a bar for the numbers.</p>
         </Card>
@@ -281,7 +288,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <div className="d">{billedMins} billed min · avg talk {avgTalk.toFixed(1)} min</div>
           </div>
           <table style={{ marginTop: 10 }}><tbody>
-            <tr><td className="muted">Per conversation ({TALK_SECONDS}s+)</td><td className="num">{answered ? `$${(cost / answered).toFixed(2)}` : "—"}</td></tr>
+            <tr><td className="muted">Per real conversation</td><td className="num">{answered ? `$${(cost / answered).toFixed(2)}` : "—"}</td></tr>
             <tr><td className="muted">Per interested driver</td><td className="num">{interestedLeads ? `$${(cost / interestedLeads).toFixed(2)}` : "—"}</td></tr>
             <tr><td className="muted">Per CDL received</td><td className="num">{docsLeads ? `$${(cost / docsLeads).toFixed(2)}` : "—"}</td></tr>
             <tr><td className="muted">Per hire</td><td className="num">{hiredNow ? `$${(cost / hiredNow).toFixed(2)}` : "—"}</td></tr>

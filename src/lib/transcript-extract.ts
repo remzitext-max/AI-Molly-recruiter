@@ -132,6 +132,7 @@ async function settleUnfinishedCall(attemptId: string, leadId: string, result?: 
   if (r !== "interested" && r !== "not_interested") return;
   const lead = await db.lead.findUnique({ where: { id: leadId }, select: { pipelineStatus: true } });
   if (!lead || !["NEW", "QUEUED", "CONTACTING"].includes(lead.pipelineStatus)) return;
+  await db.callAttempt.update({ where: { id: attemptId }, data: { outcome: r === "interested" ? "INTERESTED" : "NOT_INTERESTED" } });
   await db.$executeRaw`UPDATE "Job" SET status = 'CANCELED', "updatedAt" = now() WHERE status = 'PENDING' AND type = 'lead.attempt-call' AND payload->>'leadId' = ${leadId}`;
   if (r === "not_interested") {
     const why = reason ? `: ${redactText(reason).slice(0, 150)}` : "";
