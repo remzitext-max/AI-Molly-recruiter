@@ -22,6 +22,7 @@ import { personaByKey } from "./conversation/personas";
 import { mockCalls } from "../adapters/mock";
 import { SHEETS_SOURCE } from "./import";
 import { writeBackLeadStatus } from "./sheets-sync";
+import { tabRecruiterPhone, transferTargetName } from "./recruiter-tab";
 import { recruiterWorkedStatus } from "./hiring";
 
 export const STATUS_RANK: Record<CallStatus, number> = {
@@ -638,7 +639,7 @@ export async function callVariables(
   return {
     driver_first_name: lead.firstName ?? "", company_name: (await db.organization.findUnique({ where: { id: lead.orgId } }))?.name ?? "",
     offer_version_id: offerVersionId, attempt_id: attemptId,
-    driver_timezone: lead.timezone ?? "unknown", ...(await transferVariables(lead.orgId)),
+    driver_timezone: lead.timezone ?? "unknown", ...(await transferVariables(lead.orgId, lead.id)),
     // Sheet leads arrive within a minute of applying, so the import time stands in when no permission date was recorded.
     applied_when: appliedWhen(lead.permissions.find((p) => p.scope === "AI_CALL" && !p.revokedAt)?.grantedAt ?? lead.createdAt ?? null, now),
     time_greeting: timeGreeting(lead.timezone, now),
@@ -672,11 +673,14 @@ export function appliedPosition(raws: unknown[]): string {
   return "a truck driving position";
 }
 
-// Molly's direct line for the Retell transfer tool and the voicemail callback number.
-async function transferVariables(orgId: string): Promise<Record<string, string>> {
+// Who Crystal's transfer reaches: the recruiter of the driver's sheet tab when Settings
+// has a phone for that tab (e.g. Dennis), otherwise the manager marked available on Users.
+async function transferVariables(orgId: string, leadId: string): Promise<Record<string, string>> {
+  const tab = await tabRecruiterPhone(leadId);
+  if (tab) return { transfer_number: tab.phone, recruiter_phone: tab.phone, transfer_target: transferTargetName(tab.tab) };
   const r = await db.user.findFirst({ where: { orgId, availableForTransfer: true, transferPhoneE164: { not: null } } });
   const phone = r?.transferPhoneE164 ?? "";
-  return { transfer_number: phone, recruiter_phone: phone };
+  return { transfer_number: phone, recruiter_phone: phone, transfer_target: "manager" };
 }
 
 // Rounded, truthful phrase for when the driver applied, from the recorded call permission date.

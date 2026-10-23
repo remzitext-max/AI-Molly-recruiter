@@ -9,6 +9,7 @@ import { recordingMime } from "./recordings";
 import { getSettings } from "./settings";
 import { answersOf, fitRulesFrom, fitScore, fitText } from "./fit-score";
 import { endedByText, whoEnded } from "./call-end";
+import { leadSheetTab } from "./recruiter-tab";
 import type { CallNotes } from "./transcript-extract";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -36,12 +37,11 @@ export function parseRecruiterTelegram(text: string): Map<string, string> {
  */
 export async function recruiterTags(leadId: string): Promise<string[]> {
   const extra = config.googleSheets.extraTabs.filter((t) => t.tag);
-  const lead = await db.lead.findUnique({ where: { id: leadId }, select: { phoneE164: true, sourceRecords: { select: { sourceSystem: true, raw: true } } } });
+  const lead = await db.lead.findUnique({ where: { id: leadId }, select: { sourceRecords: { select: { sourceSystem: true } } } });
   if (!lead) return [];
   const tags = extra.filter((t) => lead.sourceRecords.some((r) => r.sourceSystem === `GOOGLE_SHEETS:${t.gid}`)).map((t) => t.tag);
-  const recallTab = lead.sourceRecords.map((r) => (r.raw as { tab?: string } | null)?.tab).find(Boolean);
-  const tab = recallTab ?? (await db.sheetLeadStatus.findUnique({ where: { phoneE164: lead.phoneE164 } }))?.tab;
-  if (tab && !/pool/i.test(tab)) {
+  const tab = await leadSheetTab(leadId);
+  if (tab) {
     const who = parseRecruiterTelegram((await getSettings()).recruiterTelegram).get(tab.toLowerCase());
     if (who) tags.push(who);
     else if (!tags.length) tags.push(`👤 Before processed by ${esc(tab)}`);

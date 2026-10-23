@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { addLead, drain, resetDb, seedBase, setPersona } from "./helpers";
 import { setHireStage, syncHiringFromSheet } from "@/lib/hiring";
 import { smsSenderFor } from "@/lib/messaging";
-import { attemptCallJob } from "@/lib/calls";
+import { attemptCallJob, callVariables } from "@/lib/calls";
 import { recruiterTags, sendTelegram } from "@/lib/telegram";
 import { mockSmsOutbox } from "@/adapters/mock";
 import { setAdapterOverride } from "@/adapters/registry";
@@ -243,6 +243,25 @@ describe("Telegram tags the recruiter of the lead's sheet tab", () => {
     expect(await recruiterTags(await mk("(214) 555-0192", "Ben", true))).toEqual(["👤 Before processed by Ben"]);
     expect(await recruiterTags(await mk("(214) 555-0193", "Luke", false))).toEqual(["👤 Before processed by Luke"]);
     expect(await recruiterTags(await mk("(214) 555-0194", "📥 Pool", false))).toEqual([]);
+  });
+});
+
+describe("Live transfer to the recruiter of the driver's sheet tab", () => {
+  it("connects Dennis's tab drivers to Dennis and everyone else to the manager", async () => {
+    const base = await seedBase();
+    await db.systemSetting.update({ where: { id: "global" }, data: { recruiterTransfer: "Dennis = (815) 846-1661\nBroken = 12" } });
+    await db.user.updateMany({ data: { availableForTransfer: false } });
+    await db.user.update({ where: { id: (await db.user.findFirstOrThrow()).id }, data: { availableForTransfer: true, transferPhoneE164: "+13149310525" } });
+    const vars = async (phone: string, tab?: string) => {
+      const r = await addLead(base, { phone });
+      if (r.result !== "created") throw new Error("no lead");
+      const l = await db.lead.findUniqueOrThrow({ where: { id: r.leadId }, include: { permissions: true } });
+      if (tab) await db.sheetLeadStatus.create({ data: { phoneE164: l.phoneE164, tab, status: "No answer" } });
+      return callVariables(l, "att", "ov");
+    };
+    expect(await vars("(214) 555-0181", "Dennis")).toMatchObject({ transfer_number: "+18158461661", recruiter_phone: "+18158461661", transfer_target: "Dennis" });
+    expect(await vars("(214) 555-0182", "Molly")).toMatchObject({ transfer_number: "+13149310525", transfer_target: "manager" });
+    expect(await vars("(214) 555-0183")).toMatchObject({ transfer_number: "+13149310525", transfer_target: "manager" });
   });
 });
 

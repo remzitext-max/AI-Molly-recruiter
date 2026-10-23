@@ -200,6 +200,7 @@ model SystemSetting {
   missedCallSmsOffer         String    @default("")
   /// One line per recruiter sheet tab: "Molly = @username". No @username: the card says "Before processed by Molly".
   recruiterTelegram          String    @default("")
+  recruiterTransfer          String    @default("")
   /// Fit score rules (see src/lib/fit-score.ts); empty = the company's published requirements.
   fitRules                   Json?
   aiDisclosure               String    @default("Hi, this is the AI recruiting assistant for {company}, calling on behalf of Molly, one of our recruiters.")
