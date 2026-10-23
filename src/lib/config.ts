@@ -106,6 +106,13 @@ export const config = {
       return (env("GOOGLE_SHEETS_EXTRA_TABS") ?? "").split(",").map((p) => p.trim().match(/^(\d+)\s*=\s*(@?[A-Za-z0-9_]{3,64})?$/)).filter((m): m is RegExpMatchArray => !!m)
         .map((m) => ({ gid: m[1], tag: m[2] ? (m[2].startsWith("@") ? m[2] : `@${m[2]}`) : "" }));
     },
+    /**
+     * The company's other lead sheets (other recruiting teams), comma-separated spreadsheet ids.
+     * Only their recruiters' good statuses are read, to report them to Facebook; nobody there is called.
+     */
+    get metaSpreadsheets(): string[] {
+      return (env("GOOGLE_SHEETS_META_SPREADSHEETS") ?? "").split(",").map((s) => s.trim().match(/[A-Za-z0-9_-]{20,}/)?.[0] ?? "").filter(Boolean);
+    },
     get serviceAccountEmail() { return env("GOOGLE_SERVICE_ACCOUNT_EMAIL"); },
     get privateKey() { return env("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY")?.replace(/\\n/g, "\n"); },
   },

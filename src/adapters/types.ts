@@ -51,10 +51,10 @@ export interface SheetLeadSource {
   /** Header of the optional column the app writes progress into (write-back is off when unset). */
   statusColumn: string | undefined;
   status(): IntegrationStatus;
-  /** range: another tab ("gid:<id>" or A1); defaults to the configured one. */
-  readSheet(range?: string): Promise<SheetSnapshot>;
-  /** Every tab in the spreadsheet (live sheets only). */
-  listTabs?(): Promise<{ title: string; gid: string }[]>;
+  /** range: another tab ("gid:<id>" or A1); defaults to the configured one. spreadsheetId: another spreadsheet (live only). */
+  readSheet(range?: string, spreadsheetId?: string): Promise<SheetSnapshot>;
+  /** Every tab in the spreadsheet, or in another one shared with the service account (live sheets only). */
+  listTabs?(spreadsheetId?: string): Promise<{ title: string; gid: string }[]>;
   /** sourceRecordId "phone:+1..." matches the row by phone number in `phoneColumn`. */
   writeStatus(sourceRecordId: string, text: string, phoneColumn?: string): Promise<"written" | "row_not_found" | "ambiguous_id" | "not_enabled">;
 }

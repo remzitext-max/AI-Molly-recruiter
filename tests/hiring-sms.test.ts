@@ -155,6 +155,43 @@ describe("hiring and good outcomes from the recruiters' lead sheet", () => {
   });
 });
 
+describe("other teams' lead sheets", () => {
+  const env = { APP_MODE: "live", GOOGLE_SHEETS_SPREADSHEET_ID: "SHEET", META_ACCESS_TOKEN: "TOKEN", META_DATASET_ID: "DS", GOOGLE_SHEETS_META_SPREADSHEETS: "https://docs.google.com/spreadsheets/d/TEAM1aaaaaaaaaaaaaaaaaaaa/edit?gid=1, TEAM3aaaaaaaaaaaaaaaaaaaa" };
+  it("sends their good statuses to Facebook once per driver, without touching anything else", async () => {
+    await seedBase();
+    const sheets: Record<string, Record<string, string[][]>> = {
+      SHEET: { Molly: [["(312) 555-0100", "Need to bring"]] },
+      TEAM1aaaaaaaaaaaaaaaaaaaa: { Pool: [], Tyler: [["(312) 555-0100", "Need approval"], ["(312) 555-0200", "Need to talk"], ["(312) 555-0201", "Changed mind"], ["(312) 555-0202", "Not interested"]] },
+      TEAM3aaaaaaaaaaaaaaaaaaaa: { Martin: [["312-555-0200", "Call back"], ["312-555-0203", "Hired"]] },
+    };
+    const asked: string[] = [];
+    setAdapterOverride({ sheets: {
+      status: () => ({ kind: "lead_source", provider: "test", state: "configured", isMock: true, detail: "" }),
+      listTabs: async (id = "SHEET") => { asked.push(id); return Object.keys(sheets[id]).map((title, i) => ({ title, gid: String(i) })); },
+      readSheet: async (t?: string, id = "SHEET") => ({ title: t!, headers: ["Phone", "Status"], rows: sheets[id][t!] ?? [], warnings: [] }),
+    } as never });
+    const sent: { event_name: string; user_data: { ph: string[] } }[] = [];
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (u, init) => {
+      if (String(u).includes("/DS/events")) sent.push(JSON.parse(init!.body as string).data[0]);
+      return new Response(JSON.stringify({ events_received: 1 }));
+    });
+    Object.assign(process.env, env);
+    try {
+      expect(await syncHiringFromSheet()).toMatchObject({ sent: 4 });
+      expect(asked).toEqual(["SHEET", "TEAM1aaaaaaaaaaaaaaaaaaaa", "TEAM3aaaaaaaaaaaaaaaaaaaa"]);
+      // 0100 Qualified once (our sheet first); 0200 Interested once; 0201 Interested; 0203 Hired.
+      expect(sent.map((e) => e.event_name).sort()).toEqual(["Hired", "Interested", "Interested", "Qualified"]);
+      // Other teams' drivers are not ours: no status rows, no calls.
+      expect(await db.sheetLeadStatus.count()).toBe(1);
+      expect(await syncHiringFromSheet()).toMatchObject({ sent: 0 });
+    } finally {
+      spy.mockRestore();
+      for (const k of Object.keys(env)) delete process.env[k];
+      process.env.APP_MODE = "demo";
+    }
+  });
+});
+
 describe("follow-up call a month later", () => {
   it("is not placed when a recruiter has talked to the driver since", async () => {
     const base = await seedBase();

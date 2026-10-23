@@ -11,6 +11,7 @@ import { sendLeadEvent } from "../adapters/live/meta";
 import { getAdapters } from "../adapters/registry";
 import { normalizePhone } from "./phone";
 import { config } from "./config";
+import { log } from "./redact";
 import { recallNoAnswerLeads, type SheetTab } from "./sheet-recall";
 
 export const HIRE_STAGES: HireStage[] = ["NONE", "PROCESSING", "APPLICATION", "ORIENTATION", "HIRED", "SAFETY_DECLINED", "NOT_HIRED"];
@@ -58,7 +59,7 @@ export async function setHireStage(leadId: string, stage: HireStage, note: strin
 // are read: Status "Application" / "Hired" is copied onto the matching lead (by phone), and
 // good outcomes are reported to Facebook so it finds more drivers like them.
 const SHEET_STATUS: { re: RegExp; stage?: HireStage; event: string }[] = [
-  { re: /^(interested|need to talk|call ?back|need (a )?teammate|changed his mind)$/i, event: "Interested" },
+  { re: /^(interested|need to talk|call ?back|need (a )?teammate|changed (his |her )?mind)$/i, event: "Interested" },
   { re: /^(need to bring|need approval|paired)$/i, event: "Qualified" },
   { re: /^application$/i, stage: "APPLICATION", event: "Application" },
   { re: /^hired$/i, stage: "HIRED", event: "Hired" },
@@ -96,17 +97,10 @@ export async function syncHiringFromSheet(now = new Date()) {
         updated++;
       }
       if (!meta || (lead && hit.event === "Hired")) continue;
-      const key = { phoneE164: phone, eventName: hit.event };
-      if (await db.metaSheetEvent.findUnique({ where: { phoneE164_eventName: key } })) continue;
-      // Crystal's own "Interested" (or a stage set on the site) already went to Facebook.
-      const already = lead && (await db.activityEvent.count({ where: { leadId: lead.id, type: "META_EVENT", message: { startsWith: `Sent "${hit.event}"` } } }));
-      if (already) { await db.metaSheetEvent.create({ data: { ...key, tab: title.slice(0, 100), status: status.slice(0, 100) } }); continue; }
-      const r = await sendLeadEvent({ eventName: hit.event, time: now, fbLeadId: lead?.fbLeadId, phoneE164: phone, eventId: `sheet:${phone}:${hit.event}` });
-      await db.metaSheetEvent.create({ data: { ...key, tab: title.slice(0, 100), status: status.slice(0, 100) } });
-      if (lead) await recordEvent({ leadId: lead.id, actorType: "SYSTEM", type: "META_EVENT", message: `Sent "${hit.event}" to Facebook (sheet ${title} tab: ${status})${r.events_received ? "" : ": not confirmed"}` });
-      sent++;
+      if (await reportSheetStatus(phone, hit.event, status, title, lead, now)) sent++;
     }
   }
+  if (meta) sent += await reportOtherTeamSheets(now);
   const known = new Map((await db.sheetLeadStatus.findMany()).map((r) => [r.phoneE164, r]));
   for (const [phoneE164, v] of latest) {
     const k = known.get(phoneE164);
@@ -115,6 +109,53 @@ export async function syncHiringFromSheet(now = new Date()) {
   }
   const recalled = await recallNoAnswerLeads(read, now);
   return { tabs, updated, sent, recalled };
+}
+
+/**
+ * One good sheet status to Facebook, once per driver and event across every team's sheet.
+ * Returns false when it was already sent (from a sheet, or by Crystal / the site).
+ */
+async function reportSheetStatus(phone: string, event: string, status: string, tab: string, lead: { id: string; fbLeadId: string | null } | null, now: Date) {
+  const key = { phoneE164: phone, eventName: event };
+  if (await db.metaSheetEvent.findUnique({ where: { phoneE164_eventName: key } })) return false;
+  const row = { ...key, tab: tab.slice(0, 100), status: status.slice(0, 100) };
+  // Crystal's own "Interested" (or a stage set on the site) already went to Facebook.
+  const already = lead && (await db.activityEvent.count({ where: { leadId: lead.id, type: "META_EVENT", message: { startsWith: `Sent "${event}"` } } }));
+  if (already) { await db.metaSheetEvent.create({ data: row }); return false; }
+  const r = await sendLeadEvent({ eventName: event, time: now, fbLeadId: lead?.fbLeadId, phoneE164: phone, eventId: `sheet:${phone}:${event}` });
+  await db.metaSheetEvent.create({ data: row });
+  if (lead) await recordEvent({ leadId: lead.id, actorType: "SYSTEM", type: "META_EVENT", message: `Sent "${event}" to Facebook (sheet ${tab} tab: ${status})${r.events_received ? "" : ": not confirmed"}` });
+  return true;
+}
+
+// Events sent per run from the other teams' sheets: their whole history goes out over the
+// first few runs (every 15 minutes) instead of one run outliving the job lock.
+const OTHER_TEAMS_PER_RUN = 150;
+
+/** The other teams' lead sheets: good statuses go to Facebook too, nothing else is read from them. */
+async function reportOtherTeamSheets(now: Date) {
+  const src = getAdapters().sheets;
+  let sent = 0;
+  for (const id of config.googleSheets.metaSpreadsheets) {
+    if (id === config.googleSheets.spreadsheetId) continue;
+    const tabs = await src.listTabs!(id).catch((e) => { log.warn("other team sheet not readable (share it with the service account)", { id, error: String(e) }); return []; });
+    for (const { title } of tabs) {
+      const snap = await src.readSheet(title, id).catch(() => null);
+      const phoneI = snap?.headers.findIndex((h) => /^phone$/i.test(h)) ?? -1;
+      const statusI = snap?.headers.findIndex((h) => /^status$/i.test(h)) ?? -1;
+      if (!snap || phoneI < 0 || statusI < 0) continue;
+      for (const row of snap.rows) {
+        const status = (row[statusI] ?? "").trim();
+        const hit = SHEET_STATUS.find((s) => s.re.test(status));
+        const phone = hit && normalizePhone(row[phoneI] ?? "");
+        if (!hit || !phone) continue;
+        if (sent >= OTHER_TEAMS_PER_RUN) return sent;
+        const lead = await db.lead.findFirst({ where: { phoneE164: phone, isDemo: false }, orderBy: { createdAt: "desc" }, select: { id: true, fbLeadId: true } });
+        if (await reportSheetStatus(phone, hit.event, status, title, lead, now)) sent++;
+      }
+    }
+  }
+  return sent;
 }
 
 // Statuses that still mean "nobody has talked to this driver".
