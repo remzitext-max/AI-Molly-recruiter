@@ -9,13 +9,21 @@ import type { Prisma } from "@prisma/client";
 
 const BASE = "https://api.telnyx.com/v2";
 
-type Msg = { role: string; text: string | null; created_at?: string; sent_at?: string; tool_calls?: { function?: { name?: string } }[] };
+type Msg = { role: string; text: string | null; created_at?: string; sent_at?: string; tool_calls?: { function?: { name?: string; arguments?: string | Record<string, unknown> } }[] };
 
 /** Conversation messages -> our transcript turns (driver/agent only, in time order). Exported for tests. */
 export function toTurns(msgs: Msg[]) {
-  // Tool calls are kept as a short note (e.g. "[hangup]") so it is clear who ended a call.
+  // Tool calls are kept as a short note (e.g. "[hangup]") so it is clear who ended a call;
+  // a transfer keeps the target it dialed ("[transfer: Dennis]").
+  const note = (f?: { name?: string; arguments?: string | Record<string, unknown> }) => {
+    if (!f?.name) return null;
+    let args: Record<string, unknown> = {};
+    try { args = typeof f.arguments === "string" ? JSON.parse(f.arguments) : f.arguments ?? {}; } catch { /* not JSON */ }
+    const target = f.name === "transfer" ? args.target ?? args.to ?? args.name : null;
+    return typeof target === "string" && target ? `${f.name}: ${target}` : f.name;
+  };
   const text = (m: Msg) => {
-    const tools = m.role === "assistant" ? (m.tool_calls ?? []).map((t) => t.function?.name).filter(Boolean) : [];
+    const tools = m.role === "assistant" ? (m.tool_calls ?? []).map((t) => note(t.function)).filter(Boolean) : [];
     return [m.text?.trim(), tools.length ? `[${tools.join(", ")}]` : ""].filter(Boolean).join(" ");
   };
   return msgs

@@ -8,7 +8,7 @@ import { db } from "../src/lib/db";
 import { AGENT_TOOLS, buildAgentPrompt } from "../src/lib/agent-config";
 import { getActiveOfferVersion } from "../src/lib/knowledge";
 import { getSettings } from "../src/lib/settings";
-import { parseRecruiterPhones, transferTargetName } from "../src/lib/recruiter-tab";
+import { DEFAULT_TRANSFER_TARGET, parseRecruiterPhones, transferTargetName } from "../src/lib/recruiter-tab";
 
 const BASE = "https://api.telnyx.com/v2";
 const DEFAULT_VOICE = "Telnyx.KokoroTTS.af_heart"; // test voice until Molly's voice is set up
@@ -72,19 +72,19 @@ async function main() {
   }));
   // One target per recruiter tab with a phone in Settings; each call says which one in {{transfer_target}}.
   const tabPhones = [...parseRecruiterPhones((await getSettings()).recruiterTransfer).values()];
-  const targets = [...(managerPhone ? [{ name: "manager", to: managerPhone }] : []), ...tabPhones.map((t) => ({ name: transferTargetName(t.tab), to: t.phone }))];
+  const targets = [...(managerPhone ? [{ name: DEFAULT_TRANSFER_TARGET, to: managerPhone }] : []), ...tabPhones.map((t) => ({ name: transferTargetName(t.tab), to: t.phone }))];
   if (targets.length) tools.push({ type: "transfer", transfer: { from: fromNumber, targets } });
   for (const t of targets) console.log(`Transfer target ${t.name}: ${t.to}`);
   tools.push({ type: "hangup", hangup: { description: "End the call. Only after you said goodbye AND the driver said goodbye back or stayed silent; never in the same turn as your goodbye. Use right away for voicemail." } });
 
   const body = {
     name: `${company} - Molly AI recruiter`,
-    instructions: await buildAgentPrompt(company, "the transfer tool with the target named {{transfer_target}}", facts),
+    instructions: await buildAgentPrompt(company, "the transfer tool with the target named {{transfer_target}} (exactly that target; never pick another one, whatever the driver calls the person)", facts),
     greeting: "{{time_greeting}}! Is this {{driver_first_name}}?",
     enabled_features: ["telephony"],
     ...(process.env.TELNYX_MODEL ? { model: process.env.TELNYX_MODEL } : {}),
     tools,
-    dynamic_variables: { driver_first_name: "there", applied_when: "a while back", time_greeting: "Hi", position_applied: "a truck driving position", follow_up: "no", driver_timezone: "unknown", attempt_id: "", transfer_number: managerPhone, recruiter_phone: managerPhone, transfer_target: "manager", company_name: company },
+    dynamic_variables: { driver_first_name: "there", applied_when: "a while back", time_greeting: "Hi", position_applied: "a truck driving position", follow_up: "no", driver_timezone: "unknown", attempt_id: "", transfer_number: managerPhone, recruiter_phone: managerPhone, transfer_target: DEFAULT_TRANSFER_TARGET, company_name: company },
     telephony_settings: {
       time_limit_secs: 15 * 60,
       // A silent line (voicemail recording, phone in a pocket) is checked once, then the call ends.

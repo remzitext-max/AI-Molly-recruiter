@@ -140,8 +140,10 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
   }
   const secs = a.startedAt && a.endedAt ? Math.round((a.endedAt.getTime() - a.startedAt.getTime()) / 1000) : null;
   const ended = endedByText(whoEnded(a), config.agentPersona.name);
-  const transferred = Array.isArray(a.transcript) && (a.transcript as { text?: string }[]).some((t) => /^\[transfer/.test(String(t.text ?? "")));
-  const endLine = transferred ? `🔀 ${v(config.agentPersona.name)} transferred the driver to the manager${secs !== null ? ` (${secs} sec call)` : ""}` : ended ? `📴 ${v(ended)}${secs !== null ? ` (${secs} sec call)` : ""}` : null;
+  const transferNote = Array.isArray(a.transcript) ? (a.transcript as { text?: string }[]).map((t) => /\[transfer(?::\s*([^\],]+))?/.exec(String(t.text ?? ""))).find(Boolean) : null;
+  const transferred = !!transferNote;
+  const transferTo = transferNote?.[1]?.trim();
+  const endLine = transferred ? `🔀 ${v(config.agentPersona.name)} transferred the driver to ${transferTo && !/^(manager|office)$/i.test(transferTo) ? v(transferTo) : "the main line"}${secs !== null ? ` (${secs} sec call)` : ""}` : ended ? `📴 ${v(ended)}${secs !== null ? ` (${secs} sec call)` : ""}` : null;
   // The full card is for a call where the driver talked: answers saved in this call (an English
   // rating or a name check alone does not count) or a decision. A later voicemail or call
   // screening on a driver who talked before gets the short note, not their old card again.

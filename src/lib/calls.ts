@@ -22,7 +22,7 @@ import { personaByKey } from "./conversation/personas";
 import { mockCalls } from "../adapters/mock";
 import { SHEETS_SOURCE } from "./import";
 import { writeBackLeadStatus } from "./sheets-sync";
-import { tabRecruiterPhone, transferTargetName } from "./recruiter-tab";
+import { DEFAULT_TRANSFER_TARGET, tabRecruiterPhone, transferTargetName } from "./recruiter-tab";
 import { HIRE_LABEL, recruiterWorkedStatus } from "./hiring";
 
 export const STATUS_RANK: Record<CallStatus, number> = {
@@ -500,7 +500,10 @@ export async function requestTransfer(attemptId: string, reason: "HUMAN_REQUESTE
   const handoff = await createHandoff(lead.id, reason, { callAttemptId: attemptId, transferStatus: "ATTEMPTING", note: `Transfer requested to ${recruiter.name}` });
   try {
     const r = await provider.transferCall(attempt.providerCallId, recruiter.transferPhoneE164!);
-    await recordEvent({ leadId: lead.id, actorType: "AI", type: "TRANSFER_REQUESTED", message: `Live transfer to ${recruiter.name} requested; waiting for provider confirmation`, data: { handoffId: handoff.id, detail: r.detail } });
+    // Telnyx dials the tab recruiter of the driver's sheet tab, when there is one (transfer_target).
+    const tab = await tabRecruiterPhone(lead.id);
+    const to = tab ? `${tab.tab} (${tab.phone})` : `${recruiter.name} (${recruiter.transferPhoneE164})`;
+    await recordEvent({ leadId: lead.id, actorType: "AI", type: "TRANSFER_REQUESTED", message: `Live transfer to ${to} requested; waiting for provider confirmation`, data: { handoffId: handoff.id, detail: r.detail } });
   } catch (e) {
     await db.handoff.update({ where: { id: handoff.id }, data: { transferStatus: "FAILED" } });
     await transferFailedTask(lead.id, attemptId, recruiter.id, (e as Error).message);
@@ -722,7 +725,7 @@ async function transferVariables(orgId: string, leadId: string): Promise<Record<
   if (tab) return { transfer_number: tab.phone, recruiter_phone: tab.phone, transfer_target: transferTargetName(tab.tab) };
   const r = await db.user.findFirst({ where: { orgId, availableForTransfer: true, transferPhoneE164: { not: null } } });
   const phone = r?.transferPhoneE164 ?? "";
-  return { transfer_number: phone, recruiter_phone: phone, transfer_target: "manager" };
+  return { transfer_number: phone, recruiter_phone: phone, transfer_target: DEFAULT_TRANSFER_TARGET };
 }
 
 // Rounded, truthful phrase for when the driver applied, from the recorded call permission date.

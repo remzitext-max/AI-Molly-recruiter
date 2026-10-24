@@ -5,6 +5,7 @@ import { setHireStage, syncHiringFromSheet } from "@/lib/hiring";
 import { smsSenderFor } from "@/lib/messaging";
 import { attemptCallJob, callVariables, ingestVoiceEvent } from "@/lib/calls";
 import { buildCallReport, recruiterTags, sendTelegram } from "@/lib/telegram";
+import { toTurns } from "@/lib/telnyx-transcript";
 import { mockSmsOutbox } from "@/adapters/mock";
 import { setAdapterOverride } from "@/adapters/registry";
 import type { SmsProvider, SmsSender } from "@/adapters/types";
@@ -284,7 +285,7 @@ describe("Telegram tags the recruiter of the lead's sheet tab", () => {
 });
 
 describe("Live transfer to the recruiter of the driver's sheet tab", () => {
-  it("connects Dennis's tab drivers to Dennis and everyone else to the manager", async () => {
+  it("connects Dennis's tab drivers to Dennis and everyone else to the main line", async () => {
     const base = await seedBase();
     await db.systemSetting.update({ where: { id: "global" }, data: { recruiterTransfer: "Dennis = (815) 846-1661\nBroken = 12" } });
     await db.user.updateMany({ data: { availableForTransfer: false } });
@@ -297,8 +298,31 @@ describe("Live transfer to the recruiter of the driver's sheet tab", () => {
       return callVariables(l, "att", "ov");
     };
     expect(await vars("(214) 555-0181", "Dennis")).toMatchObject({ transfer_number: "+18158461661", recruiter_phone: "+18158461661", transfer_target: "Dennis" });
-    expect(await vars("(214) 555-0182", "Molly")).toMatchObject({ transfer_number: "+13149310525", transfer_target: "manager" });
-    expect(await vars("(214) 555-0183")).toMatchObject({ transfer_number: "+13149310525", transfer_target: "manager" });
+    expect(await vars("(214) 555-0182", "Molly")).toMatchObject({ transfer_number: "+13149310525", transfer_target: "office" });
+    expect(await vars("(214) 555-0183")).toMatchObject({ transfer_number: "+13149310525", transfer_target: "office" });
+  });
+
+  it("a driver imported from Dennis's own tab goes to Dennis, and the card says who took the call", async () => {
+    const base = await seedBase();
+    await db.systemSetting.update({ where: { id: "global" }, data: { recruiterTransfer: "Dennis = +18158461661" } });
+    setAdapterOverride({ sheets: { status: () => ({}), readSheet: async () => ({ title: "", headers: [], rows: [], warnings: [] }), listTabs: async () => [{ title: "📥 Pool", gid: "1" }, { title: "Dennis", gid: "1759604612" }] } as never });
+    process.env.GOOGLE_SHEETS_EXTRA_TABS = "1759604612=@tonyhope7";
+    try {
+      const l = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Maksim", phoneE164: "+15125550199", isDemo: false } });
+      await db.leadSourceRecord.create({ data: { leadId: l.id, sourceSystem: "GOOGLE_SHEETS:1759604612", sourceRecordId: "phone:+15125550199", raw: {} } });
+      const full = await db.lead.findUniqueOrThrow({ where: { id: l.id }, include: { permissions: true } });
+      expect(await callVariables(full, "att", "ov")).toMatchObject({ transfer_number: "+18158461661", transfer_target: "Dennis" });
+      const turns = toTurns([
+        { role: "assistant", text: "Perfect, I'm connecting you with my manager right now.", created_at: "2026-10-24T21:52:20Z", tool_calls: [{ function: { name: "transfer", arguments: JSON.stringify({ target: "Dennis" }) } }] },
+        { role: "user", text: "Okay.", created_at: "2026-10-24T21:52:10Z" },
+      ]);
+      expect(turns.map((t) => t.text)).toEqual(["Okay.", "Perfect, I'm connecting you with my manager right now. [transfer: Dennis]"]);
+      const started = new Date(Date.now() - 300_000);
+      const a = await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "tr-1", status: "COMPLETED", outcome: "HUMAN_REQUESTED", startedAt: started, endedAt: new Date(started.getTime() + 278_000), transcript: turns } });
+      expect(await buildCallReport(a.id)).toContain("🔀 Crystal transferred the driver to Dennis (278 sec call)");
+    } finally {
+      delete process.env.GOOGLE_SHEETS_EXTRA_TABS;
+    }
   });
 });
 

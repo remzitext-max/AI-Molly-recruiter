@@ -42,6 +42,12 @@ export function parseRecruiterPhones(text: string): Map<string, { tab: string; p
   return m;
 }
 
+/**
+ * Transfer target for drivers whose tab has no phone in Settings. Not "manager": Crystal calls the
+ * recruiter "my manager", and with a target of that name the model picked it for Dennis's drivers too.
+ */
+export const DEFAULT_TRANSFER_TARGET = "office";
+
 /** Transfer target names for the Telnyx assistant: one per recruiter tab with a phone. */
 export function transferTargetName(tab: string) {
   return tab.replace(/[^A-Za-z0-9]+/g, "_");
