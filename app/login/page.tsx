@@ -23,7 +23,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   return (
     <div style={{ maxWidth: 380, margin: "10vh auto", padding: 16 }}>
       <div className="card">
-        <h1>Molly Recruiting Assistant</h1>
+        <h1>TBT Recruiting Assistant</h1>
         {config.mode === "demo" && <div className="banner demo">DEMO MODE: synthetic data, simulated calls</div>}
         {sp.error && <div className="alert error">Email or password is incorrect.</div>}
         <form action={login}>
