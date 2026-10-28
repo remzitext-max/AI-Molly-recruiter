@@ -8,6 +8,7 @@ import { getSettings } from "./settings";
 import { answersOf, fitRulesFrom, fitScore, fitTone } from "./fit-score";
 import { endedByText, whoEnded } from "./call-end";
 import { HIRE_LABEL } from "./hiring";
+import { recordEvent } from "./activity";
 
 type Viewer = Parameters<typeof leadScope>[0];
 export type Row = [label: string, value: string];
@@ -32,7 +33,12 @@ export interface DriverProfile {
   calls: { id: string; when: string; length: string; result: string; endedBy: string; recording: boolean }[];
   documents: { id: string; kind: string; when: string; read: string }[];
   timeline: { when: string; who: string; what: string }[];
+  /** Current values for the edit form, keyed like PROFILE_FIELDS and BASIC_FIELDS. */
+  edit: Record<string, string>;
 }
+
+import { BASIC_FIELDS, PROFILE_FIELDS } from "./profile-fields";
+export { BASIC_FIELDS, PROFILE_FIELDS };
 
 const TZ = "America/Chicago";
 export const when = (d: Date | null | undefined) => (d ? DateTime.fromJSDate(d).setZone(TZ).toFormat("LLL d, h:mm a") : "");
@@ -40,6 +46,7 @@ const words = (s: string | null | undefined) => (s ?? "").replace(/_/g, " ").toL
 
 export function sourceLabel(s: string) {
   if (s === "GOOGLE_SHEETS") return "Google Sheet · Pool";
+  if (s === "RECRUITER") return "Recruiter's own driver";
   if (s.startsWith("GOOGLE_SHEETS:")) {
     const gid = s.split(":")[1];
     const tab = config.googleSheets.extraTabs.find((t) => t.gid === gid);
@@ -68,7 +75,7 @@ export async function loadDriverProfile(user: Viewer, id: string): Promise<Drive
   const answers = answersOf(l.screening);
   const a = (k: string) => (answers[k] ?? "").trim();
   const verified = new Set(l.screening.filter((f) => f.verifiedValue).map((f) => f.key));
-  const val = (k: string) => (a(k) ? `${a(k)}${verified.has(k) ? " (verified)" : ""}` : "");
+  const val = (k: string) => (a(k) ? `${a(k)}${verified.has(k) ? " (by recruiter)" : ""}` : "");
   const position = l.sourceRecords.map((s) => (s.raw as { position?: string } | null)?.position).find(Boolean);
   const fit = fitScore(answers, fitRulesFrom((await getSettings()).fitRules));
   const name = [l.firstName, l.lastName].filter(Boolean).join(" ") || "(no name)";
@@ -87,7 +94,7 @@ export async function loadDriverProfile(user: Viewer, id: string): Promise<Drive
     source: [...new Set(l.sourceRecords.map((s) => sourceLabel(s.sourceSystem)))].join(", "),
     applied: when(l.createdAt),
     recruiter: l.assignedTo?.name ?? "Unassigned",
-    status: words(l.pipelineStatus),
+    status: l.recruiterStatus ?? words(l.pipelineStatus),
     hiring: l.hireStage !== "NONE" ? HIRE_LABEL[l.hireStage] : null,
     fit: { text: fit.score === null ? fit.label : `${fit.score}/100 · ${fit.label}${fit.reasons.length ? `: ${fit.reasons.join("; ")}` : ""}`, tone: fitTone(fit) },
     driver: ([
@@ -118,7 +125,7 @@ export async function loadDriverProfile(user: Viewer, id: string): Promise<Drive
       id: c.id,
       when: when(c.createdAt),
       length: c.startedAt && c.endedAt ? `${Math.round((c.endedAt.getTime() - c.startedAt.getTime()) / 1000)} sec` : "",
-      result: [words(c.status), words(c.outcome)].filter(Boolean).join(" · "),
+      result: c.provider === "recruiter-upload" ? `Recording uploaded by ${(c.metrics as { uploadedBy?: string } | null)?.uploadedBy ?? "recruiter"}` : [words(c.status), words(c.outcome)].filter(Boolean).join(" · "),
       endedBy: endedByText(whoEnded(c), config.agentPersona.name) ?? "",
       recording: !!c.recordingKey,
     })),
@@ -127,5 +134,48 @@ export async function loadDriverProfile(user: Viewer, id: string): Promise<Drive
       return { id: d.id, kind: d.kind === "MED_CARD" ? "Medical card" : "CDL", when: when(d.uploadedAt), read: fields.map((f) => `${words(f.name)} ${f.value}`).join(" · ") };
     }),
     timeline: l.events.map((e) => ({ when: when(e.createdAt), who: who(e), what: e.message })),
+    edit: {
+      ...Object.fromEntries(PROFILE_FIELDS.map((f) => [f.key, f.key === "recent_companies" ? splitEmployers(a(f.key)).join("\n") : f.key === "accident_details" ? a(f.key) || a("accidents_at_fault") : a(f.key)])),
+      firstName: l.firstName ?? "", lastName: l.lastName ?? "", email: l.email ?? "", state: l.state ?? "",
+    },
   };
+}
+
+/**
+ * A recruiter's corrections to the profile. Saved as the recruiter's value next to what the
+ * driver told Crystal (which is kept); an emptied field clears the recruiter's value.
+ * Returns the labels of the fields that changed.
+ */
+export async function saveProfileEdits(user: Viewer & { name: string }, id: string, values: Record<string, unknown>): Promise<string[] | null> {
+  const l = await db.lead.findFirst({ where: { id, ...leadScope(user) }, include: { screening: true } });
+  if (!l) return null;
+  const str = (v: unknown) => (typeof v === "string" ? v.trim().slice(0, 1000) : null);
+  const changed: string[] = [];
+  const lead: Record<string, string | null> = {};
+  for (const f of BASIC_FIELDS) {
+    const v = str(values[f.key]);
+    if (v === null || v === (l[f.key] ?? "")) continue;
+    lead[f.key] = v || null;
+    changed.push(f.label);
+  }
+  if (Object.keys(lead).length) await db.lead.update({ where: { id }, data: lead });
+  const now = new Date();
+  for (const f of PROFILE_FIELDS) {
+    const v = str(values[f.key]);
+    if (v === null) continue;
+    const row = l.screening.find((x) => x.key === f.key);
+    const current = (row?.verifiedValue || row?.reportedValue || (f.key === "accident_details" ? l.screening.find((x) => x.key === "accidents_at_fault")?.reportedValue : "") || "").trim();
+    const shown = f.key === "recent_companies" ? splitEmployers(current).join("\n") : current;
+    if (v === shown) continue;
+    // Several lines become one "a, b, c" value, the way Crystal saves employers.
+    const value = f.key === "recent_companies" ? splitEmployers(v).join(", ") : v;
+    await db.screeningField.upsert({
+      where: { leadId_key: { leadId: id, key: f.key } },
+      create: { leadId: id, key: f.key, verifiedValue: value || null, verifiedById: user.id, verifiedAt: now, status: "CORRECTED" },
+      update: { verifiedValue: value || null, verifiedById: value ? user.id : null, verifiedAt: value ? now : null },
+    });
+    changed.push(f.label.replace(/ \(.*\)$/, ""));
+  }
+  if (changed.length) await recordEvent({ leadId: id, actorType: "USER", actorId: user.id, type: "PROFILE_EDITED", message: `Profile edited by ${user.name}: ${changed.join(", ")}` });
+  return changed;
 }

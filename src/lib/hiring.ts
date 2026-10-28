@@ -13,6 +13,8 @@ import { normalizePhone } from "./phone";
 import { config } from "./config";
 import { log } from "./redact";
 import { recallNoAnswerLeads, type SheetTab } from "./sheet-recall";
+import { copySheetStatus } from "./recruiter-status";
+import { assignFromSheetTabs } from "./assignment";
 
 export const HIRE_STAGES: HireStage[] = ["NONE", "PROCESSING", "APPLICATION", "ORIENTATION", "HIRED", "SAFETY_DECLINED", "NOT_HIRED"];
 export const HIRE_LABEL: Record<HireStage, string> = {
@@ -68,7 +70,7 @@ const RANK: Record<HireStage, number> = { NONE: 0, NOT_HIRED: 0, SAFETY_DECLINED
 
 export async function syncHiringFromSheet(now = new Date()) {
   const src = getAdapters().sheets;
-  if (!src.listTabs || !config.googleSheets.spreadsheetId) return { tabs: 0, updated: 0, sent: 0, recalled: 0 };
+  if (!src.listTabs || !config.googleSheets.spreadsheetId) return { tabs: 0, updated: 0, sent: 0, recalled: 0, assigned: 0 };
   const meta = metaEventsConfigured() && config.mode === "live";
   let tabs = 0, updated = 0, sent = 0;
   const latest = new Map<string, { tab: string; status: string }>();
@@ -102,13 +104,18 @@ export async function syncHiringFromSheet(now = new Date()) {
   }
   if (meta) sent += await reportOtherTeamSheets(now);
   const known = new Map((await db.sheetLeadStatus.findMany()).map((r) => [r.phoneE164, r]));
+  const movedTab: { phoneE164: string; tab: string }[] = [];
   for (const [phoneE164, v] of latest) {
     const k = known.get(phoneE164);
+    if (k?.tab !== v.tab) movedTab.push({ phoneE164, tab: v.tab });
     if (k && k.tab === v.tab && k.status === v.status) continue;
     await db.sheetLeadStatus.upsert({ where: { phoneE164 }, create: { phoneE164, ...v }, update: { ...v, seenAt: new Date() } });
+    await copySheetStatus(phoneE164, v.status, v.tab, now);
   }
+  // Only a move between tabs reassigns, so a transfer made on the site is not undone every 15 minutes.
+  const assigned = await assignFromSheetTabs(movedTab);
   const recalled = await recallNoAnswerLeads(read, now);
-  return { tabs, updated, sent, recalled };
+  return { tabs, updated, sent, recalled, assigned };
 }
 
 /**

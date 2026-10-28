@@ -26,7 +26,7 @@ describe("driver profile popup and PDF", () => {
     const p = (await loadDriverProfile(base.admin, lead.id))!;
     expect(p.name).toBe("Ray Brown 🚛");
     expect(p.recruiter).toBe("Molly");
-    expect(p.driver).toContainEqual(["Experience", "10 years (verified)"]);
+    expect(p.driver).toContainEqual(["Experience", "10 years (by recruiter)"]);
     expect(p.driver).toContainEqual(["Accidents", "no"]);
     expect(p.deal).toContainEqual(["Rate expectation", "83 cpm"]);
     expect(p.employers).toEqual(["Red River 03/2024-now", "Lone Star 2022-2024"]);

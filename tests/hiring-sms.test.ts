@@ -133,7 +133,7 @@ describe("hiring and good outcomes from the recruiters' lead sheet", () => {
     });
     Object.assign(process.env, env);
     try {
-      expect(await syncHiringFromSheet()).toEqual({ tabs: 3, updated: 1, sent: 3, recalled: 0 });
+      expect(await syncHiringFromSheet()).toEqual({ tabs: 3, updated: 1, sent: 3, recalled: 0, assigned: 0 });
       const l = await db.lead.findUniqueOrThrow({ where: { id: r.leadId } });
       expect(l.hireStage).toBe("HIRED");
       const ev = await db.activityEvent.findFirstOrThrow({ where: { leadId: r.leadId, type: "HIRE_STAGE" } });
@@ -141,7 +141,7 @@ describe("hiring and good outcomes from the recruiters' lead sheet", () => {
       // Our lead's "Hired" goes through the lead's own Meta job; sheet-only drivers go directly.
       expect(sent.map((e) => e.event_name).sort()).toEqual(["Application", "Interested", "Qualified"]);
       expect(await db.job.count({ where: { type: "meta.send-event" } })).toBe(1);
-      expect(await syncHiringFromSheet()).toEqual({ tabs: 3, updated: 0, sent: 0, recalled: 0 });
+      expect(await syncHiringFromSheet()).toEqual({ tabs: 3, updated: 0, sent: 0, recalled: 0, assigned: 0 });
       // The sheet changes later: a "No answer" driver was reached by a recruiter.
       tabs.Molly[2][1] = "Call back";
       expect(await syncHiringFromSheet()).toMatchObject({ sent: 1 });
@@ -423,5 +423,42 @@ describe("No AI repeat calls once the driver talked or a recruiter set a status"
     expect(await db.callAttempt.count({ where: { leadId: r.leadId } })).toBe(0);
     await setHireStage(r.leadId, "SAFETY_DECLINED", null, { id: base.admin.id, name: "Ben" });
     expect((await db.lead.findUniqueOrThrow({ where: { id: r.leadId } })).hireStage).toBe("SAFETY_DECLINED");
+  });
+});
+
+describe("leads moved to a recruiter's tab in the lead sheet", () => {
+  it("are assigned to that recruiter, and a later transfer on the site stays", async () => {
+    const base = await seedBase();
+    const r = await addLead(base, { phone: "(214) 555-0177" });
+    if (r.result !== "created") throw new Error("no lead");
+    await db.lead.update({ where: { id: r.leadId }, data: { isDemo: false } });
+    const denis = await db.user.create({ data: { orgId: base.org.id, email: "denis@x.test", name: "Denis", passwordHash: "x", sheetTab: "Dennis" } });
+    const ben = await db.user.create({ data: { orgId: base.org.id, email: "ben@x.test", name: "Ben", passwordHash: "x", sheetTab: "ben" } });
+    const tabs: Record<string, string[][]> = { Pool: [["(214) 555-0177", ""]], Dennis: [], Ben: [] };
+    setAdapterOverride({ sheets: {
+      status: () => ({ kind: "lead_source", provider: "test", state: "configured", isMock: true, detail: "" }),
+      listTabs: async () => Object.keys(tabs).map((title, i) => ({ title, gid: String(i) })),
+      readSheet: async (t?: string) => ({ title: t!, headers: ["Phone", "Status"], rows: tabs[t!] ?? [], warnings: [] }),
+    } as never });
+    process.env.GOOGLE_SHEETS_SPREADSHEET_ID = "SHEET";
+    const owner = async () => (await db.lead.findUniqueOrThrow({ where: { id: r.leadId } })).assignedToId;
+    try {
+      const before = await owner();
+      expect(await syncHiringFromSheet()).toMatchObject({ assigned: 0 }); // still in the Pool
+      expect(await owner()).toBe(before);
+      tabs.Pool = []; tabs.Dennis = [["214-555-0177", "Need to talk"]];
+      expect(await syncHiringFromSheet()).toMatchObject({ assigned: 1 });
+      expect(await owner()).toBe(denis.id);
+      const { transferLead } = await import("@/lib/assignment");
+      await transferLead(r.leadId, ben.id, { id: base.admin.id, name: "Admin" });
+      expect(await syncHiringFromSheet()).toMatchObject({ assigned: 0 }); // same tab: the site's transfer stays
+      expect(await owner()).toBe(ben.id);
+      tabs.Dennis = []; tabs.Ben = [["214-555-0177", "Need to talk"]];
+      await transferLead(r.leadId, denis.id, { id: base.admin.id, name: "Admin" });
+      expect(await syncHiringFromSheet()).toMatchObject({ assigned: 1 });
+      expect(await owner()).toBe(ben.id);
+    } finally {
+      delete process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+    }
   });
 });

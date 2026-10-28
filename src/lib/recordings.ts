@@ -58,4 +58,4 @@ export async function fetchRecording(attemptId: string, url?: string) {
   return { saved: true };
 }
 
-export const recordingMime = (key: string) => (key.endsWith(".wav") ? "audio/wav" : "audio/mpeg");
+export const recordingMime = (key: string) => ({ wav: "audio/wav", m4a: "audio/mp4", ogg: "audio/ogg" } as Record<string, string>)[key.split(".").pop() ?? ""] ?? "audio/mpeg";

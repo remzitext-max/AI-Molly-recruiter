@@ -20,6 +20,7 @@ export type JobType =
   | "notify.telegram-document"
   | "notify.telegram-consent"
   | "call.fetch-transcript"
+  | "call.transcribe-upload"
   | "sms.poll-inbound"
   | "call.fetch-recording"
   | "sms.missed-call"

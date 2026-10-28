@@ -11,6 +11,7 @@ import { endedByText, whoEnded } from "@/lib/call-end";
 import { config } from "@/lib/config";
 import { HIRE_LABEL } from "@/lib/hiring";
 import { LeadPopup } from "@/components/lead-popup";
+import { RECRUITER_STATUSES, statusTone } from "@/lib/recruiter-status";
 
 const endedBy = (c: Parameters<typeof whoEnded>[0]) => endedByText(whoEnded(c), config.agentPersona.name);
 
@@ -25,6 +26,7 @@ const VIEWS: { key: string; label: string; statuses?: string[] }[] = [
   { key: "docs", label: "CDL received", statuses: ["DOCS_RECEIVED", "HANDOFF_READY", "HANDED_OFF"] },
   { key: "hiring", label: "Hiring" },
   { key: "closed", label: "Closed", statuses: ["NOT_INTERESTED", "OPTED_OUT", "CLOSED"] },
+  { key: "own", label: "Own drivers" },
 ];
 
 export default async function Leads({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
@@ -43,24 +45,27 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
   if (sp.pipeline) where.pipelineStatus = sp.pipeline as Prisma.LeadWhereInput["pipelineStatus"];
   else if (view.statuses) where.pipelineStatus = { in: view.statuses as PipelineStatus[] };
   if (!sp.pipeline && view.key === "hiring") where.hireStage = { not: "NONE" };
+  if (view.key === "own") where.ownDriver = true;
+  if (sp.status) where.recruiterStatus = sp.status;
   if (sp.docs) where.documentStatus = sp.docs as Prisma.LeadWhereInput["documentStatus"];
   if (sp.assigned === "me") where.assignedToId = user.id;
   else if (sp.assigned === "none") where.assignedToId = null;
   else if (sp.assigned && user.role === "ADMIN") where.assignedToId = sp.assigned;
   if (sp.data === "demo") where.isDemo = true;
   if (sp.data === "live") where.isDemo = false;
-  const [leads, recruiters, counts, hiringCount] = await Promise.all([
+  const [leads, recruiters, counts, hiringCount, ownCount] = await Promise.all([
     db.lead.findMany({ where, orderBy: { updatedAt: "desc" }, take: 200, include: { assignedTo: true, calls: { orderBy: { createdAt: "desc" }, take: 1 }, screening: { select: { key: true, reportedValue: true, verifiedValue: true } } } }),
     user.role === "ADMIN" ? db.user.findMany({ where: { orgId: user.orgId, active: true } }) : Promise.resolve([]),
     db.lead.groupBy({ by: ["pipelineStatus"], where: leadScope(user), _count: true }),
     db.lead.count({ where: { ...leadScope(user), hireStage: { not: "NONE" } } }),
+    db.lead.count({ where: { ...leadScope(user), ownDriver: true } }),
   ]);
   const rules = fitRulesFrom((await getSettings()).fitRules);
-  const countOf = (v: (typeof VIEWS)[number]) => v.key === "hiring" ? hiringCount : counts.filter((c) => !v.statuses || v.statuses.includes(c.pipelineStatus)).reduce((n, c) => n + c._count, 0);
+  const countOf = (v: (typeof VIEWS)[number]) => v.key === "hiring" ? hiringCount : v.key === "own" ? ownCount : counts.filter((c) => !v.statuses || v.statuses.includes(c.pipelineStatus)).reduce((n, c) => n + c._count, 0);
   const keep = (v: string) => { const q = new URLSearchParams(Object.entries(sp).filter(([k, x]) => x && k !== "view" && k !== "pipeline") as [string, string][]); if (v) q.set("view", v); const t = q.toString(); return t ? `/leads?${t}` : "/leads"; };
   return (
     <>
-      <PageHead title="Leads" sub="Every driver Crystal is working, newest activity first. Click a driver to see the profile and download it as PDF." right={user.role === "ADMIN" && <Link className="btn" href="/leads/new"><Icon name="plus" size={16} />Add lead</Link>} />
+      <PageHead title="Leads" sub="Every driver Crystal is working, newest activity first. Click a driver to see the profile and download it as PDF." right={<div className="row"><Link className="btn" href="/leads/create"><Icon name="plus" size={16} />Create form</Link>{user.role === "ADMIN" && <Link className="btn secondary" href="/leads/new">Add lead</Link>}</div>} />
       <div className="tabs">
         {VIEWS.map((v) => <Link key={v.key} href={keep(v.key)} className={`tab ${!sp.pipeline && v.key === view.key ? "on" : ""}`}>{v.label}<span className="c">{countOf(v)}</span></Link>)}
       </div>
@@ -69,6 +74,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
           {sp.view && <input type="hidden" name="view" value={sp.view} />}
           <span className="search"><Icon name="search" size={15} /><input name="q" placeholder="Search name, phone, email" defaultValue={sp.q} /></span>
           <select name="pipeline" defaultValue={sp.pipeline ?? ""}><option value="">Any pipeline status</option>{PIPE.map((p) => <option key={p} value={p}>{p.replace(/_/g, " ").toLowerCase()}</option>)}</select>
+          <select name="status" defaultValue={sp.status ?? ""}><option value="">Any recruiter status</option>{RECRUITER_STATUSES.map((p) => <option key={p} value={p}>{p}</option>)}</select>
           <select name="docs" defaultValue={sp.docs ?? ""}><option value="">Any document status</option>{DOCS.map((p) => <option key={p} value={p}>{p.toLowerCase()}</option>)}</select>
           <select name="assigned" defaultValue={sp.assigned ?? ""}>
             <option value="">Anyone</option><option value="me">Assigned to me</option>
@@ -85,10 +91,10 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
           <tbody>
             {leads.map((l) => (
               <tr key={l.id} data-profile={l.id} className="clickable">
-                <td><div className="person"><div className="avatar">{initials(l)}</div><div><Link href={`/leads/${l.id}`} data-profile={l.id}>{name(l)}</Link> {l.isDemo && <Badge v="DEMO" tone="demo" />}<div className="small muted">{[l.state, l.zip].filter(Boolean).join(" ") || "—"}</div></div></div></td>
+                <td><div className="person"><div className="avatar">{initials(l)}</div><div><Link href={`/leads/${l.id}`} data-profile={l.id}>{name(l)}</Link> {l.isDemo && <Badge v="DEMO" tone="demo" />}{l.ownDriver && <span className="badge info">Own driver</span>}<div className="small muted">{[l.state, l.zip].filter(Boolean).join(" ") || "—"}</div></div></div></td>
                 <td className="small">{l.phoneE164}</td>
                 <td>{(() => { const f = fitScore(answersOf(l.screening), rules); return <span className={`badge ${fitTone(f)}`} title={[...f.reasons, ...(f.missing.length ? [`Not asked yet: ${f.missing.join(", ")}`] : [])].join("\n") || f.label}>{f.score === null ? "—" : f.score}</span>; })()}</td>
-                <td><Badge v={l.pipelineStatus} />{l.hireStage !== "NONE" && <> <Badge v={HIRE_LABEL[l.hireStage]} tone={l.hireStage === "HIRED" ? "ok" : ["NOT_HIRED", "SAFETY_DECLINED"].includes(l.hireStage) ? "bad" : "info"} /></>}{l.queueReason && <div className="small muted">{l.queueReason}</div>}</td>
+                <td>{l.recruiterStatus && <><span className={`badge ${statusTone(l.recruiterStatus)}`}>{l.recruiterStatus}</span> </>}<Badge v={l.pipelineStatus} />{l.hireStage !== "NONE" && <> <Badge v={HIRE_LABEL[l.hireStage]} tone={l.hireStage === "HIRED" ? "ok" : ["NOT_HIRED", "SAFETY_DECLINED"].includes(l.hireStage) ? "bad" : "info"} /></>}{l.queueReason && <div className="small muted">{l.queueReason}</div>}</td>
                 <td>{l.calls[0] ? <><Badge v={l.calls[0].status} /> <span className="small muted">{l.calls[0].outcome?.toLowerCase().replace(/_/g, " ")}</span>{endedBy(l.calls[0]) && <div className="small muted">{endedBy(l.calls[0])}</div>}</> : <span className="muted">—</span>}</td>
                 <td><Badge v={l.documentStatus} /></td>
                 <td className="small">{l.assignedTo?.name ?? <span className="muted">unassigned</span>}</td>

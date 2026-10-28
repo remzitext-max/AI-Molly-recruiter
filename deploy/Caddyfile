@@ -1,7 +1,7 @@
 {$DOMAIN} {$EXTRA_DOMAINS} {
 	encode gzip
 	request_body {
-		max_size 15MB
+		max_size 45MB
 	}
 	reverse_proxy web:3000
 }

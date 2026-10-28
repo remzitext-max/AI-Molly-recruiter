@@ -67,14 +67,18 @@ export function parseAnswers(content: string): Record<string, string> {
 export async function fillScreeningFromTranscript(attemptId: string): Promise<string[]> {
   const a = await db.callAttempt.findUnique({ where: { id: attemptId }, include: { lead: { include: { screening: true } } } });
   const turns = (Array.isArray(a?.transcript) ? a!.transcript : []) as Turn[];
-  if (!a || !config.telnyx.apiKey || !turns.some((t) => t.speaker === "driver")) return [];
+  // A recruiter's uploaded recording has "speaker_1", "speaker_2" (or one "call" block) instead of driver / agent.
+  const unlabelled = !turns.some((t) => t.speaker === "driver");
+  if (!a || !config.telnyx.apiKey || (unlabelled && !turns.some((t) => /^(speaker_\d+|call)$/.test(t.speaker)))) return [];
   const have = new Set(a.lead.screening.filter((f) => f.reportedValue).map((f) => f.key));
   const wanted = Object.keys(FIELDS).filter((k) => !have.has(k));
   const asked = [...wanted.map((k) => `- ${k}: ${FIELDS[k]}`), ...Object.entries(RESULT_KEYS).map(([k, d]) => `- ${k}: ${d}`)];
 
-  const text = turns.map((t) => `${t.speaker === "driver" ? "Driver" : "Recruiter"}: ${t.text.replace(/<[^>]+>/g, "")}`).join("\n").slice(0, 20_000);
+  const label = (s: string) => (s === "driver" ? "Driver" : s === "call" ? "Call (speakers not separated)" : s.startsWith("speaker_") ? `Speaker ${s.slice(8)}` : "Recruiter");
+  const text = turns.map((t) => `${label(t.speaker)}: ${t.text.replace(/<[^>]+>/g, "")}`).join("\n").slice(0, 20_000);
+  const who = unlabelled ? " The speakers are not labelled: the driver is the one answering questions about their own experience and jobs; the recruiter is the one asking and describing the company's offer." : "";
   const messages = [
-    { role: "system", content: "You read a phone call between a trucking recruiter and a truck driver and return ONLY a JSON object, no other text. Include a key only when the DRIVER actually gave that answer in the call; never guess, never copy what the recruiter offered. Use the driver's own words, short." },
+    { role: "system", content: `You read a phone call between a trucking recruiter and a truck driver and return ONLY a JSON object, no other text. Include a key only when the DRIVER actually gave that answer in the call; never guess, never copy what the recruiter offered. Use the driver's own words, short.${who}` },
     { role: "user", content: `Keys:\n${asked.join("\n")}\n\nCall:\n${text}` },
   ];
   const ask = async (strict: boolean) => {

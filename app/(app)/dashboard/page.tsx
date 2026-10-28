@@ -7,6 +7,8 @@ import { db } from "@/lib/db";
 import { leadScope } from "@/lib/rbac";
 import { config } from "@/lib/config";
 import { sourceLabel } from "@/lib/driver-profile";
+import { UPLOAD_PROVIDER } from "@/lib/recruiter-upload";
+import { DateRangePicker } from "@/components/date-range-picker";
 import { Card, Stat, Badge, PageHead, fmt, name, initials, initialsOf } from "@/components/ui";
 import { loadDemoLeads } from "@/lib/demo-actions";
 import { drainQueue } from "@/lib/jobs/queue";
@@ -17,8 +19,25 @@ import { flash } from "@/lib/flash";
 const ZONE = "America/Chicago";
 // Rough AI call cost per started minute (Telnyx line + agent), shown as an estimate.
 const COST_PER_MIN = 0.06;
-const RANGES = { today: "Today", "7d": "Last 7 days", "30d": "Last 30 days" } as const;
-type Range = keyof typeof RANGES;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The period to show: ?from=&to= (days, Central time, both included) or an older ?range= link. */
+function period(sp: Record<string, string | undefined>, now: DateTime) {
+  const today = now.startOf("day");
+  let from = today.minus({ days: 6 }), to = today;
+  if (sp.from && DAY.test(sp.from)) {
+    from = DateTime.fromISO(sp.from, { zone: ZONE });
+    to = sp.to && DAY.test(sp.to) ? DateTime.fromISO(sp.to, { zone: ZONE }) : from;
+    if (to < from) [from, to] = [to, from];
+    if (to > today) to = today;
+    if (from > today) from = today;
+  } else if (sp.range === "today") from = today;
+  else if (sp.range === "30d") from = today.minus({ days: 29 });
+  const days = Math.round(to.diff(from, "days").days) + 1;
+  const label = days === 1 ? (+to === +today ? "Today" : +to === +today.minus({ days: 1 }) ? "Yesterday" : to.toFormat("MMM d")) : +to === +today && [7, 14, 30].includes(days) ? `Last ${days} days` : `${days} days`;
+  // The period ends now for today, so "vs previous" compares the same length of time.
+  return { from, end: +to === +today ? now : to.plus({ days: 1 }), to, days, label };
+}
 const ANSWERED = ["COMPLETED"] as const;
 // A real conversation is a call where the driver gave Crystal at least one screening
 // answer (English rating alone does not count), or made a clear decision. Voicemail,
@@ -110,19 +129,25 @@ function CallsChart({ days }: { days: { label: string; answered: number; other: 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  const range: Range = sp.range && sp.range in RANGES ? (sp.range as Range) : "7d";
   const isDemo = config.mode === "demo";
+  // Recruiters start on their own leads; admins on everyone's. Both can switch.
+  const mine = (sp.who ?? (user.role === "ADMIN" ? "all" : "mine")) === "mine";
   // Owner test calls (scripts/telnyx-test-call.ts, "Remzi Test" sheet rows) are not real results.
-  const scope = { ...leadScope(user), isDemo, phoneE164: { notIn: OWNER_PHONES }, OR: [{ lastName: null }, { lastName: { notIn: TEST_LAST_NAMES } }] };
+  // A recruiter's own drivers (Create form) are not leads Crystal works.
+  const scope = {
+    ...leadScope(user), isDemo, ownDriver: false, phoneE164: { notIn: OWNER_PHONES }, OR: [{ lastName: null }, { lastName: { notIn: TEST_LAST_NAMES } }],
+    ...(mine ? { assignedToId: user.id } : {}),
+  };
   const now = DateTime.now().setZone(ZONE);
-  const start = range === "today" ? now.startOf("day") : now.startOf("day").minus({ days: range === "7d" ? 6 : 29 });
-  const len = now.toMillis() - start.toMillis();
-  const since = start.toJSDate();
-  const prevSince = new Date(since.getTime() - len);
-  const inRange = { gte: since };
+  const p = period(sp, now);
+  const since = p.from.toJSDate();
+  const until = p.end.toJSDate();
+  const prevSince = new Date(since.getTime() - (until.getTime() - since.getTime()));
+  const inRange = { gte: since, lt: until };
   const inPrev = { gte: prevSince, lt: since };
-  const chartDays = range === "30d" ? 30 : 14;
-  const chartStart = now.startOf("day").minus({ days: chartDays - 1 });
+  // The chart shows the chosen days, at least two weeks and at most three months.
+  const chartDays = Math.min(92, Math.max(14, p.days));
+  const chartStart = p.to.minus({ days: chartDays - 1 });
 
   const [
     newLeads, prevLeads, placed, prevPlaced, answeredCalls, prevAnsweredCalls, interestedLeads, prevInterested,
@@ -130,16 +155,16 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   ] = await Promise.all([
     db.lead.count({ where: { ...scope, createdAt: inRange } }),
     db.lead.count({ where: { ...scope, createdAt: inPrev } }),
-    db.callAttempt.count({ where: { lead: scope, status: PLACED, createdAt: inRange } }),
-    db.callAttempt.count({ where: { lead: scope, status: PLACED, createdAt: inPrev } }),
-    db.callAttempt.findMany({ where: { lead: scope, status: { in: [...ANSWERED] }, createdAt: inRange }, select: { id: true, outcome: true, startedAt: true, endedAt: true } }),
-    db.callAttempt.findMany({ where: { lead: scope, status: { in: [...ANSWERED] }, createdAt: inPrev }, select: { id: true, outcome: true } }),
-    db.callAttempt.findMany({ where: { lead: scope, outcome: "INTERESTED", createdAt: inRange }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
-    db.callAttempt.findMany({ where: { lead: scope, outcome: "INTERESTED", createdAt: inPrev }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
+    db.callAttempt.count({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: PLACED, createdAt: inRange } }),
+    db.callAttempt.count({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: PLACED, createdAt: inPrev } }),
+    db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: { in: [...ANSWERED] }, createdAt: inRange }, select: { id: true, outcome: true, startedAt: true, endedAt: true } }),
+    db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: { in: [...ANSWERED] }, createdAt: inPrev }, select: { id: true, outcome: true } }),
+    db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, outcome: "INTERESTED", createdAt: inRange }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
+    db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, outcome: "INTERESTED", createdAt: inPrev }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
     db.document.findMany({ where: { lead: scope, uploadedAt: inRange }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
     db.document.findMany({ where: { lead: scope, uploadedAt: inPrev }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
-    db.callAttempt.findMany({ where: { lead: scope, status: PLACED, createdAt: { gte: chartStart.toJSDate() } }, select: { id: true, createdAt: true, status: true, outcome: true } }),
-    db.callAttempt.groupBy({ by: ["outcome"], where: { lead: scope, status: PLACED, createdAt: inRange }, _count: true }),
+    db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: PLACED, createdAt: { gte: chartStart.toJSDate(), lt: until } }, select: { id: true, createdAt: true, status: true, outcome: true } }),
+    db.callAttempt.groupBy({ by: ["outcome"], where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: PLACED, createdAt: inRange }, _count: true }),
     db.lead.findMany({
       where: { ...scope, createdAt: inRange },
       select: { createdAt: true, pipelineStatus: true, documentStatus: true, hireStage: true, assignedTo: { select: { id: true, name: true } }, calls: { where: { status: PLACED }, orderBy: { createdAt: "asc" }, select: { id: true, createdAt: true, status: true, outcome: true } } },
@@ -214,17 +239,20 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const sMax = Math.max(1, ...sourceRows.map((s) => s.n));
   const hello = now.hour < 12 ? "Good morning" : now.hour < 18 ? "Good afternoon" : "Good evening";
 
+  const keep = (k: string, v: string) => { const q = new URLSearchParams(Object.entries(sp).filter(([, x]) => x) as [string, string][]); q.set(k, v); return `/dashboard?${q}`; };
   const rangeTabs: ReactNode = (
-    <div className="tabs" style={{ margin: 0 }}>
-      {(Object.keys(RANGES) as Range[]).map((r) => (
-        <Link key={r} href={`/dashboard?range=${r}`} className={`tab ${r === range ? "on" : ""}`}>{RANGES[r]}</Link>
-      ))}
+    <div className="dash-tools">
+      <div className="tabs" style={{ margin: 0 }}>
+        <Link href={keep("who", "mine")} className={`tab ${mine ? "on" : ""}`}>My leads</Link>
+        <Link href={keep("who", "all")} className={`tab ${mine ? "" : "on"}`}>All leads</Link>
+      </div>
+      <DateRangePicker from={p.from.toISODate()!} to={p.to.toISODate()!} today={now.toISODate()!} label={p.label} />
     </div>
   );
 
   return (
     <>
-      <PageHead title={`${hello}, ${user.name.split(" ")[0]}`} sub={`Recruiting overview · ${RANGES[range].toLowerCase()} · ${now.toFormat("ccc, MMM d")} (Central time)`} right={rangeTabs} />
+      <PageHead title={`${hello}, ${user.name.split(" ")[0]}`} sub={`${mine ? "Your leads" : "All leads"} · ${p.days === 1 ? p.to.toFormat("ccc, MMM d") : `${p.from.toFormat("MMM d")} – ${p.to.toFormat("MMM d")}`} (Central time)`} right={rangeTabs} />
 
       <div className="stats four">
         <Stat label="New leads" icon="leads" tone="blue" n={newLeads} sub={<Delta now={newLeads} prev={prevLeads} />} />
@@ -240,7 +268,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <div className="grid wide-left section">
         <Card title="Calls per day" right={<div className="legend"><span><i style={{ background: "var(--series-1)" }} />Talked to driver</span><span><i style={{ background: "var(--series-muted)" }} />No answer, voicemail or no real talk</span></div>}>
           <CallsChart days={days} />
-          <p className="small muted" style={{ margin: "8px 0 0" }}>Last {chartDays} days, Central time. Hover a bar for the numbers.</p>
+          <p className="small muted" style={{ margin: "8px 0 0" }}>{chartStart.toFormat("MMM d")} – {p.to.toFormat("MMM d")}, Central time. Hover a bar for the numbers.</p>
         </Card>
         <Card title="Conversion funnel">
           <div className="funnel">

@@ -2,7 +2,7 @@
 const nextConfig = {
   poweredByHeader: false,
   serverExternalPackages: ["@prisma/client", "exceljs", "bcryptjs"],
-  experimental: { serverActions: { bodySizeLimit: "12mb" } },
+  experimental: { serverActions: { bodySizeLimit: "45mb" } },
   async headers() {
     return [
       {

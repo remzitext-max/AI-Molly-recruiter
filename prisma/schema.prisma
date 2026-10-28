@@ -159,6 +159,8 @@ model User {
   inRoundRobin           Boolean  @default(true)
   availableForTransfer   Boolean  @default(false)
   transferPhoneE164      String?
+  /// Name of this recruiter's tab in the lead sheet; leads moved there are assigned to them.
+  sheetTab               String?
   createdAt              DateTime @default(now())
   sessions               Session[]
   assignedLeads          Lead[]   @relation("AssignedLeads")
@@ -275,6 +277,12 @@ model Lead {
   hireStageAt        DateTime?
   hiredAt            DateTime?
   hireNote           String?
+  /// The recruiter's status for the driver, same words as the lead sheet's Status column.
+  recruiterStatus    String?
+  recruiterStatusAt  DateTime?
+  /// A driver a recruiter added from their own call (not a Facebook lead).
+  ownDriver          Boolean         @default(false)
+  createdById        String?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
   sourceRecords      LeadSourceRecord[]

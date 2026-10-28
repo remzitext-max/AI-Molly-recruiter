@@ -12,6 +12,7 @@ import { fetchRecording } from "../recordings";
 import { reengageScan } from "../reengage";
 import { readDocument } from "../document-read";
 import { syncHiringFromSheet } from "../hiring";
+import { transcribeUpload } from "../recruiter-upload";
 import { sendMetaStageEvent, syncMetaLeads, type MetaStage } from "../meta";
 
 export const handlers: Record<string, JobHandler> = {
@@ -90,6 +91,10 @@ export const handlers: Record<string, JobHandler> = {
     }
     await fillScreeningFromTranscript(attemptId).catch((e) => log.error("screening from transcript failed", { attemptId, error: (e as Error).message }));
     await releaseCard();
+  },
+  "call.transcribe-upload": async (job) => {
+    const { attemptId } = job.payload as { attemptId: string };
+    await transcribeUpload(attemptId);
   },
   "notify.telegram-consent": async (job) => {
     const { consentId } = job.payload as { consentId: string };

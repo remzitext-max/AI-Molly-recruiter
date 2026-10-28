@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { assertAdmin, assertLeadAccess, leadScope } from "@/lib/rbac";
-import { assignLead } from "@/lib/assignment";
+import { assignLead, transferLead } from "@/lib/assignment";
 import { optOutLead, scheduleLeadCall, stopAiCalls } from "@/lib/leads";
 import { deleteDocument } from "@/lib/documents";
 import { sendCdlLink } from "@/lib/messaging";
@@ -24,6 +24,8 @@ import { ConfirmButton } from "@/components/confirm-button";
 import { flash } from "@/lib/flash";
 import { HIRE_LABEL, HIRE_STAGES, setHireStage } from "@/lib/hiring";
 import type { HireStage } from "@prisma/client";
+import { RECRUITER_STATUSES, setRecruiterStatus, statusTone } from "@/lib/recruiter-status";
+import { saveUploadedRecording } from "@/lib/recruiter-upload";
 
 type Turn = { speaker: string; text: string; latencyMs?: number };
 
@@ -37,10 +39,27 @@ async function assign(fd: FormData) {
   "use server";
   const id = String(fd.get("leadId"));
   const u = await guard(id);
-  assertAdmin(u);
   const to = String(fd.get("userId") || "") || null;
-  await assignLead(id, to, "MANUAL", u.id);
-  await flash("Recruiter assigned");
+  // Any recruiter can hand a driver to a colleague; only an admin can leave it unassigned.
+  if (to) {
+    const r = await transferLead(id, to, u);
+    await flash(r.changed ? `Lead transferred to ${r.to}` : `Already with ${r.to}`);
+  } else {
+    assertAdmin(u);
+    await assignLead(id, null, "MANUAL", u.id);
+    await flash("Lead unassigned");
+  }
+  revalidatePath(`/leads/${id}`);
+}
+
+async function uploadRecording(fd: FormData) {
+  "use server";
+  const id = String(fd.get("leadId"));
+  const u = await guard(id);
+  const f = fd.get("recording");
+  const r = f instanceof File && f.size ? await saveUploadedRecording(u, id, { name: f.name, data: Buffer.from(await f.arrayBuffer()) }) : { error: "Choose a recording file" };
+  if ("error" in r) await flash(r.error!, "error");
+  else await flash("Recording uploaded. Crystal fills the profile from it in a minute or two");
   revalidatePath(`/leads/${id}`);
 }
 
@@ -73,6 +92,15 @@ async function setHire(fd: FormData) {
   const stage = String(fd.get("hireStage")) as HireStage;
   const r = await setHireStage(id, stage, String(fd.get("hireNote") || ""), { id: u.id, name: u.name });
   await flash(r.changed ? `Hiring result saved: ${HIRE_LABEL[stage]}` : "Nothing changed");
+  revalidatePath(`/leads/${id}`);
+}
+
+async function setStatus(fd: FormData) {
+  "use server";
+  const id = String(fd.get("leadId"));
+  const u = await guard(id);
+  const r = await setRecruiterStatus(id, String(fd.get("status")), { id: u.id, name: u.name });
+  await flash(r.changed ? `Status saved: ${String(fd.get("status"))}` : "Nothing changed");
   revalidatePath(`/leads/${id}`);
 }
 
@@ -201,7 +229,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
     },
   });
   if (!lead) notFound();
-  const recruiters = user.role === "ADMIN" ? await db.user.findMany({ where: { orgId: user.orgId, active: true } }) : [];
+  const recruiters = await db.user.findMany({ where: { orgId: user.orgId, active: true }, orderBy: { name: "asc" } });
   const offerVersions = await db.offerVersion.findMany({ where: { id: { in: lead.calls.map((c) => c.offerVersionId).filter(Boolean) as string[] } }, include: { offer: true } });
   const ov = (vid: string | null) => offerVersions.find((o) => o.id === vid);
   const hidden = <input type="hidden" name="leadId" value={lead.id} />;
@@ -218,6 +246,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         <div className="row">
           <Badge v={lead.pipelineStatus} /> <span className="small muted">pipeline</span>
           <Badge v={lead.documentStatus} /> <span className="small muted">CDL</span>
+          {lead.recruiterStatus && <><span className={`badge ${statusTone(lead.recruiterStatus)}`}>{lead.recruiterStatus}</span> <span className="small muted">status</span></>}
           {lead.hireStage !== "NONE" && <><Badge v={HIRE_LABEL[lead.hireStage]} tone={lead.hireStage === "HIRED" ? "ok" : ["NOT_HIRED", "SAFETY_DECLINED"].includes(lead.hireStage) ? "bad" : "info"} /> <span className="small muted">hiring</span></>}
         </div>
       </div>
@@ -240,14 +269,19 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
           </tbody></table>
         </Card>
         <Card title="Actions">
-          {user.role === "ADMIN" && (
-            <form action={assign} className="inline">{hidden}
-              <select name="userId" defaultValue={lead.assignedToId ?? ""}><option value="">Unassigned</option>{recruiters.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
-              <button className="secondary">Assign</button>
-            </form>
-          )}
+          <form action={assign} className="inline">{hidden}
+            <select name="userId" defaultValue={lead.assignedToId ?? ""} aria-label="Recruiter">{user.role === "ADMIN" || !lead.assignedToId ? <option value="">Unassigned</option> : null}{recruiters.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
+            <button className="secondary">Transfer lead</button>
+          </form>
+          <h3>Call recording</h3>
+          <form action={uploadRecording} className="inline">{hidden}
+            <input type="file" name="recording" accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/ogg,.mp3,.wav,.m4a,.ogg" required />
+            <button className="secondary">Upload recording</button>
+          </form>
+          <p className="small muted">Your own call with this driver (mp3, wav, m4a or ogg, up to 40 MB). Crystal turns it into text and fills the profile.</p>
           {!lead.optedOutAt && (
             <>
+              {lead.ownDriver ? <p className="small muted">Your own driver: Crystal does not call them.</p> : <>
               <h3>Schedule AI call</h3>
               <form action={schedule} className="inline">{hidden}
                 <input type="datetime-local" name="at" title="Leave empty for as soon as permitted" />
@@ -255,18 +289,22 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                 <button>Schedule</button>
               </form>
               <p className="small muted">Permission, contact hours, pause switches and attempt limits are checked again when the call is due.</p>
+              </>}
               <h3>Recruiter actions</h3>
               <div className="row">
                 <form action={sendLink}>{hidden}<button className="secondary">Text CDL / med card request</button></form>
                 <form action={clickToCall}>{hidden}<button className="secondary">Call from my phone</button></form>
                 <form action={stopCalls}>{hidden}<ConfirmButton className="secondary" title="Stop AI calls for this driver?" message="Crystal will not call this driver again. The lead stays on the site and you can still call or text them yourself." confirmLabel="Stop AI calls">Stop AI calls</ConfirmButton></form>
                 <form action={optOut}>{hidden}<ConfirmButton className="danger" danger title="Opt this driver out?" message="The number is blocked for good: no AI calls, no texts, and future imports of this number are skipped. Use this only if the driver asked not to be contacted." confirmLabel="Yes, opt out">Opt out / stop contact</ConfirmButton></form>
-                <form action={setHire} className="inline">{hidden}<input type="hidden" name="hireNote" value={lead.hireNote ?? ""} />
-                  <select name="hireStage" defaultValue={lead.hireStage} aria-label="Driver status">{HIRE_STAGES.map((h) => <option key={h} value={h}>{h === "NONE" ? "Status: not set" : HIRE_LABEL[h]}</option>)}</select>
+                <form action={setStatus} className="inline">{hidden}
+                  <select name="status" defaultValue={lead.recruiterStatus ?? ""} aria-label="Driver status" required>
+                    <option value="" disabled>Status: not set</option>
+                    {RECRUITER_STATUSES.map((h) => <option key={h} value={h}>{h}</option>)}
+                  </select>
                   <button className="secondary">Set status</button>
                 </form>
               </div>
-              <p className="small muted">Any status (processing, application, hired, declined by safety) stops Crystal&apos;s calls and texts for this driver.</p>
+              <p className="small muted">Any status except New and No answer stops Crystal&apos;s calls and texts for this driver. The lead sheet&apos;s Status column is copied here too.</p>
             </>
           )}
           <h3>Timezone</h3>
@@ -342,7 +380,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
             {Array.isArray(c.transcript) && (
               <details><summary>Transcript ({(c.transcript as Turn[]).length} turns)</summary>
                 <div className="transcript">
-                  {(c.transcript as Turn[]).map((t, i) => <div key={i} className={`turn ${t.speaker}`}><span className="who">{t.speaker === "agent" ? "AI" : "Driver"}</span>{t.text}</div>)}
+                  {(c.transcript as Turn[]).map((t, i) => <div key={i} className={`turn ${t.speaker}`}><span className="who">{t.speaker === "agent" ? "AI" : t.speaker === "driver" ? "Driver" : t.speaker.startsWith("speaker_") ? `Speaker ${t.speaker.slice(8)}` : "Call"}</span>{t.text}</div>)}
                 </div>
               </details>
             )}
