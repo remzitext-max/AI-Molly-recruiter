@@ -10,6 +10,7 @@ import { answersOf, fitRulesFrom, fitScore, fitTone } from "@/lib/fit-score";
 import { endedByText, whoEnded } from "@/lib/call-end";
 import { config } from "@/lib/config";
 import { HIRE_LABEL } from "@/lib/hiring";
+import { LeadPopup } from "@/components/lead-popup";
 
 const endedBy = (c: Parameters<typeof whoEnded>[0]) => endedByText(whoEnded(c), config.agentPersona.name);
 
@@ -59,7 +60,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
   const keep = (v: string) => { const q = new URLSearchParams(Object.entries(sp).filter(([k, x]) => x && k !== "view" && k !== "pipeline") as [string, string][]); if (v) q.set("view", v); const t = q.toString(); return t ? `/leads?${t}` : "/leads"; };
   return (
     <>
-      <PageHead title="Leads" sub="Every driver Crystal is working, newest activity first." right={user.role === "ADMIN" && <Link className="btn" href="/leads/new"><Icon name="plus" size={16} />Add lead</Link>} />
+      <PageHead title="Leads" sub="Every driver Crystal is working, newest activity first. Click a driver to see the profile and download it as PDF." right={user.role === "ADMIN" && <Link className="btn" href="/leads/new"><Icon name="plus" size={16} />Add lead</Link>} />
       <div className="tabs">
         {VIEWS.map((v) => <Link key={v.key} href={keep(v.key)} className={`tab ${!sp.pipeline && v.key === view.key ? "on" : ""}`}>{v.label}<span className="c">{countOf(v)}</span></Link>)}
       </div>
@@ -83,8 +84,8 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
           <thead><tr><th>Lead</th><th>Phone</th><th>Fit</th><th>Pipeline</th><th>Last call</th><th>Documents</th><th>Assigned</th><th>Next contact</th></tr></thead>
           <tbody>
             {leads.map((l) => (
-              <tr key={l.id} data-href={`/leads/${l.id}`}>
-                <td><div className="person"><div className="avatar">{initials(l)}</div><div><Link href={`/leads/${l.id}`}>{name(l)}</Link> {l.isDemo && <Badge v="DEMO" tone="demo" />}<div className="small muted">{[l.state, l.zip].filter(Boolean).join(" ") || "—"}</div></div></div></td>
+              <tr key={l.id} data-profile={l.id} className="clickable">
+                <td><div className="person"><div className="avatar">{initials(l)}</div><div><Link href={`/leads/${l.id}`} data-profile={l.id}>{name(l)}</Link> {l.isDemo && <Badge v="DEMO" tone="demo" />}<div className="small muted">{[l.state, l.zip].filter(Boolean).join(" ") || "—"}</div></div></div></td>
                 <td className="small">{l.phoneE164}</td>
                 <td>{(() => { const f = fitScore(answersOf(l.screening), rules); return <span className={`badge ${fitTone(f)}`} title={[...f.reasons, ...(f.missing.length ? [`Not asked yet: ${f.missing.join(", ")}`] : [])].join("\n") || f.label}>{f.score === null ? "—" : f.score}</span>; })()}</td>
                 <td><Badge v={l.pipelineStatus} />{l.hireStage !== "NONE" && <> <Badge v={HIRE_LABEL[l.hireStage]} tone={l.hireStage === "HIRED" ? "ok" : ["NOT_HIRED", "SAFETY_DECLINED"].includes(l.hireStage) ? "bad" : "info"} /></>}{l.queueReason && <div className="small muted">{l.queueReason}</div>}</td>
@@ -98,6 +99,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
           </tbody>
         </table>
       </Card>
+      <LeadPopup />
     </>
   );
 }

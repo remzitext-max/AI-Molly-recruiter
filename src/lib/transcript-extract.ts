@@ -24,6 +24,7 @@ const FIELDS: Record<string, string> = {
   accidents_at_fault: "accidents at fault (yes/no and details)",
   accident_details: "every accident the driver mentioned: date, what happened, whose fault, ticket, police report",
   recent_companies: "trucking companies the driver worked for in the last 3 years with the dates or length the driver said, e.g. Swift 03/2023-now, Werner 2021-03/2023",
+  rate_expectation: "pay rate the driver said they expect, in their words, e.g. 80 cpm",
   work_type: "whether each job was OTR, regional or local, e.g. Swift OTR, Werner local",
   home_time: "home-time option the driver picked or asked for, e.g. 5 weeks out / 6 days home",
   start_date: "when the driver can start, e.g. ASAP or a date",
@@ -40,7 +41,7 @@ const FIELDS: Record<string, string> = {
 const RESULT_KEYS: Record<string, string> = {
   call_result: "the driver's decision in this call, one of: interested, not_interested, call_later, unclear",
   decline_reason: "if not_interested: why, short, in the driver's words",
-  unanswered: "screening questions (experience, past companies, OTR or local, location, SAP, accidents, home time, miles, start date, medical card) the driver did not answer or answered unclearly, including ones never reached because the call ended; short names, comma separated",
+  unanswered: "screening questions (experience, past companies, OTR or local, pay expectation, location, SAP, accidents, home time, miles, start date, medical card) the driver did not answer or answered unclearly, including ones never reached because the call ended; short names, comma separated",
   call_summary: "notes for the recruiter in English: one or two sentences on how the call went, then 3 to 6 short lines each starting with '• ' recapping what the driver said (experience, past companies, location, home time, miles, start, concerns, decision). Say 'unclear' where the driver's answer was unclear. Under 700 characters",
 };
 

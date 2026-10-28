@@ -172,7 +172,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
     `🏢Companies (3 yrs): ${v(slot("recent_companies"))}`,
     `🛣OTR/local: ${v(slot("work_type"))}`,
     `💥Accidents: ${v(slot("accident_details") || slot("accidents_at_fault"))}`,
-    `💵Payment: asking: `,
+    `💵Payment: asking: ${v(slot("rate_expectation"))}`,
     `🚛can drive: ${v(slot("weekly_miles"))}`,
     `🗣 English: ${v(slot("english_level"))}`,
     `✅ Ready date: ${v(slot("start_date"))}`,

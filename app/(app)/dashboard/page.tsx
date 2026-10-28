@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { leadScope } from "@/lib/rbac";
 import { config } from "@/lib/config";
+import { sourceLabel } from "@/lib/driver-profile";
 import { Card, Stat, Badge, PageHead, fmt, name, initials, initialsOf } from "@/components/ui";
 import { loadDemoLeads } from "@/lib/demo-actions";
 import { drainQueue } from "@/lib/jobs/queue";
@@ -68,16 +69,6 @@ function Delta({ now, prev, invert }: { now: number; prev: number; invert?: bool
   if (d === 0) return <span>same as before</span>;
   const good = invert ? d < 0 : d > 0;
   return <span><span className={good ? "delta-up" : "delta-down"}>{d > 0 ? "▲" : "▼"} {Math.abs(d)}%</span> vs previous</span>;
-}
-
-function sourceLabel(s: string) {
-  if (s === "GOOGLE_SHEETS") return "Google Sheet · Pool";
-  if (s.startsWith("GOOGLE_SHEETS:")) {
-    const gid = s.split(":")[1];
-    const tab = config.googleSheets.extraTabs.find((t) => t.gid === gid);
-    return `Google Sheet · ${tab ? tab.tag : `tab ${gid}`}`;
-  }
-  return s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ");
 }
 
 function CallsChart({ days }: { days: { label: string; answered: number; other: number }[] }) {
