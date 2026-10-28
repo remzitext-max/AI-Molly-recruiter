@@ -17,7 +17,7 @@ const URL_ = "https://api.telnyx.com/v2/ai/openai/chat/completions";
 const FIELDS: Record<string, string> = {
   first_name: "driver's first name if they corrected it",
   home_location: "where the driver is based (city/state or state)",
-  cdl_class: "CDL class, e.g. A",
+  cdl_class: "CDL class, only if the driver mentioned it, e.g. A",
   experience_years: "OTR / CDL driving experience, e.g. 3 years",
   weekly_miles: "miles the driver says they can cover, in their words with the unit, e.g. 4,000 a week or 600 a day",
   sap_history: "SAP program history (yes/no and details)",
@@ -40,7 +40,7 @@ const FIELDS: Record<string, string> = {
 const RESULT_KEYS: Record<string, string> = {
   call_result: "the driver's decision in this call, one of: interested, not_interested, call_later, unclear",
   decline_reason: "if not_interested: why, short, in the driver's words",
-  unanswered: "screening questions (experience, past companies, OTR or local, location, CDL class, SAP, accidents, home time, miles, start date, medical card) the driver did not answer or answered unclearly, including ones never reached because the call ended; short names, comma separated",
+  unanswered: "screening questions (experience, past companies, OTR or local, location, SAP, accidents, home time, miles, start date, medical card) the driver did not answer or answered unclearly, including ones never reached because the call ended; short names, comma separated",
   call_summary: "notes for the recruiter in English: one or two sentences on how the call went, then 3 to 6 short lines each starting with '• ' recapping what the driver said (experience, past companies, location, home time, miles, start, concerns, decision). Say 'unclear' where the driver's answer was unclear. Under 700 characters",
 };
 

@@ -73,9 +73,10 @@ export function fitScore(answers: Record<string, string | null | undefined>, rul
   if (!a.sap_history) { missing.push("SAP"); score -= 10; }
   else if (yes(a.sap_history) && rules.sapKnockout) { knockout = true; reasons.push("SAP history"); }
 
+  // Crystal never asks the CDL class (Remzi); it is checked only when the driver says it or sends a CDL photo.
   if (a.cdl_class) {
     if (rules.requireClassA && !/\b(a|class a|cdl a|cdl-a)\b/i.test(a.cdl_class)) { knockout = true; reasons.push(`CDL ${a.cdl_class}, needs Class A`); }
-  } else { missing.push("CDL class"); score -= 5; }
+  }
 
   if (!a.accidents_at_fault) { missing.push("accidents"); score -= 5; }
   else if (yes(a.accidents_at_fault)) { score -= 25; reasons.push(`At-fault accident: ${a.accidents_at_fault}`); }

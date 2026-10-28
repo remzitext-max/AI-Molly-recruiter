@@ -602,7 +602,7 @@ describe("Telegram driver card", () => {
       "🗣 English: Good",
       "✅ Ready date: Next Monday",
       "☎️Phone number : +12145550111",
-      "⭐ Fit: 60/100 · Possible fit: At-fault accident: yes",
+      "⭐ Fit: 65/100 · Possible fit: At-fault accident: yes",
       "🟢 Interested",
     ].join("\n"));
 
