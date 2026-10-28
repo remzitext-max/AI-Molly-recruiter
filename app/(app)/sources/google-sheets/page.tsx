@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/auth";
+import { requireOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 import { recordEvent } from "@/lib/activity";
@@ -20,7 +20,7 @@ const back = async (msg: string, kind: "ok" | "error" = "ok") => {
 
 async function preview(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   let id: string;
   try { id = (await createSheetPreview(u, String(fd.get("campaignId")))).id; }
   catch (e) { await back((e as Error).message, "error"); }
@@ -29,7 +29,7 @@ async function preview(fd: FormData) {
 
 async function saveAuto(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const autoSync = fd.get("autoSync") === "on";
   const pollMinutes = Math.min(Math.max(Number(fd.get("pollMinutes")) || 5, 1), 60);
   const r = await db.sourceConnection.updateMany({ where: { id: SHEETS_CONN_ID, orgId: u.orgId }, data: { autoSync, pollMinutes } });
@@ -40,21 +40,21 @@ async function saveAuto(fd: FormData) {
 
 async function syncNow() {
   "use server";
-  await requireAdmin();
+  await requireOwner();
   const r = await pollGoogleSheet({ manual: true });
   await back(r.error ?? r.skipped ?? `Checked ${r.checkedRows} rows: ${describe(r.imported)}.${r.rowsWithErrors ? ` ${r.rowsWithErrors} row(s) need fixing in the sheet.` : ""}`, r.error || r.skipped ? "error" : "ok");
 }
 
 async function addDemoRow() {
   "use server";
-  await requireAdmin();
+  await requireOwner();
   if (config.mode !== "demo") await back("Only available in demo mode.", "error");
   const id = await addDemoSheetRow();
   await back(`Added synthetic row ${id} to the demo sheet. It is imported on the next sync.`);
 }
 
 export default async function GoogleSheetsPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const sp = await searchParams;
   const src = getAdapters().sheets;
   const st = src.status();

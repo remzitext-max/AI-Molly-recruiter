@@ -28,7 +28,7 @@ async function main() {
   const agents = await retell<{ agent_id: string; agent_name?: string }[]>("GET", "/list-agents"); // fails fast on a wrong key
   console.log("Retell API key OK");
 
-  const org = await db.organization.findFirst();
+  const org = await db.organization.findFirst({ where: { isMain: true }, orderBy: { createdAt: "asc" } });
   const company = org?.name ?? process.env.ORG_NAME ?? "our company";
   const s = await getSettings();
 

@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/auth";
+import { requireOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { FACT_CATEGORIES, FactsSchema, type Fact } from "@/lib/knowledge";
 import { recordEvent } from "@/lib/activity";
@@ -24,7 +24,7 @@ function readFacts(fd: FormData): Fact[] {
 
 async function save(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const id = String(fd.get("versionId"));
   const v = await db.offerVersion.findUniqueOrThrow({ where: { id }, include: { offer: true } });
   if (v.status !== "DRAFT" || v.offer.orgId !== u.orgId) throw new Error("Only drafts can be edited");
@@ -46,7 +46,7 @@ async function save(fd: FormData) {
 }
 
 export default async function VersionPage({ params, searchParams }: { params: Promise<{ versionId: string }>; searchParams: Promise<{ error?: string; saved?: string }> }) {
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const { versionId } = await params;
   const sp = await searchParams;
   const v = await db.offerVersion.findUnique({ where: { id: versionId }, include: { offer: true } });

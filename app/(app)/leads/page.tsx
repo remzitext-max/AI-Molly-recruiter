@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { PipelineStatus, Prisma } from "@prisma/client";
-import { requireUser } from "@/lib/auth";
+import { isOwner, requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { leadScope } from "@/lib/rbac";
 import { Badge, Card, PageHead, fmt, name, initials } from "@/components/ui";
@@ -31,6 +31,7 @@ const VIEWS: { key: string; label: string; statuses?: string[] }[] = [
 
 export default async function Leads({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requireUser();
+  const owner = await isOwner(user);
   const sp = await searchParams;
   const where: Prisma.LeadWhereInput = { ...leadScope(user) };
   if (sp.q) {
@@ -65,7 +66,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
   const keep = (v: string) => { const q = new URLSearchParams(Object.entries(sp).filter(([k, x]) => x && k !== "view" && k !== "pipeline") as [string, string][]); if (v) q.set("view", v); const t = q.toString(); return t ? `/leads?${t}` : "/leads"; };
   return (
     <>
-      <PageHead title="Leads" sub="Every driver Crystal is working, newest activity first. Click a driver to see the profile and download it as PDF." right={<div className="row"><Link className="btn" href="/leads/create"><Icon name="plus" size={16} />Create form</Link>{user.role === "ADMIN" && <Link className="btn secondary" href="/leads/new">Add lead</Link>}</div>} />
+      <PageHead title="Leads" sub="Every driver Crystal is working, newest activity first. Click a driver to see the profile and download it as PDF." right={<div className="row"><Link className="btn" href="/leads/create"><Icon name="plus" size={16} />Create form</Link>{owner && <Link className="btn secondary" href="/leads/new">Add lead</Link>}</div>} />
       <div className="tabs">
         {VIEWS.map((v) => <Link key={v.key} href={keep(v.key)} className={`tab ${!sp.pipeline && v.key === view.key ? "on" : ""}`}>{v.label}<span className="c">{countOf(v)}</span></Link>)}
       </div>

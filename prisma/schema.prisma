@@ -140,6 +140,16 @@ enum AssignmentMode {
 model Organization {
   id        String     @id @default(cuid())
   name      String
+  /// The owner's company (Settings, Voice, Ads...). Other organizations are recruiting teams that
+  /// only see their own logins and leads; Crystal calls their leads the same way.
+  isMain    Boolean    @default(true)
+  /// A team's lead sheet (spreadsheet id) and its Pool tab ("gid:123" or a tab name).
+  sheetSpreadsheetId String?
+  sheetPoolTab       String?
+  /// Where Crystal transfers a team's drivers who ask for a person.
+  transferPhoneE164  String?
+  /// A team's Telegram group for driver cards; without one, nothing of theirs goes to Telegram.
+  telegramChatId     String?
   createdAt DateTime   @default(now())
   users     User[]
   campaigns Campaign[]

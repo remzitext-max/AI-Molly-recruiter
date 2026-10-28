@@ -103,6 +103,8 @@ export async function syncHiringFromSheet(now = new Date()) {
     }
   }
   if (meta) sent += await reportOtherTeamSheets(now);
+  const t = await readTeamSheets(latest);
+  tabs += t.tabs; updated += t.updated;
   const known = new Map((await db.sheetLeadStatus.findMany()).map((r) => [r.phoneE164, r]));
   const movedTab: { phoneE164: string; tab: string }[] = [];
   for (const [phoneE164, v] of latest) {
@@ -116,6 +118,45 @@ export async function syncHiringFromSheet(now = new Date()) {
   const assigned = await assignFromSheetTabs(movedTab);
   const recalled = await recallNoAnswerLeads(read, now);
   return { tabs, updated, sent, recalled, assigned };
+}
+
+/**
+ * Recruiting teams' own sheets (Teams page): every tab is read for their leads only, so a
+ * team recruiter's status stops Crystal and a move to their tab assigns the lead to them.
+ * A phone in the main sheet keeps the main sheet's status. Facebook events for these
+ * sheets come from reportOtherTeamSheets, like the other teams'.
+ */
+async function readTeamSheets(latest: Map<string, { tab: string; status: string }>) {
+  const src = getAdapters().sheets;
+  const mainPhones = new Set(latest.keys());
+  let tabs = 0, updated = 0;
+  const teams = await db.organization.findMany({ where: { isMain: false, sheetSpreadsheetId: { not: null } } });
+  for (const org of teams) {
+    const id = org.sheetSpreadsheetId!;
+    const list = await src.listTabs!(id).catch((e) => { log.warn("team sheet not readable (share it with the service account)", { team: org.name, error: String(e) }); return []; });
+    const theirs = new Set((await db.lead.findMany({ where: { orgId: org.id, isDemo: false }, select: { phoneE164: true } })).map((l) => l.phoneE164));
+    for (const { title } of list) {
+      const snap = await src.readSheet(title, id).catch(() => null);
+      const phoneI = snap?.headers.findIndex((h) => /^phone$/i.test(h)) ?? -1;
+      const statusI = snap?.headers.findIndex((h) => /^status$/i.test(h)) ?? -1;
+      if (!snap || phoneI < 0 || statusI < 0) continue;
+      tabs++;
+      for (const row of snap.rows) {
+        const status = (row[statusI] ?? "").trim();
+        const phone = normalizePhone(row[phoneI] ?? "");
+        if (!phone || !theirs.has(phone) || mainPhones.has(phone)) continue;
+        if (!latest.has(phone) || !OPEN_STATUS.test(status)) latest.set(phone, { tab: title.slice(0, 100), status: status.slice(0, 100) });
+        const stage = SHEET_STATUS.find((s) => s.re.test(status))?.stage;
+        if (!stage) continue;
+        const lead = await db.lead.findUnique({ where: { orgId_phoneE164: { orgId: org.id, phoneE164: phone } } });
+        if (lead && RANK[lead.hireStage] < RANK[stage]) {
+          await setHireStage(lead.id, stage, lead.hireNote, { id: null, name: `${org.name} sheet (${title} tab)` });
+          updated++;
+        }
+      }
+    }
+  }
+  return { tabs, updated };
 }
 
 /**
@@ -143,7 +184,8 @@ const OTHER_TEAMS_PER_RUN = 150;
 async function reportOtherTeamSheets(now: Date) {
   const src = getAdapters().sheets;
   let sent = 0;
-  for (const id of config.googleSheets.metaSpreadsheets) {
+  const teamSheets = (await db.organization.findMany({ where: { isMain: false, sheetSpreadsheetId: { not: null } }, select: { sheetSpreadsheetId: true } })).map((o) => o.sheetSpreadsheetId!);
+  for (const id of new Set([...config.googleSheets.metaSpreadsheets, ...teamSheets])) {
     if (id === config.googleSheets.spreadsheetId) continue;
     const tabs = await src.listTabs!(id).catch((e) => { log.warn("other team sheet not readable (share it with the service account)", { id, error: String(e) }); return []; });
     for (const { title } of tabs) {

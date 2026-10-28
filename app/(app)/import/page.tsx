@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { requireAdmin } from "@/lib/auth";
+import { requireOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 import { createImportPreview } from "@/lib/import";
@@ -8,7 +8,7 @@ import { Card, fmt } from "@/components/ui";
 
 async function upload(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const file = fd.get("file");
   if (!(file instanceof File) || !file.size) redirect("/import?error=Choose a file");
   if (file.size > 5 * 1024 * 1024) redirect("/import?error=File larger than 5 MB");
@@ -24,7 +24,7 @@ async function upload(fd: FormData) {
 }
 
 export default async function ImportPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const sp = await searchParams;
   const [campaigns, batches] = await Promise.all([
     db.campaign.findMany({ where: { orgId: u.orgId } }),

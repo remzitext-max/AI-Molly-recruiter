@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { requireUser } from "@/lib/auth";
+import { isOwner, requireUser } from "@/lib/auth";
 import { config } from "@/lib/config";
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
@@ -16,6 +16,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
   const [settings, org, flash] = await Promise.all([getSettings(), db.organization.findUnique({ where: { id: user.orgId }, select: { name: true } }), readFlash()]);
   const admin = user.role === "ADMIN";
+  // A team's manager manages their logins; the company's setup pages are the owner's.
+  const owner = await isOwner(user);
   const live = config.mode !== "demo";
   const contactOn = settings.liveContactEnabled && !!settings.contactPolicyConfirmedAt;
   const nav = (
@@ -28,7 +30,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <NavLink href="/dashboard" icon="dashboard" label="Dashboard" />
       <NavLink href="/leads" icon="leads" label="Leads" />
       <NavLink href="/tasks" icon="tasks" label="Tasks" />
-      {admin && (
+      {owner && (
         <>
           <div className="nav-group">Recruiting</div>
           <NavLink href="/import" icon="import" label="Import leads" />
@@ -37,11 +39,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           <NavLink href="/ads" icon="ads" label="Facebook ads" />
         </>
       )}
-      <div className="nav-group">Workspace</div>
-      <NavLink href="/integrations" icon="integrations" label="Integrations" />
+      {admin && <div className="nav-group">Workspace</div>}
+      {owner && <NavLink href="/integrations" icon="integrations" label="Integrations" />}
       {admin && <NavLink href="/users" icon="users" label="Users" />}
-      {admin && <NavLink href="/jobs" icon="jobs" label="Background jobs" />}
-      {admin && <NavLink href="/settings" icon="settings" label="Settings" />}
+      {owner && <NavLink href="/teams" icon="leads" label="Teams" />}
+      {owner && <NavLink href="/jobs" icon="jobs" label="Background jobs" />}
+      {owner && <NavLink href="/settings" icon="settings" label="Settings" />}
       <div className="who">
         <div className="avatar">{initialsOf(user.name)}</div>
         <div className="who-text"><div className="who-name">{user.name}</div><div className="who-role">{user.role.toLowerCase()}</div></div>

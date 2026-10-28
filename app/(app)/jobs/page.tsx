@@ -1,5 +1,5 @@
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/auth";
+import { requireOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { retryDeadJob } from "@/lib/jobs/queue";
 import { Badge, Card, fmt } from "@/components/ui";
@@ -7,14 +7,14 @@ import { flash } from "@/lib/flash";
 
 async function retry(fd: FormData) {
   "use server";
-  await requireAdmin();
+  await requireOwner();
   await retryDeadJob(String(fd.get("jobId")));
   await flash("Job queued to run again");
   revalidatePath("/jobs");
 }
 
 export default async function Jobs() {
-  await requireAdmin();
+  await requireOwner();
   const [counts, problem, upcoming] = await Promise.all([
     db.job.groupBy({ by: ["status"], _count: true }),
     db.job.findMany({ where: { OR: [{ status: "DEAD" }, { lastError: { not: null }, status: "PENDING", attempts: { gt: 0 } }] }, orderBy: { updatedAt: "desc" }, take: 50 }),

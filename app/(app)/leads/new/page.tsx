@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/auth";
+import { requireOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { ingestLead } from "@/lib/leads";
 import { config } from "@/lib/config";
@@ -9,7 +9,7 @@ import { flash } from "@/lib/flash";
 
 async function create(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const g = (k: string) => String(fd.get(k) ?? "").trim();
   const permission: { scope: "AI_CALL" | "SMS"; source: string; grantedAt: string; evidence?: string }[] = [];
   if (g("callPermSource") && g("callPermDate")) permission.push({ scope: "AI_CALL", source: g("callPermSource"), grantedAt: new Date(g("callPermDate")).toISOString(), evidence: g("permEvidence") || undefined });
@@ -25,7 +25,7 @@ async function create(fd: FormData) {
 }
 
 export default async function NewLead({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const sp = await searchParams;
   const campaigns = await db.campaign.findMany({ where: { orgId: u.orgId } });
   return (

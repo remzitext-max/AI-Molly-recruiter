@@ -1,6 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/auth";
+import { requireOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getSettings, validateOpening } from "@/lib/settings";
 import { config } from "@/lib/config";
@@ -14,7 +14,7 @@ import { flash } from "@/lib/flash";
 
 async function togglePause(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const on = fd.get("on") === "1";
   await db.systemSetting.update({ where: { id: "global" }, data: { globalPause: on } });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "GLOBAL_PAUSE", message: `Global pause ${on ? "ON" : "OFF"}` });
@@ -24,7 +24,7 @@ async function togglePause(fd: FormData) {
 
 async function saveCampaign(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const id = String(fd.get("id"));
   const time = (v: FormDataEntryValue | null) => (/^\d{2}:\d{2}$/.test(String(v)) ? String(v) : "09:00");
   const days = fd.getAll("days").map(String).filter((d) => /^[1-7]$/.test(d)).join(",") || "1,2,3,4,5";
@@ -48,7 +48,7 @@ async function saveCampaign(fd: FormData) {
 
 async function savePolicy(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const openingError = validateOpening(String(fd.get("aiDisclosure") || ""));
   if (openingError) redirect(`/settings?error=${encodeURIComponent(openingError)}`);
   const n = (k: string, d: number, min: number, max: number) => Math.min(max, Math.max(min, Number(fd.get(k)) || d));
@@ -74,7 +74,7 @@ async function savePolicy(fd: FormData) {
 
 async function saveFitRules(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const rules: FitRules = fitRulesFrom({
     minSoloMonths: Number(fd.get("minSoloMonths")), minTeamMonths: Number(fd.get("minTeamMonths")),
     sapKnockout: fd.get("sapKnockout") === "on", requireClassA: fd.get("requireClassA") === "on",
@@ -87,7 +87,7 @@ async function saveFitRules(fd: FormData) {
 
 async function confirmPolicy(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const notes = String(fd.get("notes") || "").trim();
   if (notes.length < 20) redirect("/settings?error=Describe the reviewed contact policy (who approved it and what it covers)");
   await db.systemSetting.update({ where: { id: "global" }, data: { contactPolicyConfirmedAt: new Date(), contactPolicyConfirmedById: u.id, contactPolicyNotes: notes } });
@@ -98,7 +98,7 @@ async function confirmPolicy(fd: FormData) {
 
 async function setLive(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const on = fd.get("on") === "1";
   const s = await getSettings();
   if (on) {
@@ -116,7 +116,7 @@ async function setLive(fd: FormData) {
 
 async function saveScreening(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const cfg: SlotSpec[] = DEFAULT_SLOTS.map((s) => ({ ...s, enabled: fd.get(`en_${s.key}`) === "on", essential: fd.get(`es_${s.key}`) === "on", prompt: String(fd.get(`p_${s.key}`) || s.prompt).slice(0, 200) }));
   await db.systemSetting.update({ where: { id: "global" }, data: { screeningConfig: cfg as never } });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "SCREENING_CONFIG", message: "Screening questions updated" });
@@ -125,7 +125,7 @@ async function saveScreening(fd: FormData) {
 }
 
 export default async function Settings({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const sp = await searchParams;
   const s = await getSettings();
   const [campaigns, offers] = await Promise.all([db.campaign.findMany({ where: { orgId: u.orgId } }), db.offer.findMany({ where: { orgId: u.orgId } })]);

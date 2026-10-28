@@ -64,3 +64,15 @@ export async function requireAdmin(): Promise<User> {
   if (u.role !== "ADMIN") redirect("/dashboard?error=forbidden");
   return u;
 }
+
+/** The owner's company admins (Settings, Voice, Ads, Jobs...); a team's manager is an admin of their team only. */
+export async function isOwner(u: Pick<User, "role" | "orgId">) {
+  if (u.role !== "ADMIN") return false;
+  return !!(await db.organization.findUnique({ where: { id: u.orgId }, select: { isMain: true } }))?.isMain;
+}
+
+export async function requireOwner(): Promise<User> {
+  const u = await requireAdmin();
+  if (!(await isOwner(u))) redirect("/dashboard?error=forbidden");
+  return u;
+}

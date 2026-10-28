@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/auth";
+import { requireOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { recordEvent } from "@/lib/activity";
 import { Badge, Card, fmt } from "@/components/ui";
@@ -8,7 +8,7 @@ import { flash } from "@/lib/flash";
 
 async function newDraft(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const offer = await db.offer.findFirstOrThrow({ where: { id: String(fd.get("offerId")), orgId: u.orgId } });
   const base = offer.activeVersionId ? await db.offerVersion.findUnique({ where: { id: offer.activeVersionId } }) : null;
   const last = await db.offerVersion.findFirst({ where: { offerId: offer.id }, orderBy: { version: "desc" } });
@@ -20,7 +20,7 @@ async function newDraft(fd: FormData) {
 
 async function newOffer(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const name = String(fd.get("name") || "").trim();
   if (!name) return;
   const offer = await db.offer.create({ data: { orgId: u.orgId, name } });
@@ -30,7 +30,7 @@ async function newOffer(fd: FormData) {
 }
 
 export default async function Knowledge() {
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const offers = await db.offer.findMany({ where: { orgId: u.orgId }, include: { versions: { orderBy: { version: "desc" } }, campaigns: true } });
   return (
     <>

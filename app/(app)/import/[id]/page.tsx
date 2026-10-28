@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import type { Prisma } from "@prisma/client";
-import { requireAdmin } from "@/lib/auth";
+import { requireOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { commitBatch, previewBatch, SHEETS_SOURCE, TARGET_FIELDS } from "@/lib/import";
 import { getAdapters } from "@/adapters/registry";
@@ -10,7 +10,7 @@ import { flash } from "@/lib/flash";
 
 async function remap(fd: FormData) {
   "use server";
-  await requireAdmin();
+  await requireOwner();
   const id = String(fd.get("batchId"));
   const mapping: Record<string, string> = {};
   for (const f of TARGET_FIELDS) { const v = String(fd.get(`map_${f}`) ?? ""); if (v) mapping[f] = v; }
@@ -24,7 +24,7 @@ async function remap(fd: FormData) {
 
 async function commit(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const id = String(fd.get("batchId"));
   await commitBatch(id, u);
   await flash("Import finished");
@@ -33,14 +33,14 @@ async function commit(fd: FormData) {
 
 async function discard(fd: FormData) {
   "use server";
-  await requireAdmin();
+  await requireOwner();
   await db.importBatch.updateMany({ where: { id: String(fd.get("batchId")), status: "PREVIEW" }, data: { status: "DISCARDED" } });
   await flash("Import discarded");
   redirect("/import");
 }
 
 export default async function Preview({ params }: { params: Promise<{ id: string }> }) {
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const { id } = await params;
   const { batch, headers, warnings, preview } = await previewBatch(id, u.orgId);
   const mapping = batch.mapping as Record<string, string>;

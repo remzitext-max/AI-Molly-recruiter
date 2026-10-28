@@ -1,3 +1,4 @@
+import { companyName } from "./company";
 import crypto from "node:crypto";
 import type { User } from "@prisma/client";
 import { db } from "./db";
@@ -35,7 +36,7 @@ export async function createUploadLink(leadId: string) {
 
 export async function lookupUploadToken(token: string) {
   if (!/^[A-Za-z0-9_-]{30,64}$/.test(token)) return null;
-  const t = await db.uploadToken.findUnique({ where: { tokenHash: sha256(token) }, include: { lead: { select: { id: true, firstName: true, optedOutAt: true, isDemo: true, org: { select: { name: true } } } } } });
+  const t = await db.uploadToken.findUnique({ where: { tokenHash: sha256(token) }, include: { lead: { select: { id: true, firstName: true, optedOutAt: true, isDemo: true, org: { select: { name: true, isMain: true } } } } } });
   if (!t || t.revokedAt || t.completedAt || t.expiresAt < new Date() || t.filesUsed >= t.maxFiles) return null;
   return t;
 }
@@ -88,7 +89,7 @@ export async function saveRecordCheckConsent(token: string, input: { fullName: s
   if (!s.recordConsentEnabled) throw new UploadError("Not available.");
   const fullName = input.fullName.replace(/\s+/g, " ").trim();
   if (fullName.length < 3 || fullName.length > 100) throw new UploadError("Type your full name to sign.");
-  const text = recordConsentText(s.recordConsentText, t.lead.org.name);
+  const text = recordConsentText(s.recordConsentText, await companyName(t.lead.org));
   const c = await db.recordCheckConsent.create({ data: { leadId: t.leadId, fullName, text, ip: input.ip?.slice(0, 64) ?? null, userAgent: input.userAgent?.slice(0, 300) ?? null } });
   await recordEvent({ leadId: t.leadId, actorType: "DRIVER", type: "RECORD_CHECK_CONSENT", message: `Driver signed the driving record check authorization as "${fullName}"`, data: { consentId: c.id } });
   if (telegramConfigured() && !t.lead.isDemo) await enqueue("notify.telegram-consent", { consentId: c.id }, { idempotencyKey: `telegram-consent:${c.id}`, maxAttempts: 3 });

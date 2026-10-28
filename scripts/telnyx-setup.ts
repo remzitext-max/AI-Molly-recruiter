@@ -8,7 +8,7 @@ import { db } from "../src/lib/db";
 import { AGENT_TOOLS, buildAgentPrompt } from "../src/lib/agent-config";
 import { getActiveOfferVersion } from "../src/lib/knowledge";
 import { getSettings } from "../src/lib/settings";
-import { DEFAULT_TRANSFER_TARGET, parseRecruiterPhones, transferTargetName } from "../src/lib/recruiter-tab";
+import { DEFAULT_TRANSFER_TARGET, parseRecruiterPhones, teamTransferTarget, transferTargetName } from "../src/lib/recruiter-tab";
 
 const BASE = "https://api.telnyx.com/v2";
 const DEFAULT_VOICE = "Telnyx.KokoroTTS.af_heart"; // test voice until Molly's voice is set up
@@ -45,9 +45,9 @@ async function main() {
   const list = await telnyx<{ data: Assistant[] }>("GET", "/ai/assistants"); // fails fast on a wrong key
   console.log("Telnyx API key OK");
 
-  const org = await db.organization.findFirst();
+  const org = await db.organization.findFirst({ where: { isMain: true }, orderBy: { createdAt: "asc" } });
   const company = org?.name ?? process.env.ORG_NAME ?? "our company";
-  const manager = await db.user.findFirst({ where: { availableForTransfer: true, active: true, transferPhoneE164: { not: null } } });
+  const manager = await db.user.findFirst({ where: { availableForTransfer: true, active: true, transferPhoneE164: { not: null }, org: { isMain: true } } });
   const managerPhone = manager?.transferPhoneE164 ?? "";
   if (!managerPhone) console.log("No user is marked available for transfer, so the assistant gets no transfer tool.");
 
@@ -72,7 +72,13 @@ async function main() {
   }));
   // One target per recruiter tab with a phone in Settings; each call says which one in {{transfer_target}}.
   const tabPhones = [...parseRecruiterPhones((await getSettings()).recruiterTransfer).values()];
-  const targets = [...(managerPhone ? [{ name: DEFAULT_TRANSFER_TARGET, to: managerPhone }] : []), ...tabPhones.map((t) => ({ name: transferTargetName(t.tab), to: t.phone }))];
+  // Recruiting teams on the site: their drivers go to the team's own number.
+  const teams = await db.organization.findMany({ where: { isMain: false, transferPhoneE164: { not: null } } });
+  const targets = [
+    ...(managerPhone ? [{ name: DEFAULT_TRANSFER_TARGET, to: managerPhone }] : []),
+    ...tabPhones.map((t) => ({ name: transferTargetName(t.tab), to: t.phone })),
+    ...teams.map((o) => ({ name: teamTransferTarget(o), to: o.transferPhoneE164! })),
+  ];
   if (targets.length) tools.push({ type: "transfer", transfer: { from: fromNumber, targets } });
   for (const t of targets) console.log(`Transfer target ${t.name}: ${t.to}`);
   tools.push({ type: "hangup", hangup: { description: "End the call. Only after you said goodbye AND the driver said goodbye back or stayed silent; never in the same turn as your goodbye. Use right away for voicemail." } });

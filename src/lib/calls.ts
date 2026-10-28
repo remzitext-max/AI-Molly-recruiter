@@ -1,5 +1,6 @@
 // Call orchestration: gating, locking, provider calls, event ingestion,
 // real-time agent actions, transfers and post-call workflow.
+import { companyName } from "./company";
 import type { CallOutcome, CallStatus, Job, Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "./db";
@@ -22,7 +23,7 @@ import { personaByKey } from "./conversation/personas";
 import { mockCalls } from "../adapters/mock";
 import { SHEETS_SOURCE } from "./import";
 import { writeBackLeadStatus } from "./sheets-sync";
-import { DEFAULT_TRANSFER_TARGET, tabRecruiterPhone, transferTargetName } from "./recruiter-tab";
+import { DEFAULT_TRANSFER_TARGET, tabRecruiterPhone, transferTargetName, teamTransfer } from "./recruiter-tab";
 import { HIRE_LABEL, recruiterWorkedStatus } from "./hiring";
 
 export const STATUS_RANK: Record<CallStatus, number> = {
@@ -488,11 +489,15 @@ export async function requestTransfer(attemptId: string, reason: "HUMAN_REQUESTE
   const attempt = await db.callAttempt.findUniqueOrThrow({ where: { id: attemptId }, include: { lead: { include: { assignedTo: true } } } });
   const lead = attempt.lead;
   const provider = getAdapters().voice;
-  let recruiter = lead.assignedTo && lead.assignedTo.active && lead.assignedTo.availableForTransfer && lead.assignedTo.transferPhoneE164 ? lead.assignedTo : null;
-  if (!recruiter) recruiter = await db.user.findFirst({ where: { orgId: lead.orgId, active: true, availableForTransfer: true, transferPhoneE164: { not: null } } });
+  // A team's drivers go to the team's number; nobody of the company's is dialed for them.
+  const team = await teamTransfer(lead.id);
+  let recruiter: { id: string | null; name: string; transferPhoneE164: string | null } | null = team
+    ? (team.phone ? { id: lead.assignedToId, name: "the team's number", transferPhoneE164: team.phone } : null)
+    : lead.assignedTo && lead.assignedTo.active && lead.assignedTo.availableForTransfer && lead.assignedTo.transferPhoneE164 ? lead.assignedTo : null;
+  if (!recruiter && !team) recruiter = await db.user.findFirst({ where: { orgId: lead.orgId, active: true, availableForTransfer: true, transferPhoneE164: { not: null } } });
 
   if (!recruiter || !provider.supportsLiveTransfer() || !attempt.providerCallId) {
-    const why = !recruiter ? "No recruiter marked available for live transfer" : "Provider cannot transfer this call";
+    const why = !recruiter ? (team ? "The team has no transfer number (Teams page)" : "No recruiter marked available for live transfer") : "Provider cannot transfer this call";
     await createHandoff(lead.id, reason, { callAttemptId: attemptId, transferStatus: "FAILED", note: why });
     await transferFailedTask(lead.id, attemptId, lead.assignedToId, why);
     return { ok: false, transfer: "failed", detail: why };
@@ -501,7 +506,7 @@ export async function requestTransfer(attemptId: string, reason: "HUMAN_REQUESTE
   try {
     const r = await provider.transferCall(attempt.providerCallId, recruiter.transferPhoneE164!);
     // Telnyx dials the tab recruiter of the driver's sheet tab, when there is one (transfer_target).
-    const tab = await tabRecruiterPhone(lead.id);
+    const tab = team ? null : await tabRecruiterPhone(lead.id);
     const to = tab ? `${tab.tab} (${tab.phone})` : `${recruiter.name} (${recruiter.transferPhoneE164})`;
     await recordEvent({ leadId: lead.id, actorType: "AI", type: "TRANSFER_REQUESTED", message: `Live transfer to ${to} requested; waiting for provider confirmation`, data: { handoffId: handoff.id, detail: r.detail } });
   } catch (e) {
@@ -594,13 +599,14 @@ export async function simulateCallJob(job: Job) {
   const offer = attempt.offerVersionId ? await db.offerVersion.findUnique({ where: { id: attempt.offerVersionId } }) : null;
   const { FactsSchema } = await import("./knowledge");
   const facts = offer ? FactsSchema.parse(offer.facts) : [];
-  const fill = (s: string) => s.replace(/\{company\}/g, lead.org.name).replace(/\{recruiterPhone\}/g, "the number in our text");
+  const company = await companyName(lead.org);
+  const fill = (s: string) => s.replace(/\{company\}/g, company).replace(/\{recruiterPhone\}/g, "the number in our text");
   const known: Record<string, string> = {};
   for (const s of lead.screening) if (s.reportedValue && s.status !== "UNCLEAR") known[s.key] = s.reportedValue;
   if (lead.state || lead.zip) known.home_location ??= [lead.state, lead.zip].filter(Boolean).join(" ");
 
   const brain = new RecruitingBrain({
-    companyName: lead.org.name, recruiterName: "Molly", driverFirstName: lead.firstName, driverTimezone: lead.timezone,
+    companyName: company, recruiterName: "Molly", driverFirstName: lead.firstName, driverTimezone: lead.timezone,
     knownSlots: known, facts, disclosure: fill(settings.aiDisclosure),
     recordingNotice: settings.recordingEnabled ? settings.recordingNotice : null,
     voicemailMessage: fill(settings.voicemailMessage), uploadLinkTtlMinutes: settings.uploadLinkTtlMinutes, cdlBySms: settings.cdlBySms,
@@ -682,7 +688,7 @@ export async function callVariables(
 ): Promise<Record<string, string>> {
   const sources = await db.leadSourceRecord.findMany({ where: { leadId: lead.id }, select: { raw: true } });
   return {
-    driver_first_name: lead.firstName ?? "", company_name: (await db.organization.findUnique({ where: { id: lead.orgId } }))?.name ?? "",
+    driver_first_name: lead.firstName ?? "", company_name: await companyName(await db.organization.findUniqueOrThrow({ where: { id: lead.orgId } })),
     offer_version_id: offerVersionId, attempt_id: attemptId,
     driver_timezone: lead.timezone ?? "unknown", ...(await transferVariables(lead.orgId, lead.id)),
     // Sheet leads arrive within a minute of applying, so the import time stands in when no permission date was recorded.
@@ -721,6 +727,9 @@ export function appliedPosition(raws: unknown[]): string {
 // Who Crystal's transfer reaches: the recruiter of the driver's sheet tab when Settings
 // has a phone for that tab (e.g. Dennis), otherwise the manager marked available on Users.
 async function transferVariables(orgId: string, leadId: string): Promise<Record<string, string>> {
+  // A team's drivers go to the team's number (Teams page), never to the company's people.
+  const team = await teamTransfer(leadId);
+  if (team) return { transfer_number: team.phone ?? "", recruiter_phone: team.phone ?? "", transfer_target: team.target };
   const tab = await tabRecruiterPhone(leadId);
   if (tab) return { transfer_number: tab.phone, recruiter_phone: tab.phone, transfer_target: transferTargetName(tab.tab) };
   const r = await db.user.findFirst({ where: { orgId, availableForTransfer: true, transferPhoneE164: { not: null } } });

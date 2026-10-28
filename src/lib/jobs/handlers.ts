@@ -3,6 +3,7 @@ import { attemptCallJob, handoffEvaluateJob, reconcileCallJob, simulateCallJob, 
 import { pollRingCentralInbound, sendCdlLink, sendMissedCallText } from "../messaging";
 import { runRetentionSweep } from "../documents";
 import { pollGoogleSheet } from "../sheets-sync";
+import { pollTeamSheets } from "../team-sheets";
 import { db } from "../db";
 import { sendCallReport, sendConsentToTelegram, sendDocumentToTelegram, sendHiredToTelegram, sendSmsReplyToTelegram } from "../telegram";
 import { fetchTelnyxTranscript } from "../telnyx-transcript";
@@ -28,6 +29,7 @@ export const handlers: Record<string, JobHandler> = {
   },
   "source.google-sheets.poll": async () => {
     await pollGoogleSheet();
+    await pollTeamSheets();
     // One poll job per interval accumulates; keep two days of them for troubleshooting.
     await db.job.deleteMany({ where: { type: "source.google-sheets.poll", status: "DONE", updatedAt: { lt: new Date(Date.now() - 2 * 86400_000) } } });
   },

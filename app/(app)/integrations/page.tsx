@@ -1,10 +1,10 @@
-import { requireUser } from "@/lib/auth";
+import { requireOwner } from "@/lib/auth";
 import { integrationStatuses } from "@/adapters/registry";
 import { config } from "@/lib/config";
 import { Badge, Card } from "@/components/ui";
 
 export default async function Integrations() {
-  await requireUser();
+  await requireOwner();
   const list = integrationStatuses();
   return (
     <>

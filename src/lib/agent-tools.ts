@@ -2,7 +2,7 @@
 // route authenticates the request and finds the call attempt, then calls this.
 import { db } from "./db";
 import { applyAgentAction } from "./calls";
-import { tabRecruiterPhone } from "./recruiter-tab";
+import { tabRecruiterPhone, teamTransfer } from "./recruiter-tab";
 import { answerQuestion, getActiveOfferVersion } from "./knowledge";
 
 export async function findToolAttempt(where: { providerCallId?: string; attemptId?: string }) {
@@ -36,9 +36,10 @@ export async function runAgentTool(attempt: ToolAttempt, name: string | undefine
       return applyAgentAction(attempt.id, { type: "opt_out", raw: String(a.raw ?? "") });
     case "request_human": {
       const r = await applyAgentAction(attempt.id, { type: "request_transfer", reason: a.reason ?? "HUMAN_REQUESTED" });
-      const tab = await tabRecruiterPhone(attempt.leadId);
-      const s = tab ? null : await db.user.findFirst({ where: { orgId: attempt.lead.orgId, availableForTransfer: true, transferPhoneE164: { not: null } } });
-      return { ...r, transfer_number: r.transfer === "pending" ? (tab?.phone ?? s?.transferPhoneE164) : undefined, say: r.transfer === "pending" ? "Tell the driver you're connecting them to your manager." : "Say your manager isn't available right now and will contact them; ask for a good time." };
+      const team = await teamTransfer(attempt.leadId);
+      const tab = team ? null : await tabRecruiterPhone(attempt.leadId);
+      const s = team || tab ? null : await db.user.findFirst({ where: { orgId: attempt.lead.orgId, availableForTransfer: true, transferPhoneE164: { not: null } } });
+      return { ...r, transfer_number: r.transfer === "pending" ? (team ? team.phone ?? undefined : tab?.phone ?? s?.transferPhoneE164) : undefined, say: r.transfer === "pending" ? "Tell the driver you're connecting them to your manager." : "Say your manager isn't available right now and will contact them; ask for a good time." };
     }
     case "flag_for_recruiter":
       return applyAgentAction(attempt.id, { type: "flag_handoff", reason: a.reason, note: String(a.note ?? "") });

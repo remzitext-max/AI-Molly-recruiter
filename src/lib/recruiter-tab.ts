@@ -60,3 +60,13 @@ export async function tabRecruiterPhone(leadId: string): Promise<{ tab: string; 
   const tab = await leadSheetTab(leadId);
   return (tab && phones.get(tab.toLowerCase())) || null;
 }
+
+/** Transfer target of a recruiting team (its own number, set on Teams). */
+export const teamTransferTarget = (org: { name: string }) => transferTargetName(`team ${org.name}`);
+
+/** A team's transfer number for this lead, or null for the company's own leads. */
+export async function teamTransfer(leadId: string): Promise<{ target: string; phone: string | null } | null> {
+  const lead = await db.lead.findUnique({ where: { id: leadId }, select: { org: { select: { isMain: true, name: true, transferPhoneE164: true } } } });
+  if (!lead || lead.org.isMain) return null;
+  return { target: teamTransferTarget(lead.org), phone: lead.org.transferPhoneE164 };
+}

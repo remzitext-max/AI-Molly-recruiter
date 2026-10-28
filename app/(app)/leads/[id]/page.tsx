@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/auth";
+import { isOwner, requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { assertAdmin, assertLeadAccess, leadScope } from "@/lib/rbac";
 import { assignLead, transferLead } from "@/lib/assignment";
@@ -231,6 +231,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
   const { id } = await params;
   const editing = (await searchParams).edit === "1";
   const user = await requireUser();
+  const owner = await isOwner(user);
   const lead = await db.lead.findFirst({
     where: { id, ...leadScope(user) },
     include: {
@@ -278,7 +279,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             <tr><th>Call attempts</th><td>{lead.attemptCount} / {lead.campaign.maxAttempts}</td></tr>
             <tr><th>Next contact</th><td>{fmt(lead.nextContactAt)} {lead.queueReason && <div className="small muted">{lead.queueReason}</div>}</td></tr>
             <tr><th>Agreed callback</th><td>{lead.callbackAt ? `${formatLocal(lead.callbackAt, lead.timezone)} (driver local)` : "—"}</td></tr>
-            {user.role === "ADMIN" && lead.fbCampaign && <tr><th>Facebook ad</th><td className="small">{lead.fbCampaign}{lead.fbAd ? ` · ${lead.fbAd}` : ""}{lead.fbForm ? <div className="muted">form: {lead.fbForm}</div> : null}</td></tr>}
+            {owner && lead.fbCampaign && <tr><th>Facebook ad</th><td className="small">{lead.fbCampaign}{lead.fbAd ? ` · ${lead.fbAd}` : ""}{lead.fbForm ? <div className="muted">form: {lead.fbForm}</div> : null}</td></tr>}
             <tr><th>Sources</th><td className="small">{lead.sourceRecords.map((s) => <div key={s.id}>{s.sourceSystem}: {s.sourceRecordId} <span className="muted">sync: {s.syncStatus?.toLowerCase().replace(/_/g, " ") ?? "—"}</span></div>)}</td></tr>
           </tbody></table>
         </Card>

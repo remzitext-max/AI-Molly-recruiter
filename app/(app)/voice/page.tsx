@@ -1,5 +1,5 @@
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/auth";
+import { requireOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getAdapters } from "@/adapters/registry";
 import { PREVIEW_SCRIPTS } from "@/lib/demo-data";
@@ -13,7 +13,7 @@ const PROFILE = "Molly Recruiting Assistant";
 
 async function saveProfile(fd: FormData) {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const g = (k: string) => String(fd.get(k) ?? "").trim() || null;
   const provider = g("provider") ?? "mock";
   const consentDate = g("consentDate") ? new Date(g("consentDate")!) : null;
@@ -29,7 +29,7 @@ async function saveProfile(fd: FormData) {
 
 async function generatePreviews() {
   "use server";
-  const u = await requireAdmin();
+  const u = await requireOwner();
   const profile = await db.voiceProfile.findUniqueOrThrow({ where: { name: PROFILE } });
   const synth = getAdapters().synth;
   for (const s of PREVIEW_SCRIPTS) {
@@ -48,7 +48,7 @@ async function generatePreviews() {
 }
 
 export default async function VoicePage() {
-  await requireAdmin();
+  await requireOwner();
   const profile = await db.voiceProfile.findUnique({ where: { name: PROFILE }, include: { previews: { orderBy: { createdAt: "desc" }, take: 18 } } });
   const synth = getAdapters().synth;
   return (

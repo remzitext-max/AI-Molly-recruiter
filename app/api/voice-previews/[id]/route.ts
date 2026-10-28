@@ -1,10 +1,10 @@
-import { currentUser } from "@/lib/auth";
+import { currentUser, isOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getAdapters } from "@/adapters/registry";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const u = await currentUser();
-  if (!u || u.role !== "ADMIN") return new Response("Forbidden", { status: 403 });
+  if (!u || !(await isOwner(u))) return new Response("Forbidden", { status: 403 });
   const { id } = await params;
   const p = await db.voicePreview.findUnique({ where: { id } });
   if (!p?.audioKey) return new Response("Not found", { status: 404 });

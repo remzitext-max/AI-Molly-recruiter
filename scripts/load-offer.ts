@@ -9,7 +9,7 @@ async function main() {
   const file = process.argv[2] ?? "data/tbt-offer.json";
   const input = JSON.parse(readFileSync(file, "utf8")) as { offerName: string; notes?: string; facts: unknown };
   const facts = FactsSchema.parse(input.facts);
-  const org = await db.organization.findFirst();
+  const org = await db.organization.findFirst({ where: { isMain: true }, orderBy: { createdAt: "asc" } });
   if (!org) throw new Error("No organization in the database");
 
   const offer = (await db.offer.findFirst({ where: { orgId: org.id, name: input.offerName } }))

@@ -60,9 +60,12 @@ export function telegramConfigured() {
  * texts, CDL photos) from a single message.
  */
 async function postToGroup(method: string, body: Record<string, string | Blob>, leadId?: string, timeoutMs?: number) {
-  const token = config.telegram.botToken, configured = config.telegram.chatId;
-  if (!token || !configured) throw new Error("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not configured");
-  const lead = leadId ? await db.lead.findUnique({ where: { id: leadId }, select: { telegramThread: true } }) : null;
+  const token = config.telegram.botToken;
+  if (!token || !config.telegram.chatId) throw new Error("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not configured");
+  const lead = leadId ? await db.lead.findUnique({ where: { id: leadId }, select: { telegramThread: true, org: { select: { isMain: true, telegramChatId: true } } } }) : null;
+  // A team's drivers go to the team's own group, never to the company's; no group, no message.
+  const configured = !lead || lead.org.isMain ? config.telegram.chatId : lead.org.telegramChatId;
+  if (!configured) return;
   const [threadChat, threadMsg] = (lead?.telegramThread ?? "").split(":");
   const post = async (chatId: string) => {
     const form = new FormData();

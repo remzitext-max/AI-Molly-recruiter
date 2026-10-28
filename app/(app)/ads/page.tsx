@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { DateTime } from "luxon";
-import { requireAdmin } from "@/lib/auth";
+import { requireOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 import { campaignSpend, type CampaignSpend } from "@/adapters/live/meta";
@@ -16,7 +16,7 @@ const money = (n: number | null) => (n === null ? "—" : `$${n.toFixed(2)}`);
 const per = (spend: number | null, n: number) => (spend !== null && n ? spend / n : null);
 
 export default async function Ads({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  await requireAdmin();
+  await requireOwner();
   const sp = await searchParams;
   const range: Range = sp.range && sp.range in RANGES ? (sp.range as Range) : "30d";
   const now = DateTime.now().setZone(ZONE);

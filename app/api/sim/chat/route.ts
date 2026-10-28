@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/auth";
+import { currentUser, isOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 import { FactsSchema } from "@/lib/knowledge";
@@ -9,7 +9,7 @@ import { RecruitingBrain, type BrainState, type DriverInput } from "@/lib/conver
 // browser and nothing is persisted or sent anywhere.
 export async function POST(req: Request) {
   const u = await currentUser();
-  if (!u || u.role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!u || !(await isOwner(u))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const body = (await req.json().catch(() => null)) as { state: BrainState | null; input: { type: string; text?: string } } | null;
   if (!body?.input) return NextResponse.json({ error: "Bad request" }, { status: 400 });
   const settings = await getSettings();

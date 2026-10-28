@@ -43,7 +43,7 @@ export async function syncMetaLeads(now = new Date()) {
       });
       matched += r.count;
     }
-    const org = await db.organization.findFirst();
+    const org = await db.organization.findFirst({ where: { isMain: true }, orderBy: { createdAt: "asc" } });
     await db.sourceConnection.upsert({
       where: { id: CONN },
       create: { id: CONN, orgId: org?.id ?? "", lastSyncAt: now, lastSummary: { fetched: leads.length, matched }, lastError: null },

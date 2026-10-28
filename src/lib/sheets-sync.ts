@@ -58,6 +58,16 @@ export async function createSheetPreview(user: { id: string; orgId: string }, ca
   });
 }
 
+/**
+ * Phones that are already a lead of another team (or of the main company). A driver who
+ * applied to two teams' ads stays with the first one, so Crystal never calls them twice.
+ */
+export async function phonesOfOtherOrgs(orgId: string, phones: string[]) {
+  if (!phones.length) return new Set<string>();
+  const rows = await db.lead.findMany({ where: { phoneE164: { in: phones }, orgId: { not: orgId }, isDemo: false }, select: { phoneE164: true } });
+  return new Set(rows.map((r) => r.phoneE164));
+}
+
 export interface SheetSyncResult { skipped?: string; checkedRows?: number; imported?: Record<string, number> | null; rowsWithErrors?: number; error?: string }
 
 /** Import rows not seen before, using the mapping the admin reviewed. Safe to run concurrently or repeatedly. */
@@ -72,7 +82,8 @@ export async function pollGoogleSheet(opts: { manual?: boolean } = {}): Promise<
     const mapping = sheetMapping(snap.headers, conn.mapping as Mapping);
     const sheet: ParsedSheet = { headers: snap.headers, rows: snap.rows, warnings: snap.warnings };
     const preview = await buildPreview(sheet, mapping, SHEETS_SOURCE, conn.orgId);
-    const fresh = preview.filter((r) => r.disposition === "new" || r.disposition === "merge_existing_phone" || r.disposition === "suppressed");
+    const elsewhere = await phonesOfOtherOrgs(conn.orgId, preview.map((r) => r.phoneE164!).filter(Boolean));
+    const fresh = preview.filter((r) => (r.disposition === "new" || r.disposition === "merge_existing_phone" || r.disposition === "suppressed") && !elsewhere.has(r.phoneE164!));
     let imported: Record<string, number> | null = null;
     if (fresh.length) {
       const rows = fresh.map((r) => snap.rows[r.rowNumber - 2]);
@@ -119,7 +130,8 @@ async function pollExtraTab(main: { orgId: string; campaignId: string | null; ma
       await db.sourceConnection.create({ data: { id, orgId: main.orgId, campaignId: main.campaignId, mapping: { baseline: ids }, lastSyncAt: new Date(), lastSummary: { baselineRows: ids.length } } });
       return;
     }
-    const fresh = preview.filter((r) => !baseline.has(r.sourceRecordId) && (r.disposition === "new" || r.disposition === "merge_existing_phone" || r.disposition === "suppressed"));
+    const elsewhere = await phonesOfOtherOrgs(main.orgId, preview.map((r) => r.phoneE164!).filter(Boolean));
+    const fresh = preview.filter((r) => !baseline.has(r.sourceRecordId) && !elsewhere.has(r.phoneE164!) && (r.disposition === "new" || r.disposition === "merge_existing_phone" || r.disposition === "suppressed"));
     let imported: Record<string, number> | null = null;
     if (fresh.length) {
       const rows = fresh.map((r) => snap.rows[r.rowNumber - 2]);

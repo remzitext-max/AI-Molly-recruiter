@@ -15,7 +15,7 @@ async function main() {
   if (!/^\+1\d{10}$/.test(to)) throw new Error("Give your own US number like +18165551234");
   if (config.voiceProvider !== "telnyx") throw new Error("VOICE_PROVIDER is not telnyx in .env");
 
-  const org = await db.organization.findFirst();
+  const org = await db.organization.findFirst({ where: { isMain: true }, orderBy: { createdAt: "asc" } });
   if (!org) throw new Error("No organization in the database");
   const campaigns = await db.campaign.findMany({ where: { orgId: org.id, isDemo: false, offerId: { not: null } } });
   let campaign = null;

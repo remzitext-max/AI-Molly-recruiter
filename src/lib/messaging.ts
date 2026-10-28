@@ -1,3 +1,4 @@
+import { companyName } from "./company";
 import { db } from "./db";
 import { getSettings } from "./settings";
 import { evaluateContactGate } from "./contact-policy";
@@ -56,9 +57,10 @@ export async function sendCdlLink(leadId: string, attemptId: string | null, opts
   const link = useLink ? await createUploadLink(leadId) : null;
   const ttl = settings.uploadLinkTtlMinutes;
   const hi = lead.firstName ? `Hi ${lead.firstName}, it's ${config.agentPersona.name}. ` : "";
+  const company = await companyName(lead.org);
   const body = link
-    ? `${lead.org.name} recruiting team: can you send your CDL and medical card here please: ${link.url} . Link expires in ${ttl >= 60 ? `${Math.round(ttl / 60)} hr` : `${ttl} min`}. Reply STOP to opt out.`
-    : `${lead.org.name} recruiting team: ${hi}Can you send a photo of your CDL and medical card here please? Just reply to this text. Reply STOP to opt out.`;
+    ? `${company} recruiting team: can you send your CDL and medical card here please: ${link.url} . Link expires in ${ttl >= 60 ? `${Math.round(ttl / 60)} hr` : `${ttl} min`}. Reply STOP to opt out.`
+    : `${company} recruiting team: ${hi}Can you send a photo of your CDL and medical card here please? Just reply to this text. Reply STOP to opt out.`;
   const stored = link ? body.replace(link.token, "[link-token]") : body;
   const sender = await smsSenderFor(leadId);
   const msg = await db.message.create({ data: { leadId, isDemo: lead.isDemo, direction: "OUTBOUND", purpose: "CDL_LINK", body: stored, provider: getAdapters().sms.key, idempotencyKey: idem, status: "SENDING" } });
@@ -118,7 +120,7 @@ export async function sendMissedCallText(leadId: string, attemptId: string, now 
     await recordEvent({ leadId, actorType: "SYSTEM", type: "SMS_BLOCKED", message: `Missed-call text not sent: ${gate.message}` });
     return { sent: false, reason: gate.message };
   }
-  const vars = { company: lead.org.name, persona: config.agentPersona.name, first: lead.firstName, last: lead.lastName, position: await driverPosition(leadId) };
+  const vars = { company: await companyName(lead.org), persona: config.agentPersona.name, first: lead.firstName, last: lead.lastName, position: await driverPosition(leadId) };
   const body = fillSmsTemplate(settings.missedCallSmsText, vars).slice(0, 480);
   const msg = await db.message.create({ data: { leadId, isDemo: lead.isDemo, direction: "OUTBOUND", purpose: "MISSED_CALL", body, provider: getAdapters().sms.key, idempotencyKey: idem, status: "SENDING" } });
   try {
