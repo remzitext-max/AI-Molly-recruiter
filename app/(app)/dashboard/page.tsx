@@ -8,6 +8,7 @@ import { leadScope } from "@/lib/rbac";
 import { config } from "@/lib/config";
 import { sourceLabel } from "@/lib/driver-profile";
 import { UPLOAD_PROVIDER } from "@/lib/recruiter-upload";
+import { RECALL_PREFIX } from "@/lib/sheet-recall";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { Card, Stat, Badge, PageHead, fmt, name, initials, initialsOf } from "@/components/ui";
 import { loadDemoLeads } from "@/lib/demo-actions";
@@ -144,6 +145,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const until = p.end.toJSDate();
   const prevSince = new Date(since.getTime() - (until.getTime() - since.getTime()));
   const inRange = { gte: since, lt: until };
+  // Old "No answer" leads re-called from the recruiters' tabs are not new applicants.
+  const recall = { sourceRecordId: { startsWith: RECALL_PREFIX } };
+  const fresh = { sourceRecords: { none: recall } };
   const inPrev = { gte: prevSince, lt: since };
   // The chart shows the chosen days, at least two weeks and at most three months.
   const chartDays = Math.min(92, Math.max(14, p.days));
@@ -153,8 +157,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     newLeads, prevLeads, placed, prevPlaced, answeredCalls, prevAnsweredCalls, interestedLeads, prevInterested,
     docsLeads, prevDocs, chartCalls, outcomes, rangeLeads, bySource, attention, openTasks, recent, pendingJobs, hiredNow, hiredPrev,
   ] = await Promise.all([
-    db.lead.count({ where: { ...scope, createdAt: inRange } }),
-    db.lead.count({ where: { ...scope, createdAt: inPrev } }),
+    db.lead.count({ where: { ...scope, ...fresh, createdAt: inRange } }),
+    db.lead.count({ where: { ...scope, ...fresh, createdAt: inPrev } }),
     db.callAttempt.count({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: PLACED, createdAt: inRange } }),
     db.callAttempt.count({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: PLACED, createdAt: inPrev } }),
     db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: { in: [...ANSWERED] }, createdAt: inRange }, select: { id: true, outcome: true, startedAt: true, endedAt: true } }),
@@ -166,10 +170,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: PLACED, createdAt: { gte: chartStart.toJSDate(), lt: until } }, select: { id: true, createdAt: true, status: true, outcome: true } }),
     db.callAttempt.groupBy({ by: ["outcome"], where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: PLACED, createdAt: inRange }, _count: true }),
     db.lead.findMany({
-      where: { ...scope, createdAt: inRange },
+      where: { ...scope, ...fresh, createdAt: inRange },
       select: { createdAt: true, pipelineStatus: true, documentStatus: true, hireStage: true, assignedTo: { select: { id: true, name: true } }, calls: { where: { status: PLACED }, orderBy: { createdAt: "asc" }, select: { id: true, createdAt: true, status: true, outcome: true } } },
     }),
-    db.leadSourceRecord.groupBy({ by: ["sourceSystem"], where: { lead: { ...scope, createdAt: inRange } }, _count: true }),
+    db.leadSourceRecord.groupBy({ by: ["sourceSystem"], where: { NOT: recall, lead: { ...scope, ...fresh, createdAt: inRange } }, _count: true }),
     db.lead.findMany({
       where: { ...scope, OR: [{ pipelineStatus: { in: ["NEEDS_TIMEZONE", "NEEDS_PERMISSION", "HANDOFF_READY", "CALLBACK_SCHEDULED"] } }, { calls: { some: { outcome: "HUMAN_REQUESTED", createdAt: inRange } } }] },
       orderBy: { updatedAt: "desc" }, take: 8,
@@ -181,6 +185,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     db.lead.count({ where: { ...scope, hireStage: "HIRED", hiredAt: inPrev } }),
   ]);
 
+  const recalledBy = await db.leadSourceRecord.groupBy({ by: ["sourceSystem"], where: { ...recall, lead: { ...scope, createdAt: inRange } }, _count: true });
+  const recalled = recalledBy.reduce((n, r) => n + r._count, 0);
+  const recallTab = async (sourceSystem: string) => ((await db.leadSourceRecord.findFirst({ where: { sourceSystem, ...recall }, select: { raw: true } }))?.raw as { tab?: string } | null)?.tab ?? sourceLabel(sourceSystem);
   const gaveAnswers = await callsWithAnswers([...answeredCalls, ...prevAnsweredCalls, ...chartCalls, ...rangeLeads.flatMap((l) => l.calls)].map((c) => c.id));
   const talked = (c: CallRow) => (c.status ?? "COMPLETED") === "COMPLETED" && (DECIDED.includes(c.outcome ?? "") || gaveAnswers.has(c.id));
   const prevAnswered = prevAnsweredCalls.filter(talked).length;
@@ -235,7 +242,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     team.set(k, r);
   }
   const teamRows = [...team.values()].sort((a, b) => b.hired - a.hired || b.interested - a.interested || b.leads - a.leads);
-  const sourceRows = bySource.map((s) => ({ label: sourceLabel(s.sourceSystem), n: s._count })).sort((a, b) => b.n - a.n);
+  const sourceRows = [
+    ...bySource.map((s) => ({ label: sourceLabel(s.sourceSystem), n: s._count })),
+    ...(await Promise.all(recalledBy.map(async (s) => ({ label: `Re-called · ${await recallTab(s.sourceSystem)}`, n: s._count })))),
+  ].sort((a, b) => b.n - a.n);
   const sMax = Math.max(1, ...sourceRows.map((s) => s.n));
   const hello = now.hour < 12 ? "Good morning" : now.hour < 18 ? "Good afternoon" : "Good evening";
 
@@ -255,7 +265,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <PageHead title={`${hello}, ${user.name.split(" ")[0]}`} sub={`${mine ? "Your leads" : "All leads"} · ${p.days === 1 ? p.to.toFormat("ccc, MMM d") : `${p.from.toFormat("MMM d")} – ${p.to.toFormat("MMM d")}`} (Central time)`} right={rangeTabs} />
 
       <div className="stats four">
-        <Stat label="New leads" icon="leads" tone="blue" n={newLeads} sub={<Delta now={newLeads} prev={prevLeads} />} />
+        <Stat label="New leads" icon="leads" tone="blue" n={newLeads} sub={<><Delta now={newLeads} prev={prevLeads} />{recalled > 0 && <> · +{recalled} old &quot;No answer&quot; leads re-called</>}</>} />
         <Stat label="AI calls placed" icon="phone" tone="violet" n={placed} sub={<Delta now={placed} prev={prevPlaced} />} />
         <Stat label="Talked to driver" icon="voice" tone="teal" n={`${pct(answered, placed)}%`} sub={<>{answered} of {placed} calls · {pickedUp - answered} picked up without a real talk (voicemail, call screening, hang-up) · <Delta now={answered} prev={prevAnswered} /></>} />
         <Stat label="Interested drivers" icon="star" tone="green" n={interestedLeads} sub={<Delta now={interestedLeads} prev={prevInterested} />} />
