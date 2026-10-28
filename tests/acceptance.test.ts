@@ -583,7 +583,7 @@ describe("Telegram driver card", () => {
     const real = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Ray", lastName: "<Test>", phoneE164: "+12145550111" } });
     const started = new Date(Date.now() - 200_000);
     const a = await db.callAttempt.create({ data: { leadId: real.id, provider: "telnyx", idempotencyKey: "tg-1", status: "COMPLETED", outcome: "INTERESTED", startedAt: started, endedAt: new Date(started.getTime() + 185_000) } });
-    for (const [key, reportedValue] of [["home_time", "4 weeks out, 4 days home"], ["experience_years", "3 years OTR"], ["weekly_miles", "600 a day"], ["english_level", "Good"], ["start_date", "Next Monday"], ["home_location", "Dallas, TX"]]) {
+    for (const [key, reportedValue] of [["home_time", "4 weeks out, 4 days home"], ["experience_years", "3 years OTR"], ["weekly_miles", "600 a day"], ["english_level", "Good"], ["start_date", "Next Monday"], ["home_location", "Dallas, TX"], ["recent_companies", "Swift 2023-now, Werner 2021-2023"], ["work_type", "OTR"], ["accidents_at_fault", "yes"], ["accident_details", "3/2024 rear-ended a car, at fault, police report"]]) {
       await db.screeningField.create({ data: { leadId: real.id, key, reportedValue, callAttemptId: a.id } });
     }
     const card = await buildCallReport(a.id);
@@ -594,12 +594,15 @@ describe("Telegram driver card", () => {
       "🌍State: Dallas, TX",
       "🏠Home time: 4 weeks out, 4 days home",
       "📈Experience: 3 years OTR",
+      "🏢Companies (3 yrs): Swift 2023-now, Werner 2021-2023",
+      "🛣OTR/local: OTR",
+      "💥Accidents: 3/2024 rear-ended a car, at fault, police report",
       "💵Payment: asking: ",
       "🚛can drive: 600 a day",
       "🗣 English: Good",
       "✅ Ready date: Next Monday",
       "☎️Phone number : +12145550111",
-      "⭐ Fit: Not enough answers",
+      "⭐ Fit: 60/100 · Possible fit: At-fault accident: yes",
       "🟢 Interested",
     ].join("\n"));
 

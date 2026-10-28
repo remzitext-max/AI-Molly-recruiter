@@ -67,6 +67,9 @@ export function fitScore(answers: Record<string, string | null | undefined>, rul
   if (exp === null) { missing.push("experience"); score -= 15; }
   else if (exp < need) { knockout = true; reasons.push(`Experience ${a.experience_years} (needs ${need >= 12 ? `${need / 12} yr` : `${need} mo`}${team ? " team" : " solo"})`); }
 
+  // Safety only counts over-the-road time, so local or regional-only work weighs against the driver.
+  if (a.work_type && /\b(local|regional)\b/i.test(a.work_type) && !/\b(otr|over the road|long haul)\b/i.test(a.work_type)) { score -= 20; reasons.push(`No OTR: ${a.work_type}`); }
+
   if (!a.sap_history) { missing.push("SAP"); score -= 10; }
   else if (yes(a.sap_history) && rules.sapKnockout) { knockout = true; reasons.push("SAP history"); }
 

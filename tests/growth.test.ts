@@ -38,6 +38,10 @@ describe("fit score", () => {
     expect(team.knockout).toBe(false);
     expect(fitScore({ first_name: "Al" }).label).toBe("Not enough answers");
     expect(fitScore({ experience_years: "3 years", sap_history: "no", cdl_class: "A", accidents_at_fault: "yes one in 2023", english_level: "Fair" }).score).toBe(65);
+    const local = fitScore({ experience_years: "3 years", sap_history: "no", cdl_class: "A", accidents_at_fault: "no", work_type: "Amazon local, Sysco regional" });
+    expect(local.score).toBe(80);
+    expect(local.reasons[0]).toMatch(/No OTR/);
+    expect(fitScore({ experience_years: "3 years", sap_history: "no", cdl_class: "A", accidents_at_fault: "no", work_type: "Swift OTR, Sysco local" }).score).toBe(100);
   });
 });
 

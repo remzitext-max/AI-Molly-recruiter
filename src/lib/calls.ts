@@ -374,7 +374,7 @@ async function maybeRetry(leadId: string, delayMin: number, max: number, reason:
 // 4. Real-time agent actions (provider tool calls / simulator)
 // ---------------------------------------------------------------------------
 const ActionSchema: z.ZodType<AgentAction> = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("record_slot"), key: z.enum(["first_name", "home_location", "cdl_class", "endorsements", "restrictions", "experience_years", "equipment_experience", "driving_type", "route_preference", "home_time", "start_date", "recent_miles", "weeks_out", "weekly_miles", "sap_history", "accidents_at_fault", "med_card_expiry", "english_level", "offer_interest", "concerns"]), value: z.string().max(500), raw: z.string().max(2000), status: z.enum(["CAPTURED", "CORRECTED", "UNCLEAR"]) }),
+  z.object({ type: z.literal("record_slot"), key: z.enum(["first_name", "home_location", "cdl_class", "endorsements", "restrictions", "experience_years", "equipment_experience", "driving_type", "route_preference", "home_time", "start_date", "recent_miles", "weeks_out", "weekly_miles", "sap_history", "accidents_at_fault", "accident_details", "recent_companies", "work_type", "med_card_expiry", "english_level", "offer_interest", "concerns"]), value: z.string().max(500), raw: z.string().max(2000), status: z.enum(["CAPTURED", "CORRECTED", "UNCLEAR"]) }),
   z.object({ type: z.literal("unanswered_question"), question: z.string().max(1000), reason: z.string().max(300) }),
   z.object({ type: z.literal("offer_discussed"), factKeys: z.array(z.string().max(80)).max(20) }),
   z.object({ type: z.literal("opt_out"), raw: z.string().max(2000) }),
