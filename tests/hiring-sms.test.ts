@@ -427,12 +427,21 @@ describe("No AI repeat calls once the driver talked or a recruiter set a status"
 });
 
 describe("leads moved to a recruiter's tab in the lead sheet", () => {
+  it("finds a recruiter's tab from their name", async () => {
+    const { tabForUser } = await import("@/lib/assignment");
+    const tabs = ["Pool", "Dennis", "Molly", "Ben"];
+    expect(tabForUser({ name: "Denis", sheetTab: null }, tabs)).toBe("Dennis");
+    expect(tabForUser({ name: "Molly (demo recruiter)", sheetTab: null }, tabs)).toBeNull();
+    expect(tabForUser({ name: "Bob", sheetTab: null }, tabs)).toBeNull();
+    expect(tabForUser({ name: "Bob", sheetTab: "Ben" }, tabs)).toBe("Ben");
+  });
+
   it("are assigned to that recruiter, and a later transfer on the site stays", async () => {
     const base = await seedBase();
     const r = await addLead(base, { phone: "(214) 555-0177" });
     if (r.result !== "created") throw new Error("no lead");
     await db.lead.update({ where: { id: r.leadId }, data: { isDemo: false } });
-    const denis = await db.user.create({ data: { orgId: base.org.id, email: "denis@x.test", name: "Denis", passwordHash: "x", sheetTab: "Dennis" } });
+    const denis = await db.user.create({ data: { orgId: base.org.id, email: "denis@x.test", name: "Denis Petrov", passwordHash: "x" } }); // tab found from the name
     const ben = await db.user.create({ data: { orgId: base.org.id, email: "ben@x.test", name: "Ben", passwordHash: "x", sheetTab: "ben" } });
     const tabs: Record<string, string[][]> = { Pool: [["(214) 555-0177", ""]], Dennis: [], Ben: [] };
     setAdapterOverride({ sheets: {

@@ -55,21 +55,39 @@ export async function transferLead(leadId: string, toUserId: string, by: { id: s
   return { changed: true, to: to.name };
 }
 
+// "Dennis" tab and login "Denis": letters only, doubled letters once.
+const squeeze = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "").replace(/(.)\1+/g, "$1");
+
+/** The tab of the lead sheet that belongs to this user: the one set on Users, else the one named like them. Demo users get none. */
+export function tabForUser(u: { name: string; sheetTab: string | null }, tabs: string[]): string | null {
+  if (u.sheetTab?.trim()) return u.sheetTab.trim();
+  if (/demo/i.test(u.name)) return null;
+  const first = squeeze(u.name.trim().split(/\s+/)[0] ?? "");
+  return (first.length >= 3 && tabs.find((t) => squeeze(t) === first)) || null;
+}
+
 /**
  * A recruiter moved leads from the Pool to their own tab in the lead sheet: the leads go to
- * that recruiter on the site too (Users > Sheet tab says whose tab is whose).
+ * that recruiter on the site too. The tab is found by the recruiter's name (or set on Users).
  */
 export async function assignFromSheetTabs(rows: { phoneE164: string; tab: string }[]) {
   if (!rows.length) return 0;
-  const owners = await db.user.findMany({ where: { active: true, sheetTab: { not: null } } });
-  const byTab = new Map(owners.filter((u) => u.sheetTab!.trim()).map((u) => [u.sheetTab!.trim().toLowerCase(), u]));
+  const tabs = [...new Set(rows.map((r) => r.tab.trim()))];
+  const users = await db.user.findMany({ where: { active: true } });
+  const byTab = new Map<string, (typeof users)[number][]>();
+  for (const u of users) {
+    const t = tabForUser(u, tabs)?.toLowerCase();
+    if (t) byTab.set(t, [...(byTab.get(t) ?? []), u]);
+  }
   const tabOf = new Map(rows.map((r) => [r.phoneE164, r.tab.trim()]));
   const leads = await db.lead.findMany({ where: { phoneE164: { in: [...tabOf.keys()] }, isDemo: false }, select: { id: true, orgId: true, phoneE164: true, assignedToId: true } });
   let moved = 0;
   for (const l of leads) {
     const tab = tabOf.get(l.phoneE164)!;
-    const u = byTab.get(tab.toLowerCase());
-    if (!u || u.orgId !== l.orgId || l.assignedToId === u.id) continue;
+    // Two logins for one tab (e.g. two Dennises): nobody is guessed.
+    const owners = (byTab.get(tab.toLowerCase()) ?? []).filter((u) => u.orgId === l.orgId);
+    const u = owners.length === 1 ? owners[0] : null;
+    if (!u || l.assignedToId === u.id) continue;
     await assignLead(l.id, u.id, "MANUAL", null);
     await recordEvent({ leadId: l.id, actorType: "SYSTEM", type: "TRANSFERRED", message: `Assigned to ${u.name}: lead is in the ${tab} tab of the lead sheet` });
     moved++;

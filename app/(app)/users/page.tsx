@@ -7,7 +7,7 @@ import { recordEvent } from "@/lib/activity";
 import { Badge, Card } from "@/components/ui";
 import { flash } from "@/lib/flash";
 import { ConfirmButton } from "@/components/confirm-button";
-import { assignFromSheetTabs } from "@/lib/assignment";
+import { assignFromSheetTabs, tabForUser } from "@/lib/assignment";
 
 const tabOf = (fd: FormData) => String(fd.get("sheetTab") || "").trim().slice(0, 100) || null;
 
@@ -18,6 +18,9 @@ async function claimTab(tab: string | null) {
   return assignFromSheetTabs(rows);
 }
 
+/** Tabs of the lead sheet seen so far (from the recruiters' Status columns). */
+const sheetTabs = async () => (await db.sheetLeadStatus.findMany({ distinct: ["tab"], select: { tab: true } })).map((r) => r.tab);
+
 async function createUser(fd: FormData) {
   "use server";
   const u = await requireAdmin();
@@ -25,8 +28,10 @@ async function createUser(fd: FormData) {
   const pw = String(fd.get("password") || "");
   if (!email || pw.length < 12) redirect("/users?error=Email and a password of at least 12 characters are required");
   if (await db.user.findUnique({ where: { email } })) redirect("/users?error=Email already exists");
-  const sheetTab = tabOf(fd);
-  await db.user.create({ data: { orgId: u.orgId, email, name: String(fd.get("name") || email), role: fd.get("role") === "ADMIN" ? "ADMIN" : "RECRUITER", passwordHash: await hashPassword(pw), sheetTab } });
+  const name = String(fd.get("name") || email);
+  // Left empty, the tab named like the recruiter ("Dennis" for Denis) is theirs.
+  const sheetTab = tabOf(fd) ?? tabForUser({ name, sheetTab: null }, (await sheetTabs()).filter((t) => !/^pool$/i.test(t)));
+  await db.user.create({ data: { orgId: u.orgId, email, name, role: fd.get("role") === "ADMIN" ? "ADMIN" : "RECRUITER", passwordHash: await hashPassword(pw), sheetTab } });
   await recordEvent({ actorType: "USER", actorId: u.id, orgId: u.orgId, type: "USER_CREATED", message: `User ${email} created` });
   const n = await claimTab(sheetTab);
   await flash(n ? `User created. ${n} leads from the ${sheetTab} tab assigned to them` : "User created");
@@ -74,6 +79,7 @@ export default async function Users({ searchParams }: { searchParams: Promise<{ 
   const u = await requireAdmin();
   const sp = await searchParams;
   const users = await db.user.findMany({ where: { orgId: u.orgId }, orderBy: { createdAt: "asc" }, include: { _count: { select: { assignedLeads: true } } } });
+  const tabs = (await sheetTabs()).filter((t) => !/^pool$/i.test(t));
   return (
     <>
       <h1>Users</h1>
@@ -91,7 +97,7 @@ export default async function Users({ searchParams }: { searchParams: Promise<{ 
                   <input type="checkbox" name="rr" defaultChecked={x.inRoundRobin} title="round-robin" />
                   <input type="checkbox" name="avail" defaultChecked={x.availableForTransfer} title="available" />
                   <input name="transferPhone" type="tel" autoComplete="off" defaultValue={x.transferPhoneE164 ?? ""} placeholder="+1…" size={14} />
-                  <input name="sheetTab" autoComplete="off" defaultValue={x.sheetTab ?? ""} placeholder="e.g. Dennis" size={10} title="This recruiter's tab in the lead sheet" />
+                  <input name="sheetTab" autoComplete="off" defaultValue={x.sheetTab ?? ""} placeholder={tabForUser({ ...x, sheetTab: null }, tabs) ?? "e.g. Dennis"} size={10} title="This recruiter's tab in the lead sheet" />
                   <input name="password" type="password" autoComplete="new-password" placeholder="leave blank" size={12} />
                   <button className="secondary">Save</button> {!x.active && <Badge v="INACTIVE" tone="bad" />}
                 </form>
@@ -105,13 +111,13 @@ export default async function Users({ searchParams }: { searchParams: Promise<{ 
             </tr>
           ))}
         </tbody></table>
-        <p className="small muted">Checkbox order: active · in round-robin · available for live transfer. Sheet tab: when a lead is moved from the Pool to this tab of the lead sheet, it is assigned to this user here too.</p>
+        <p className="small muted">Checkbox order: active · in round-robin · available for live transfer. Sheet tab: when a lead is moved from the Pool to this tab of the lead sheet, it is assigned to this user here too. Left empty, the tab named like the user is used (grey text shows it, e.g. Dennis for Denis); type a name only if it differs.</p>
       </Card>
       <Card title="Add recruiter or admin login">
         <form action={createUser} className="inline">
           <input name="name" placeholder="Name, e.g. Denis" autoComplete="off" required /><input name="email" type="email" placeholder="Login email, e.g. denis@tbt.local" autoComplete="off" required />
           <input name="password" type="password" placeholder="Temporary password (12+)" autoComplete="new-password" required />
-          <input name="sheetTab" placeholder="Sheet tab, e.g. Dennis" autoComplete="off" />
+          <input name="sheetTab" placeholder="Sheet tab (found from the name)" autoComplete="off" />
           <select name="role"><option value="RECRUITER">Recruiter</option><option value="ADMIN">Admin</option></select>
           <button>Create</button>
         </form>
