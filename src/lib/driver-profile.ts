@@ -57,7 +57,10 @@ export function sourceLabel(s: string) {
 
 /** "Swift 2023-now, Werner 2021-2023" -> one employer per line. */
 export function splitEmployers(text: string | null | undefined): string[] {
-  return (text ?? "").split(/\s*(?:;|\n|,(?=\s*[A-Za-z]))\s*/).map((s) => s.trim()).filter(Boolean);
+  const t = text ?? "";
+  // A recruiter's list is saved one employer per line, so "Swift, 2023 - now, OTR" stays whole.
+  const sep = t.includes("\n") ? /\s*\n\s*/ : /\s*(?:;|,(?=\s*[A-Za-z]))\s*/;
+  return t.split(sep).map((s) => s.trim()).filter(Boolean);
 }
 
 /** The profile of one lead the viewer may see, or null. */
@@ -166,9 +169,9 @@ export async function saveProfileEdits(user: Viewer & { name: string }, id: stri
     const row = l.screening.find((x) => x.key === f.key);
     const current = (row?.verifiedValue || row?.reportedValue || (f.key === "accident_details" ? l.screening.find((x) => x.key === "accidents_at_fault")?.reportedValue : "") || "").trim();
     const shown = f.key === "recent_companies" ? splitEmployers(current).join("\n") : current;
-    if (v === shown) continue;
-    // Several lines become one "a, b, c" value, the way Crystal saves employers.
-    const value = f.key === "recent_companies" ? splitEmployers(v).join(", ") : v;
+    const lines = v.split(/\s*\n\s*/).map((x) => x.trim()).filter(Boolean);
+    if ((f.key === "recent_companies" ? lines.join("\n") : v) === shown) continue;
+    const value = f.key === "recent_companies" ? lines.join("\n") : v;
     await db.screeningField.upsert({
       where: { leadId_key: { leadId: id, key: f.key } },
       create: { leadId: id, key: f.key, verifiedValue: value || null, verifiedById: user.id, verifiedAt: now, status: "CORRECTED" },

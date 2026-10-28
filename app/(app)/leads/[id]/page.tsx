@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -26,6 +26,7 @@ import { HIRE_LABEL, HIRE_STAGES, setHireStage } from "@/lib/hiring";
 import type { HireStage } from "@prisma/client";
 import { RECRUITER_STATUSES, setRecruiterStatus, statusTone } from "@/lib/recruiter-status";
 import { saveUploadedRecording } from "@/lib/recruiter-upload";
+import { BASIC_FIELDS, PROFILE_FIELDS, loadDriverProfile, saveProfileEdits } from "@/lib/driver-profile";
 
 type Turn = { speaker: string; text: string; latencyMs?: number };
 
@@ -50,6 +51,17 @@ async function assign(fd: FormData) {
     await flash("Lead unassigned");
   }
   revalidatePath(`/leads/${id}`);
+}
+
+async function editProfile(fd: FormData) {
+  "use server";
+  const id = String(fd.get("leadId"));
+  const u = await guard(id);
+  const keys = [...BASIC_FIELDS.map((f) => f.key), ...PROFILE_FIELDS.map((f) => f.key)];
+  const changed = await saveProfileEdits(u, id, Object.fromEntries(keys.map((k) => [k, String(fd.get(k) ?? "")])));
+  await flash(changed?.length ? `Profile saved: ${changed.join(", ")}` : "Nothing changed");
+  revalidatePath(`/leads/${id}`);
+  redirect(`/leads/${id}`);
 }
 
 async function uploadRecording(fd: FormData) {
@@ -215,8 +227,9 @@ async function clickToCall(fd: FormData) {
   revalidatePath(`/leads/${id}`);
 }
 
-export default async function LeadPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function LeadPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string }> }) {
   const { id } = await params;
+  const editing = (await searchParams).edit === "1";
   const user = await requireUser();
   const lead = await db.lead.findFirst({
     where: { id, ...leadScope(user) },
@@ -251,9 +264,10 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         </div>
       </div>
       {lead.optedOutAt && <div className="alert error">Opted out on {fmt(lead.optedOutAt)}. No automated calls or texts will be sent; the number is suppressed for future imports.</div>}
+      {editing && <EditProfile user={user} leadId={lead.id} />}
 
       <div className="grid two">
-        <Card title="Driver">
+        <Card title="Driver" right={<Link className="btn secondary" href={editing ? `/leads/${lead.id}` : `/leads/${lead.id}?edit=1`}>{editing ? "Cancel edit" : "Edit profile"}</Link>}>
           <table className="kv"><tbody>
             <tr><th>Phone</th><td>{lead.phoneE164}</td></tr>
             <tr><th>Email</th><td>{lead.email ?? "—"}</td></tr>
@@ -468,5 +482,27 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
         <p className="small"><Link href="/leads">Back to leads</Link></p>
       </Card>
     </>
+  );
+}
+
+/** The recruiter fills in or corrects the driver's profile (same fields as the popup and the PDF). */
+async function EditProfile({ user, leadId }: { user: Awaited<ReturnType<typeof requireUser>>; leadId: string }) {
+  const p = await loadDriverProfile(user, leadId);
+  if (!p) return null;
+  return (
+    <Card title="Edit driver profile">
+      <form action={editProfile} className="dp-edit">
+        <input type="hidden" name="leadId" value={leadId} />
+        <div className="dp-grid">
+          {BASIC_FIELDS.map((f) => <label key={f.key}>{f.label}<input name={f.key} defaultValue={p.edit[f.key]} /></label>)}
+          {PROFILE_FIELDS.filter((f) => f.section !== "employers").map((f) => <label key={f.key}>{f.label}<input name={f.key} defaultValue={p.edit[f.key]} /></label>)}
+        </div>
+        {PROFILE_FIELDS.filter((f) => f.section === "employers").map((f) => (
+          <label key={f.key} className="dp-wide">{f.label}<textarea name={f.key} rows={4} defaultValue={p.edit[f.key]} placeholder={"Werner, 04/2024 - now, OTR\nSwift, 2022 - 03/2024, OTR"} /></label>
+        ))}
+        <p className="small muted">What the driver told Crystal is kept in the history; your values are shown in the profile and the PDF.</p>
+        <div className="row"><button>Save profile</button><Link className="btn secondary" href={`/leads/${leadId}`}>Cancel</Link></div>
+      </form>
+    </Card>
   );
 }
