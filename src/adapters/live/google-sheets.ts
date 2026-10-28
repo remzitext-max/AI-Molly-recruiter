@@ -14,6 +14,8 @@ const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const API = "https://sheets.googleapis.com/v4/spreadsheets";
 
 let tokenCache: { key: string; token: string; exp: number } | null = null;
+/** "<spreadsheet>#<gid>" -> tab name, for "gid:" ranges. */
+const tabTitles = new Map<string, { title: string; exp: number }>();
 
 const b64url = (b: Buffer | string) => Buffer.from(b).toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
 
@@ -99,11 +101,16 @@ export class GoogleSheetsSource implements SheetLeadSource {
   private async range(r = config.googleSheets.range, sheetId = config.googleSheets.spreadsheetId) {
     const gid = /^gid[:=](\d+)$/i.exec(r.trim());
     if (!gid) return quoteTab(r);
+    // The tab's name is looked up once every 10 minutes, so a sheet poll costs one request, not two.
+    const key = `${sheetId}#${gid[1]}`;
+    const hit = tabTitles.get(key);
+    if (hit && hit.exp > Date.now()) return quote(hit.title);
     const url = `${API}/${encodeURIComponent(sheetId!)}?fields=sheets.properties(sheetId,title)`;
     const res = await providerFetch(url, { headers: { authorization: `Bearer ${await this.token()}` } });
     const j = (await res.json()) as { sheets?: { properties: { sheetId: number; title: string } }[] };
     const title = j.sheets?.find((s) => String(s.properties.sheetId) === gid[1])?.properties.title;
     if (title === undefined) throw new Error(`The spreadsheet has no tab with gid ${gid[1]}`);
+    tabTitles.set(key, { title, exp: Date.now() + 10 * 60_000 });
     return quote(title);
   }
 
@@ -115,18 +122,31 @@ export class GoogleSheetsSource implements SheetLeadSource {
     return (j.sheets ?? []).map((s) => ({ title: s.properties.title, gid: String(s.properties.sheetId) }));
   }
 
-  private async getValues(r?: string, sheetId = config.googleSheets.spreadsheetId) {
+  private async getValues(r?: string, sheetId = config.googleSheets.spreadsheetId): Promise<{ range: string; values?: unknown[][] }> {
     const url = `${API}/${encodeURIComponent(sheetId!)}/values/${encodeURIComponent(await this.range(r, sheetId))}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`;
-    const res = await providerFetch(url, { headers: { authorization: `Bearer ${await this.token()}` } });
-    return (await res.json()) as { range: string; values?: unknown[][] };
+    try {
+      const res = await providerFetch(url, { headers: { authorization: `Bearer ${await this.token()}` } });
+      return (await res.json()) as { range: string; values?: unknown[][] };
+    } catch (e) {
+      // A renamed tab: look its name up again once.
+      const gid = /^gid[:=](\d+)$/i.exec((r ?? config.googleSheets.range).trim());
+      if (!gid || !tabTitles.delete(`${sheetId}#${gid[1]}`)) throw e;
+      return this.getValues(r, sheetId);
+    }
   }
 
   async readSheet(r?: string, sheetId?: string): Promise<SheetSnapshot> {
-    const v = await this.getValues(r, sheetId);
-    const values = (v.values ?? []).map((r) => r.map((c) => (c === null || c === undefined ? "" : String(c))));
-    const headers = (values[0] ?? []).map((h) => h.trim());
-    const rows = values.slice(1).map((r) => headers.map((_, i) => r[i] ?? ""));
-    return { title: v.range, headers, rows, warnings: ["Values are read as shown in Google Sheets. Anything a formula calculated arrives as plain text; this app never runs formulas."] };
+    return snapshot(await this.getValues(r, sheetId));
+  }
+
+  /** Several tabs (by name) of one spreadsheet in a single request; same order as `titles`. */
+  async readTabs(titles: string[], sheetId = config.googleSheets.spreadsheetId): Promise<SheetSnapshot[]> {
+    if (!titles.length) return [];
+    const q = titles.map((t) => `ranges=${encodeURIComponent(quote(t))}`).join("&");
+    const url = `${API}/${encodeURIComponent(sheetId!)}/values:batchGet?${q}&majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`;
+    const res = await providerFetch(url, { headers: { authorization: `Bearer ${await this.token()}` }, timeoutMs: 60_000 });
+    const j = (await res.json()) as { valueRanges?: { range: string; values?: unknown[][] }[] };
+    return titles.map((t, i) => snapshot(j.valueRanges?.[i] ?? { range: quote(t) }));
   }
 
   async writeStatus(sourceRecordId: string, text: string, phoneColumn?: string) {
@@ -151,5 +171,12 @@ export class GoogleSheetsSource implements SheetLeadSource {
   }
 }
 
+function snapshot(v: { range: string; values?: unknown[][] }): SheetSnapshot {
+  const values = (v.values ?? []).map((r) => r.map((c) => (c === null || c === undefined ? "" : String(c))));
+  const headers = (values[0] ?? []).map((h) => h.trim());
+  const rows = values.slice(1).map((r) => headers.map((_, i) => r[i] ?? ""));
+  return { title: v.range, headers, rows, warnings: ["Values are read as shown in Google Sheets. Anything a formula calculated arrives as plain text; this app never runs formulas."] };
+}
+
 /** Test hook. */
-export function resetGoogleTokenCache() { tokenCache = null; }
+export function resetGoogleTokenCache() { tokenCache = null; tabTitles.clear(); }

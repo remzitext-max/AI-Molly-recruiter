@@ -15,6 +15,7 @@ import { log } from "./redact";
 import { recallNoAnswerLeads, type SheetTab } from "./sheet-recall";
 import { copySheetStatus } from "./recruiter-status";
 import { assignFromSheetTabs } from "./assignment";
+import type { SheetSnapshot } from "../adapters/types";
 
 export const HIRE_STAGES: HireStage[] = ["NONE", "PROCESSING", "APPLICATION", "ORIENTATION", "HIRED", "SAFETY_DECLINED", "NOT_HIRED"];
 export const HIRE_LABEL: Record<HireStage, string> = {
@@ -75,8 +76,7 @@ export async function syncHiringFromSheet(now = new Date()) {
   let tabs = 0, updated = 0, sent = 0;
   const latest = new Map<string, { tab: string; status: string }>();
   const read: SheetTab[] = [];
-  for (const { title, gid } of await src.listTabs()) {
-    const snap = await src.readSheet(title).catch(() => null);
+  for (const { title, gid, snap } of await readAllTabs()) {
     if (!snap) continue;
     const phoneI = snap.headers.findIndex((h) => /^phone$/i.test(h));
     const statusI = snap.headers.findIndex((h) => /^status$/i.test(h));
@@ -133,10 +133,9 @@ async function readTeamSheets(latest: Map<string, { tab: string; status: string 
   const teams = await db.organization.findMany({ where: { isMain: false, sheetSpreadsheetId: { not: null } } });
   for (const org of teams) {
     const id = org.sheetSpreadsheetId!;
-    const list = await src.listTabs!(id).catch((e) => { log.warn("team sheet not readable (share it with the service account)", { team: org.name, error: String(e) }); return []; });
+    const list = await readAllTabs(id).catch((e) => { log.warn("team sheet not readable (share it with the service account)", { team: org.name, error: String(e) }); return []; });
     const theirs = new Set((await db.lead.findMany({ where: { orgId: org.id, isDemo: false }, select: { phoneE164: true } })).map((l) => l.phoneE164));
-    for (const { title } of list) {
-      const snap = await src.readSheet(title, id).catch(() => null);
+    for (const { title, snap } of list) {
       const phoneI = snap?.headers.findIndex((h) => /^phone$/i.test(h)) ?? -1;
       const statusI = snap?.headers.findIndex((h) => /^status$/i.test(h)) ?? -1;
       if (!snap || phoneI < 0 || statusI < 0) continue;
@@ -187,9 +186,8 @@ async function reportOtherTeamSheets(now: Date) {
   const teamSheets = (await db.organization.findMany({ where: { isMain: false, sheetSpreadsheetId: { not: null } }, select: { sheetSpreadsheetId: true } })).map((o) => o.sheetSpreadsheetId!);
   for (const id of new Set([...config.googleSheets.metaSpreadsheets, ...teamSheets])) {
     if (id === config.googleSheets.spreadsheetId) continue;
-    const tabs = await src.listTabs!(id).catch((e) => { log.warn("other team sheet not readable (share it with the service account)", { id, error: String(e) }); return []; });
-    for (const { title } of tabs) {
-      const snap = await src.readSheet(title, id).catch(() => null);
+    const tabs = await readAllTabs(id).catch((e) => { log.warn("other team sheet not readable (share it with the service account)", { id, error: String(e) }); return []; });
+    for (const { title, snap } of tabs) {
       const phoneI = snap?.headers.findIndex((h) => /^phone$/i.test(h)) ?? -1;
       const statusI = snap?.headers.findIndex((h) => /^status$/i.test(h)) ?? -1;
       if (!snap || phoneI < 0 || statusI < 0) continue;
@@ -205,6 +203,19 @@ async function reportOtherTeamSheets(now: Date) {
     }
   }
   return sent;
+}
+
+/**
+ * Every tab of a spreadsheet (default: the lead sheet), read in one request where the source
+ * can: Google allows 60 reads a minute, and the Pool is read every few seconds too.
+ */
+async function readAllTabs(spreadsheetId?: string): Promise<{ title: string; gid: string; snap: SheetSnapshot | null }[]> {
+  const src = getAdapters().sheets;
+  const tabs = await src.listTabs!(spreadsheetId);
+  const snaps = src.readTabs
+    ? await src.readTabs(tabs.map((t) => t.title), spreadsheetId)
+    : await Promise.all(tabs.map((t) => src.readSheet(t.title, spreadsheetId).catch(() => null)));
+  return tabs.map((t, i) => ({ ...t, snap: snaps[i] }));
 }
 
 // Statuses that still mean "nobody has talked to this driver".

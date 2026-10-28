@@ -154,7 +154,7 @@ async function pollExtraTab(main: { orgId: string; campaignId: string | null; ma
 
 /**
  * Called by the worker every few seconds; enqueues at most one poll per interval.
- * "Every 1 minute" reads every 15 seconds: recruiters claim a lead out of the Pool
+ * "Every 1 minute" reads every 5 seconds: recruiters claim a lead out of the Pool
  * tab within a minute or two, and a row gone from the Pool is never seen.
  */
 export async function scheduleSheetPoll(now = Date.now()) {
@@ -165,7 +165,9 @@ export async function scheduleSheetPoll(now = Date.now()) {
   await enqueue("source.google-sheets.poll", {}, { idempotencyKey: `gsheets:${ms}:${Math.floor(now / ms)}`, maxAttempts: 1 });
 }
 
-export const SHEET_FAST_POLL_MS = 15_000;
+// Each read is one Google request per Pool tab (tab names are cached), so the main
+// Pool, an extra tab and a team's Pool stay well under Google's 60 reads a minute.
+export const SHEET_FAST_POLL_MS = 5_000;
 
 /** Write the candidate's current progress to the sheet row, when write-back is enabled. */
 export async function writeBackLeadStatus(leadId: string) {

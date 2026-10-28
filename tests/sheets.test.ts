@@ -193,8 +193,28 @@ describe("Google Sheets live adapter (HTTP contract, no network)", () => {
     const snap = await new GoogleSheetsSource().readSheet();
     expect(snap.headers).toEqual(["LeadID", "Name", "Phone"]);
     expect(decodeURIComponent(urls[2])).toContain("/values/'📥 Pool'?");
+    await new GoogleSheetsSource().readSheet();
+    expect(urls.length).toBe(4); // the tab name is remembered: one request per poll
     process.env.GOOGLE_SHEETS_RANGE = "gid:42";
     await expect(new GoogleSheetsSource().readSheet()).rejects.toThrow(/no tab with gid 42/);
+  });
+
+  it("reads every tab of a sheet in one request", async () => {
+    Object.assign(process.env, {
+      GOOGLE_SHEETS_SPREADSHEET_ID: "sheet123", GOOGLE_SHEETS_ID_COLUMN: "LeadID",
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: "molly@proj.iam.gserviceaccount.com", GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: privateKey.replace(/\n/g, "\\n"),
+    });
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      urls.push(url);
+      if (url.startsWith("https://oauth2.googleapis.com/token")) return new Response(JSON.stringify({ access_token: "tok", expires_in: 3600 }));
+      return new Response(JSON.stringify({ valueRanges: [{ range: "Andy!A1:B2", values: [["Phone", "Status"], ["(214) 555-0101", "Hired"]] }, { range: "'📥 Pool'!A1:B1", values: [["Phone"]] }] }));
+    }));
+    const [andy, pool] = await new GoogleSheetsSource().readTabs(["Andy", "📥 Pool"], "other");
+    expect(andy.rows).toEqual([["(214) 555-0101", "Hired"]]);
+    expect(pool.rows).toEqual([]);
+    expect(urls.filter((u) => u.includes("values:batchGet"))).toHaveLength(1);
+    expect(decodeURIComponent(urls[1])).toContain("/other/values:batchGet?ranges='Andy'&ranges='📥 Pool'&");
   });
 
   it("uses the read-only scope when write-back is off", () => {
@@ -218,12 +238,12 @@ describe("Google Sheets live adapter (HTTP contract, no network)", () => {
 
 
 describe("fast sheet polling", () => {
-  it("'every 1 minute' reads the sheet every 15 seconds", async () => {
+  it("'every 1 minute' reads the sheet every 5 seconds", async () => {
     const { base, b } = await firstImport();
     await commitBatch(b.id, base.admin);
     await db.sourceConnection.update({ where: { id: "google-sheets" }, data: { autoSync: true, pollMinutes: 1 } });
     const t = Math.floor(Date.now() / 60_000) * 60_000;
-    for (const s of [0, 5, 16, 31, 46]) await scheduleSheetPoll(t + s * 1000);
+    for (const s of [0, 2, 6, 11, 16]) await scheduleSheetPoll(t + s * 1000);
     expect(await db.job.count({ where: { type: "source.google-sheets.poll" } })).toBe(4);
   });
 });

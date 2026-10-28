@@ -55,6 +55,8 @@ export interface SheetLeadSource {
   readSheet(range?: string, spreadsheetId?: string): Promise<SheetSnapshot>;
   /** Every tab in the spreadsheet, or in another one shared with the service account (live sheets only). */
   listTabs?(spreadsheetId?: string): Promise<{ title: string; gid: string }[]>;
+  /** Several tabs by name in one request (live sheets only); same order as `titles`. */
+  readTabs?(titles: string[], spreadsheetId?: string): Promise<SheetSnapshot[]>;
   /** sourceRecordId "phone:+1..." matches the row by phone number in `phoneColumn`. */
   writeStatus(sourceRecordId: string, text: string, phoneColumn?: string): Promise<"written" | "row_not_found" | "ambiguous_id" | "not_enabled">;
 }
