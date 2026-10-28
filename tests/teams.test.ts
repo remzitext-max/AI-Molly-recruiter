@@ -62,6 +62,9 @@ describe("recruiting teams", () => {
     await db.campaign.update({ where: { id: base.campaign.id }, data: { isDemo: false } });
     const t = { name: "T", managerName: "A", managerEmail: "a@b.local", password: "x".repeat(12) };
     expect(await createTeam(base.admin, { ...t, telegramChatId: "@group" })).toEqual({ error: "Telegram chat id is a number like -1001234567890" });
-    expect(await createTeam(base.admin, { ...t, transferPhone: "123" })).toEqual({ error: "Transfer number is not a valid US phone number" });
+    const ok = await createTeam(base.admin, { ...t, telegramChatId: "1004453731090" });
+    if (!("orgId" in ok)) throw new Error("not created");
+    expect((await db.organization.findUniqueOrThrow({ where: { id: ok.orgId } })).telegramChatId).toBe("-1004453731090");
+    expect(await createTeam(base.admin, { ...t, managerEmail: "c@b.local", transferPhone: "123" })).toEqual({ error: "Transfer number is not a valid US phone number" });
   });
 });

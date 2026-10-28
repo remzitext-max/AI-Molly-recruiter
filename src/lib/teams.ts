@@ -22,7 +22,9 @@ function teamFields(t: TeamInput) {
   if (t.sheetLink?.trim() && !sheet) return { error: "That is not a Google Sheets link" };
   const phone = t.transferPhone?.trim() ? normalizePhone(t.transferPhone) : null;
   if (t.transferPhone?.trim() && !phone) return { error: "Transfer number is not a valid US phone number" };
-  const chat = t.telegramChatId?.trim() || null;
+  // Group ids are negative; a supergroup id pasted without its minus ("100…") still works.
+  const raw = t.telegramChatId?.trim().replace(/\s+/g, "") || null;
+  const chat = raw && /^100\d{8,}$/.test(raw) ? `-${raw}` : raw;
   if (chat && !/^-?\d{5,20}$/.test(chat)) return { error: "Telegram chat id is a number like -1001234567890" };
   return { data: { name, sheetSpreadsheetId: sheet?.spreadsheetId ?? null, sheetPoolTab: sheet?.tab ?? null, transferPhoneE164: phone, telegramChatId: chat } };
 }
