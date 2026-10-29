@@ -28,9 +28,11 @@ describe("drivers Crystal talked to", () => {
     const nameOnly = await lead("(214) 555-0183");
     await call(nameOnly, "INCOMPLETE", ["first_name", "english_level"]); // "yes, this is John", then hung up
 
+    const stale = await lead("(214) 555-0184", "No answer"); // re-called from a recruiter tab, talked to Crystal
+    await call(stale, "INTERESTED");
     const list = await talkedDrivers(dashboardScope(base.admin, false, true), { gte: new Date(Date.now() - 3600_000), lt: new Date(Date.now() + 1000) });
-    expect(list.map((d) => d.leadId).sort()).toEqual([declined, crystalNo].sort());
-    expect(groupCounts(list)).toEqual(expect.arrayContaining([{ label: "Declined", n: 1 }, { label: "Not interested (Crystal's call)", n: 1 }]));
+    expect(list.map((d) => d.leadId).sort()).toEqual([declined, crystalNo, stale].sort());
+    expect(groupCounts(list)).toEqual(expect.arrayContaining([{ label: "Declined", n: 1 }, { label: "Not interested (Crystal's call)", n: 1 }, { label: 'Interested (Crystal\'s call) · sheet still "No answer"', n: 1 }]));
     expect(list.find((d) => d.leadId === declined)?.crystal).toBe("Interested (Crystal's call)");
   });
 });

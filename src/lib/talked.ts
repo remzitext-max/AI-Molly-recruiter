@@ -45,6 +45,8 @@ const CRYSTAL_RESULT: Record<string, string> = {
   CALLBACK: "Asked to call back",
   HUMAN_REQUESTED: "Asked for a person",
 };
+/** Sheet statuses that only mean nobody has reached the driver yet. */
+const STALE = ["New", "No answer"];
 export const NO_CLEAR_ANSWER = "Talked, no clear yes or no";
 
 export interface TalkedDriver {
@@ -76,7 +78,9 @@ export async function talkedDrivers(scope: Prisma.LeadWhereInput, range: { gte: 
     return {
       leadId: l.id, name: [l.firstName, l.lastName].filter(Boolean).join(" ") || "(no name)", phone: l.phoneE164,
       recruiter: l.assignedTo?.name ?? null, lastTalk: last.get(l.id)!.createdAt,
-      group: l.recruiterStatus ?? crystal, crystal, recruiterStatus: l.recruiterStatus,
+      // "New" / "No answer" in the sheet is older than Crystal's talk: what the driver told her says more.
+      group: l.recruiterStatus && !STALE.includes(l.recruiterStatus) ? l.recruiterStatus : l.recruiterStatus ? `${crystal} · sheet still "${l.recruiterStatus}"` : crystal,
+      crystal, recruiterStatus: l.recruiterStatus,
     };
   }).sort((a, b) => b.lastTalk.getTime() - a.lastTalk.getTime());
 }
