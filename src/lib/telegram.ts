@@ -10,6 +10,8 @@ import { getSettings } from "./settings";
 import { answersOf, fitRulesFrom, fitScore, fitText } from "./fit-score";
 import { endedByText, whoEnded } from "./call-end";
 import { leadSheetTab } from "./recruiter-tab";
+import { officeClock } from "./office-hours";
+import { formatLocal } from "./timezone";
 import { log } from "./redact";
 import type { CallNotes } from "./transcript-extract";
 
@@ -159,6 +161,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
       `☎️ ${v(l.phoneE164)}`,
       ...(endLine ? [endLine] : []),
       ...lastDriverLines(a.transcript),
+      ...recruiterCallLine(l),
       ...notesLines(a, false),
       retryLine,
     ].join("\n");
@@ -181,6 +184,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
     `✅ Ready date: ${v(slot("start_date"))}`,
     `☎️Phone number : ${v(l.phoneE164)}`,
     `⭐ Fit: ${v(fitText(fit))}`,
+    ...recruiterCallLine(l),
     ...(endLine ? [endLine] : []),
     ...notesLines(a, true),
   ].join("\n");
@@ -213,6 +217,32 @@ export async function sendSmsReplyToTelegram(leadId: string, text: string) {
   if (!l || l.isDemo) return { sent: false };
   const name = esc([l.firstName, l.lastName].filter(Boolean).join(" ") || "A driver");
   await sendTelegram([...(await recruiterTags(l.id)), `💬 ${name} replied by text:`, `"${esc(text)}"`, `☎️ ${esc(l.phoneE164)}`].join("\n"), l.id);
+  return { sent: true };
+}
+
+/** "⏰ Recruiter call: …" for a call Crystal booked after hours, while it is still ahead. */
+function recruiterCallLine(l: { recruiterCallAt: Date | null; timezone: string | null }): string[] {
+  if (!l.recruiterCallAt || l.recruiterCallAt.getTime() < Date.now()) return [];
+  return [`⏰ Recruiter call booked: ${esc(formatLocal(l.recruiterCallAt, l.timezone))} driver time (${officeClock(l.recruiterCallAt)} Tashkent)`];
+}
+
+/**
+ * 5 minutes before a recruiter call Crystal booked after hours: a reply in the driver's thread
+ * tagging the recruiter of the sheet tab the driver is in now.
+ */
+export async function sendRecruiterCallReminder(leadId: string, at: Date) {
+  if (!telegramConfigured()) return { sent: false, reason: "not configured" };
+  const l = await db.lead.findUnique({ where: { id: leadId }, include: { assignedTo: { select: { name: true } } } });
+  // The call was moved or cancelled since it was booked.
+  if (!l || l.isDemo || l.optedOutAt || l.recruiterCallAt?.getTime() !== at.getTime()) return { sent: false, reason: "no longer booked" };
+  const tags = (await recruiterTags(l.id)).filter((t) => t.startsWith("@"));
+  const name = esc([l.firstName, l.lastName].filter(Boolean).join(" ") || "this driver");
+  await sendTelegram([
+    ...(tags.length ? tags : [l.assignedTo ? `👤 ${esc(l.assignedTo.name)}` : "👤 No recruiter tab yet"]),
+    `⏰ You have a scheduled call to this driver at ${esc(formatLocal(at, l.timezone))} driver time (${officeClock(at)} Tashkent)`,
+    `🗒 ${name}`,
+    `☎️ ${esc(l.phoneE164)}`,
+  ].join("\n"), l.id);
   return { sent: true };
 }
 

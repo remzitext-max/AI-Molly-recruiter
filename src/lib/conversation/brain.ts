@@ -25,7 +25,7 @@ export type AgentAction =
   | { type: "wrong_number" }
   | { type: "request_transfer"; reason: HandoffReasonCode }
   | { type: "flag_handoff"; reason: HandoffReasonCode; note: string }
-  | { type: "schedule_callback"; at: string | null; raw: string }
+  | { type: "schedule_callback"; at: string | null; raw: string; by?: "crystal" | "recruiter" }
   | { type: "send_cdl_link" }
   | { type: "sensitive_data_warning" }
   | { type: "injection_attempt"; raw: string }

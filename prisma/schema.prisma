@@ -150,6 +150,9 @@ model Organization {
   transferPhoneE164  String?
   /// A team's Telegram group for driver cards; without one, nothing of theirs goes to Telegram.
   telegramChatId     String?
+  /// When the recruiters are at work, Tashkent time ("17:00-03:00"); empty = always. Outside it
+  /// Crystal books a recruiter callback instead of transferring.
+  officeHours        String?
   createdAt DateTime   @default(now())
   users     User[]
   campaigns Campaign[]
@@ -272,6 +275,8 @@ model Lead {
   activeAttemptId    String?         @unique
   nextContactAt      DateTime?
   callbackAt         DateTime?
+  /// A recruiter (not Crystal) calls the driver then; booked by Crystal outside office hours.
+  recruiterCallAt    DateTime?
   queueReason        String?
   lastOfferVersionId String?
   /// First Telegram message about this lead; later ones go as replies to it ("chatId:messageId").
@@ -657,4 +662,21 @@ model SheetLeadStatus {
   tab       String
   status    String
   seenAt    DateTime @default(now())
+}
+
+/// A driver a recruiter is bringing in (sheet status Need to bring / Need approval / Application),
+/// read from every recruiter tab every 15 minutes, whether or not Crystal ever called them.
+model SheetDriver {
+  id          String   @id @default(cuid())
+  orgId       String
+  phoneE164   String
+  tab         String
+  status      String
+  name        String?
+  experience  String?
+  statusSince DateTime @default(now())
+  seenAt      DateTime @default(now())
+
+  @@unique([orgId, phoneE164])
+  @@index([orgId, status])
 }

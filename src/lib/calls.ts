@@ -14,7 +14,9 @@ import { telegramConfigured } from "./telegram";
 import { enqueue } from "./jobs/queue";
 import { getActiveOfferVersion } from "./knowledge";
 import { redactText } from "./redact";
+import { DateTime } from "luxon";
 import { formatLocal } from "./timezone";
+import { localClock, nextOpening, officeClock, officeOpen } from "./office-hours";
 import { getAdapters } from "../adapters/registry";
 import { config } from "./config";
 import { LiveContactBlockedError, UncertainOutcomeError } from "../adapters/types";
@@ -24,7 +26,7 @@ import { mockCalls } from "../adapters/mock";
 import { SHEETS_SOURCE } from "./import";
 import { writeBackLeadStatus } from "./sheets-sync";
 import { DEFAULT_TRANSFER_TARGET, tabRecruiterPhone, transferTargetName, teamTransfer } from "./recruiter-tab";
-import { HIRE_LABEL, recruiterWorkedStatus } from "./hiring";
+import { HIRE_LABEL, recruiterWorkedStatus, setHireStage } from "./hiring";
 
 export const STATUS_RANK: Record<CallStatus, number> = {
   SCHEDULED: 0, UNKNOWN: 0, DIALING: 1, RINGING: 2, IN_PROGRESS: 3,
@@ -382,7 +384,7 @@ const ActionSchema: z.ZodType<AgentAction> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("wrong_number") }),
   z.object({ type: z.literal("request_transfer"), reason: z.enum(["HUMAN_REQUESTED", "UNKNOWN_QUESTION", "ELIGIBILITY_EXCEPTION", "TECHNICAL"]) }),
   z.object({ type: z.literal("flag_handoff"), reason: z.enum(["HUMAN_REQUESTED", "UNKNOWN_QUESTION", "ELIGIBILITY_EXCEPTION", "TECHNICAL"]), note: z.string().max(1000) }),
-  z.object({ type: z.literal("schedule_callback"), at: z.string().datetime({ offset: true }).nullable(), raw: z.string().max(1000) }),
+  z.object({ type: z.literal("schedule_callback"), at: z.string().datetime({ offset: true }).nullable(), raw: z.string().max(1000), by: z.enum(["crystal", "recruiter"]).optional() }),
   z.object({ type: z.literal("send_cdl_link") }),
   z.object({ type: z.literal("sensitive_data_warning") }),
   z.object({ type: z.literal("injection_attempt"), raw: z.string().max(2000) }),
@@ -416,6 +418,7 @@ export async function applyAgentAction(attemptId: string, input: unknown): Promi
       if (action.key === "home_location") await maybeUpdateLocation(lead.id, action.value);
       if (action.status === "UNCLEAR") await upsertTask(lead.id, "REVIEW_UNCLEAR", `Unclear answer: ${action.key.replace(/_/g, " ")}`, lead.assignedToId, action.raw.slice(0, 300), undefined, `unclear:${lead.id}:${action.key}`);
       if (action.status === "CORRECTED") await recordEvent({ leadId: lead.id, actorType: "DRIVER", type: "CORRECTION", message: `Driver corrected ${action.key.replace(/_/g, " ")}` });
+      if (action.key === "offer_interest" && /teammate/i.test(action.value)) await markNeedsTeammate(lead.id);
       return { ok: true };
     }
     case "unanswered_question": {
@@ -444,6 +447,7 @@ export async function applyAgentAction(attemptId: string, input: unknown): Promi
       return { ok: true };
     case "schedule_callback": {
       const at = action.at ? new Date(action.at) : null;
+      if (action.by === "recruiter") return scheduleRecruiterCall(lead, attemptId, at, action.raw);
       await db.lead.update({ where: { id: lead.id }, data: { callbackAt: at } });
       await advancePipeline(lead.id, "CALLBACK_SCHEDULED");
       await upsertTask(lead.id, "CALLBACK", at ? `Callback agreed: ${formatLocal(at, lead.timezone)}` : "Driver asked for a follow-up (time not set)", lead.assignedToId, redactText(action.raw).slice(0, 300), at ?? undefined, `callback:${attemptId}`);
@@ -486,8 +490,13 @@ async function maybeUpdateLocation(leadId: string, value: string) {
 // 5. Transfers. Success is never reported without a provider confirmation.
 // ---------------------------------------------------------------------------
 export async function requestTransfer(attemptId: string, reason: "HUMAN_REQUESTED" | "UNKNOWN_QUESTION" | "ELIGIBILITY_EXCEPTION" | "TECHNICAL"): Promise<ActionResult> {
-  const attempt = await db.callAttempt.findUniqueOrThrow({ where: { id: attemptId }, include: { lead: { include: { assignedTo: true } } } });
+  const attempt = await db.callAttempt.findUniqueOrThrow({ where: { id: attemptId }, include: { lead: { include: { assignedTo: true, org: true } } } });
   const lead = attempt.lead;
+  // Nobody is at work to take the call: Crystal books a time for a recruiter to call instead.
+  if (!officeOpen(lead.org.officeHours)) {
+    await recordEvent({ leadId: lead.id, actorType: "AI", type: "TRANSFER_SKIPPED", message: `Driver asked for a person outside office hours (${lead.org.officeHours} Tashkent); booking a recruiter call instead` });
+    return { ok: false, transfer: "failed", detail: OFFICE_CLOSED };
+  }
   const provider = getAdapters().voice;
   // A team's drivers go to the team's number; nobody of the company's is dialed for them.
   const team = await teamTransfer(lead.id);
@@ -516,6 +525,35 @@ export async function requestTransfer(attemptId: string, reason: "HUMAN_REQUESTE
   }
   await enqueue("transfer.timeout", { handoffId: handoff.id }, { runAt: new Date(Date.now() + 90_000), idempotencyKey: `transfer-timeout:${handoff.id}` });
   return { ok: true, transfer: "pending" };
+}
+
+export const OFFICE_CLOSED = "office_closed";
+
+/**
+ * Outside office hours: a recruiter (not Crystal) calls the driver at the time they chose.
+ * Crystal stops calling; the recruiter of the driver's sheet tab is reminded in the driver's
+ * Telegram thread 5 minutes before.
+ */
+async function scheduleRecruiterCall(lead: { id: string; timezone: string | null; assignedToId: string | null }, attemptId: string, at: Date | null, raw: string): Promise<ActionResult> {
+  await db.$executeRaw`UPDATE "Job" SET status = 'CANCELED', "updatedAt" = now() WHERE status = 'PENDING' AND type = 'lead.attempt-call' AND payload->>'leadId' = ${lead.id}`;
+  const when = at ? `${formatLocal(at, lead.timezone)} driver time (${officeClock(at)} Tashkent)` : null;
+  await db.lead.update({ where: { id: lead.id }, data: { callbackAt: at, recruiterCallAt: at, nextContactAt: null, queueReason: when ? `Recruiter to call ${when}` : "Recruiter to call (time not set)" } });
+  await advancePipeline(lead.id, "CALLBACK_SCHEDULED");
+  await upsertTask(lead.id, "CALLBACK", when ? `Call the driver: ${when}` : "Driver asked for a recruiter after hours (time not set)", lead.assignedToId, redactText(raw).slice(0, 300), at ?? new Date(), `recruiter-call:${attemptId}`);
+  await recordEvent({ leadId: lead.id, actorType: "AI", type: "CALLBACK", message: when ? `Driver asked for a recruiter after hours; recruiter call booked for ${when}` : "Driver asked for a recruiter after hours; time not set" });
+  if (at && at.getTime() > Date.now()) {
+    await enqueue("notify.recruiter-call-reminder", { leadId: lead.id, at: at.toISOString() }, { runAt: new Date(Math.max(Date.now(), at.getTime() - 5 * 60_000)), idempotencyKey: `recruiter-call:${lead.id}:${at.toISOString()}`, maxAttempts: 3 });
+  }
+  return { ok: true };
+}
+
+/** The driver will take a team job if we find a partner: the recruiters' "Need teammate" status. */
+async function markNeedsTeammate(leadId: string) {
+  const lead = await db.lead.findUniqueOrThrow({ where: { id: leadId } });
+  if (lead.recruiterStatus && !["New", "No answer"].includes(lead.recruiterStatus)) return;
+  await db.lead.update({ where: { id: leadId }, data: { recruiterStatus: "Need teammate", recruiterStatusAt: new Date() } });
+  await recordEvent({ leadId, actorType: "AI", type: "RECRUITER_STATUS", message: `Status: ${lead.recruiterStatus ?? "not set"} → Need teammate (${config.agentPersona.name}: under 2 years, said yes to team)` });
+  await setHireStage(leadId, "PROCESSING", "Interested in team, needs a teammate", { id: null, name: `${config.agentPersona.name} AI` });
 }
 
 async function transferFailedTask(leadId: string, attemptId: string, assignedToId: string | null, why: string) {
@@ -687,8 +725,13 @@ export async function callVariables(
   attemptId: string, offerVersionId: string, now = new Date(),
 ): Promise<Record<string, string>> {
   const sources = await db.leadSourceRecord.findMany({ where: { leadId: lead.id }, select: { raw: true } });
+  const org = await db.organization.findUniqueOrThrow({ where: { id: lead.orgId } });
   return {
-    driver_first_name: lead.firstName ?? "", company_name: await companyName(await db.organization.findUniqueOrThrow({ where: { id: lead.orgId } })),
+    driver_first_name: lead.firstName ?? "", company_name: await companyName(org),
+    // Outside the recruiters' hours Crystal books a recruiter callback instead of transferring.
+    office_open: officeOpen(org.officeHours, now) ? "yes" : "no",
+    office_opens: localClock(nextOpening(org.officeHours, now), lead.timezone),
+    now_local: localNow(lead.timezone, now),
     offer_version_id: offerVersionId, attempt_id: attemptId,
     driver_timezone: lead.timezone ?? "unknown", ...(await transferVariables(lead.orgId, lead.id)),
     // Sheet leads arrive within a minute of applying, so the import time stands in when no permission date was recorded.
@@ -697,6 +740,12 @@ export async function callVariables(
     position_applied: appliedPosition(sources.map((r) => r.raw)),
     follow_up: lead.reengagedAt ? "yes" : "no",
   };
+}
+
+/** "Thursday, Oct 29, 2026, 9:15 PM (America/New_York, UTC-04:00)": lets Crystal turn "tomorrow at 9" into a date. */
+export function localNow(tz: string | null | undefined, now: Date): string {
+  const t = DateTime.fromJSDate(now).setZone(tz || "America/Chicago");
+  return `${t.toFormat("cccc, LLL d, yyyy, h:mm a")} (${t.zoneName}, UTC${t.toFormat("ZZ")})`;
 }
 
 // "Good morning/afternoon/evening" in the driver's local time; Central time when the timezone is unknown.

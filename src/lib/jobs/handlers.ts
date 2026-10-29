@@ -5,7 +5,7 @@ import { runRetentionSweep } from "../documents";
 import { pollGoogleSheet } from "../sheets-sync";
 import { pollTeamSheets } from "../team-sheets";
 import { db } from "../db";
-import { sendCallReport, sendConsentToTelegram, sendDocumentToTelegram, sendHiredToTelegram, sendSmsReplyToTelegram } from "../telegram";
+import { sendCallReport, sendConsentToTelegram, sendDocumentToTelegram, sendHiredToTelegram, sendRecruiterCallReminder, sendSmsReplyToTelegram } from "../telegram";
 import { fetchTelnyxTranscript } from "../telnyx-transcript";
 import { fillScreeningFromTranscript } from "../transcript-extract";
 import { log } from "../redact";
@@ -58,6 +58,10 @@ export const handlers: Record<string, JobHandler> = {
   "notify.telegram-hired": async (job) => {
     const { leadId, by } = job.payload as { leadId: string; by: string };
     await sendHiredToTelegram(leadId, by);
+  },
+  "notify.recruiter-call-reminder": async (job) => {
+    const { leadId, at } = job.payload as { leadId: string; at: string };
+    await sendRecruiterCallReminder(leadId, new Date(at));
   },
   "lead.reengage-scan": async () => { await reengageScan(); },
   "document.read": async (job) => {

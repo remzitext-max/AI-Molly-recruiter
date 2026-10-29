@@ -37,10 +37,11 @@ export const config = {
   get voiceProvider(): "retell" | "telnyx" {
     return env("VOICE_PROVIDER") === "telnyx" ? "telnyx" : "retell";
   },
-  /** How the live agent introduces itself, e.g. "Crystal, Molly's assistant". */
+  /** How the live agent introduces itself when asked: "Crystal, the recruiters' assistant". */
   agentPersona: {
     get name() { return env("AGENT_NAME") ?? "Crystal"; },
-    get role() { return env("AGENT_ROLE") ?? "Molly's assistant"; },
+    // Remzi: never name Molly to drivers, so an old AGENT_ROLE in .env that does is ignored.
+    get role() { const r = env("AGENT_ROLE"); return r && !/molly/i.test(r) ? r : "the recruiters' assistant"; },
   },
   /** Real calls allowed at the same time; the Telnyx account has 1 outbound channel. */
   get maxConcurrentCalls() { return Math.max(1, Number(env("MAX_CONCURRENT_CALLS") ?? 1) || 1); },
@@ -54,6 +55,8 @@ export const config = {
     get accountSid() { return env("TELNYX_ACCOUNT_SID"); },
     /** Shared secret Telnyx sends back on tool and status requests (set in the assistant by scripts/telnyx-setup.ts). */
     get webhookToken() { return env("TELNYX_WEBHOOK_TOKEN"); },
+    /** Seconds the phone rings before Crystal gives up: about 4 rings, before most voicemails pick up. */
+    get ringSeconds() { return Math.min(120, Math.max(5, Number(env("CALL_RING_SECONDS") ?? 24) || 24)); },
   },
   ringcentral: {
     get serverUrl() { return env("RINGCENTRAL_SERVER_URL") ?? "https://platform.ringcentral.com"; },

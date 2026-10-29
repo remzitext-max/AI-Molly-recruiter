@@ -9,6 +9,8 @@ import { answersOf, fitRulesFrom, fitScore, fitTone } from "./fit-score";
 import { endedByText, whoEnded } from "./call-end";
 import { HIRE_LABEL } from "./hiring";
 import { recordEvent } from "./activity";
+import { formatLocal } from "./timezone";
+import { officeClock } from "./office-hours";
 
 type Viewer = Parameters<typeof leadScope>[0];
 export type Row = [label: string, value: string];
@@ -121,6 +123,7 @@ export async function loadDriverProfile(user: Viewer, id: string): Promise<Drive
       ["Concerns", val("concerns")],
       ["Documents", words(l.documentStatus)],
       ["AI call attempts", String(l.attemptCount)],
+      ["Recruiter call booked", l.recruiterCallAt ? `${formatLocal(l.recruiterCallAt, l.timezone)} (${officeClock(l.recruiterCallAt)} Tashkent)` : ""],
     ] as Row[]),
     employers: splitEmployers(a("recent_companies")),
     summary,

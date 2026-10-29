@@ -46,6 +46,8 @@ export class TelnyxVoiceAgent implements VoiceAgentProvider {
         StatusCallbackMethod: "POST",
         ConversationCallback: callback,
         TimeLimit: 15 * 60,
+        // Stop ringing before voicemail answers: a voicemail pickup is billed and wastes a retry.
+        Timeout: config.telnyx.ringSeconds,
       }),
     });
     const body = (await res.json()) as { call_sid?: string; data?: { call_sid?: string } };

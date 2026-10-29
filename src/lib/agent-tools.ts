@@ -1,7 +1,7 @@
 // Provider-neutral handler for the restricted voice-agent tools. Each provider
 // route authenticates the request and finds the call attempt, then calls this.
 import { db } from "./db";
-import { applyAgentAction } from "./calls";
+import { applyAgentAction, OFFICE_CLOSED } from "./calls";
 import { tabRecruiterPhone, teamTransfer } from "./recruiter-tab";
 import { answerQuestion, getActiveOfferVersion } from "./knowledge";
 
@@ -39,12 +39,13 @@ export async function runAgentTool(attempt: ToolAttempt, name: string | undefine
       const team = await teamTransfer(attempt.leadId);
       const tab = team ? null : await tabRecruiterPhone(attempt.leadId);
       const s = team || tab ? null : await db.user.findFirst({ where: { orgId: attempt.lead.orgId, availableForTransfer: true, transferPhoneE164: { not: null } } });
+      if (r.detail === OFFICE_CLOSED) return { ...r, say: "Do not transfer. Say our office staff aren't working right now and ask what time tomorrow morning works for a recruiter to call; then call schedule_callback with by \"recruiter\"." };
       return { ...r, transfer_number: r.transfer === "pending" ? (team ? team.phone ?? undefined : tab?.phone ?? s?.transferPhoneE164) : undefined, say: r.transfer === "pending" ? "Tell the driver you're connecting them to your manager." : "Say your manager isn't available right now and will contact them; ask for a good time." };
     }
     case "flag_for_recruiter":
       return applyAgentAction(attempt.id, { type: "flag_handoff", reason: a.reason, note: String(a.note ?? "") });
     case "schedule_callback":
-      return applyAgentAction(attempt.id, { type: "schedule_callback", at: a.at || null, raw: String(a.raw ?? "") });
+      return applyAgentAction(attempt.id, { type: "schedule_callback", at: a.at || null, raw: String(a.raw ?? ""), by: a.by === "recruiter" ? "recruiter" : "crystal" });
     case "send_cdl_upload_link":
       return applyAgentAction(attempt.id, { type: "send_cdl_link" });
     case "set_call_outcome":

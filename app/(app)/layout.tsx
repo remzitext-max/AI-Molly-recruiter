@@ -29,6 +29,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <div className="nav-group">Overview</div>
       <NavLink href="/dashboard" icon="dashboard" label="Dashboard" />
       <NavLink href="/leads" icon="leads" label="Leads" />
+      <NavLink href="/process" icon="check" label="On process" />
       <NavLink href="/tasks" icon="tasks" label="Tasks" />
       {owner && (
         <>

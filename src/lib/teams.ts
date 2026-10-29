@@ -7,12 +7,17 @@ import { hashPassword } from "./auth";
 import { normalizePhone } from "./phone";
 import { recordEvent } from "./activity";
 import { parseSheetLink, teamConnId } from "./team-sheets";
+import { normalizeOfficeHours } from "./office-hours";
+
+const DEFAULT_TEAM_HOURS = "17:00-05:00";
 
 export interface TeamInput {
   name: string;
   sheetLink?: string;
   transferPhone?: string;
   telegramChatId?: string;
+  /** Recruiters' hours in Tashkent time, "17:00-05:00"; empty = always at work. */
+  officeHours?: string;
 }
 
 function teamFields(t: TeamInput) {
@@ -26,7 +31,9 @@ function teamFields(t: TeamInput) {
   const raw = t.telegramChatId?.trim().replace(/\s+/g, "") || null;
   const chat = raw && /^100\d{8,}$/.test(raw) ? `-${raw}` : raw;
   if (chat && !/^-?\d{5,20}$/.test(chat)) return { error: "Telegram chat id is a number like -1001234567890" };
-  return { data: { name, sheetSpreadsheetId: sheet?.spreadsheetId ?? null, sheetPoolTab: sheet?.tab ?? null, transferPhoneE164: phone, telegramChatId: chat } };
+  const officeHours = t.officeHours === undefined ? DEFAULT_TEAM_HOURS : normalizeOfficeHours(t.officeHours);
+  if (officeHours === undefined) return { error: "Office hours look like 17:00-05:00 (Tashkent time)" };
+  return { data: { name, sheetSpreadsheetId: sheet?.spreadsheetId ?? null, sheetPoolTab: sheet?.tab ?? null, transferPhoneE164: phone, telegramChatId: chat, officeHours } };
 }
 
 /** Creates the team, its campaign (a copy of the main one, same offer) and its manager's login. */
@@ -54,6 +61,15 @@ export async function createTeam(owner: Pick<User, "id" | "orgId">, t: TeamInput
   });
   await recordEvent({ actorType: "USER", actorId: owner.id, orgId: owner.orgId, type: "TEAM_CREATED", message: `Team ${org.name} created with manager login ${email}` });
   return { orgId: org.id };
+}
+
+/** The company's own recruiters' hours (Tashkent time). */
+export async function updateMainOfficeHours(owner: Pick<User, "id" | "orgId">, text: string) {
+  const officeHours = normalizeOfficeHours(text);
+  if (officeHours === undefined) return { error: "Office hours look like 17:00-03:00 (Tashkent time)" };
+  await db.organization.update({ where: { id: owner.orgId }, data: { officeHours } });
+  await recordEvent({ actorType: "USER", actorId: owner.id, orgId: owner.orgId, type: "OFFICE_HOURS", message: `Office hours set to ${officeHours ?? "always"} (Tashkent)` });
+  return { ok: true };
 }
 
 export async function updateTeam(owner: Pick<User, "id" | "orgId">, orgId: string, t: TeamInput) {
