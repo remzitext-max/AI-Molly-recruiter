@@ -352,3 +352,6 @@ button.secondary.is-busy::after { border-color: #cbd5e1; border-top-color: var(-
   .drp-grid { grid-template-columns: repeat(7, 1fr); }
   .drp-mtitle { padding: 0 36px; }
 }
+.talked-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); column-gap: 28px; }
+.talked-groups a.hbar { color: inherit; text-decoration: none; border-radius: 6px; }
+.talked-groups a.hbar:hover { background: var(--surface-2, rgba(0,0,0,.03)); }

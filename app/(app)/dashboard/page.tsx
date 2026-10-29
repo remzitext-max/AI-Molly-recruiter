@@ -4,10 +4,10 @@ import { DateTime } from "luxon";
 import type { ReactNode } from "react";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { leadScope } from "@/lib/rbac";
 import { config } from "@/lib/config";
 import { sourceLabel } from "@/lib/driver-profile";
 import { UPLOAD_PROVIDER } from "@/lib/recruiter-upload";
+import { callsWithAnswers, dashboardScope, groupCounts, isTalk, talkedDrivers } from "@/lib/talked";
 import { RECALL_PREFIX } from "@/lib/sheet-recall";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { Card, Stat, Badge, PageHead, fmt, name, initials, initialsOf } from "@/components/ui";
@@ -44,15 +44,7 @@ const ANSWERED = ["COMPLETED"] as const;
 // answer (English rating alone does not count), or made a clear decision. Voicemail,
 // iPhone call screening and quick hang-ups are "completed" calls too, so length alone
 // does not count.
-const TEST_LAST_NAMES = ["(owner test)", "Test", "test", "TEST"];
-const OWNER_PHONES = ["+18162913808", "+18158461661"];
-const DECIDED = ["INTERESTED", "NOT_INTERESTED", "CALLBACK", "HUMAN_REQUESTED"];
 type CallRow = { id: string; status?: string; outcome: string | null };
-/** Ids of the calls in which the driver answered a screening question. */
-async function callsWithAnswers(ids: string[]) {
-  const rows = await db.screeningField.findMany({ where: { callAttemptId: { in: ids }, key: { not: "english_level" }, reportedValue: { not: null } }, select: { callAttemptId: true }, distinct: ["callAttemptId"] });
-  return new Set(rows.map((r) => r.callAttemptId!));
-}
 const PLACED = { notIn: ["CANCELED", "SCHEDULED"] as ("CANCELED" | "SCHEDULED")[] };
 
 async function loadDemo() {
@@ -133,12 +125,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const isDemo = config.mode === "demo";
   // Recruiters start on their own leads; admins on everyone's. Both can switch.
   const mine = (sp.who ?? (user.role === "ADMIN" ? "all" : "mine")) === "mine";
-  // Owner test calls (scripts/telnyx-test-call.ts, "Remzi Test" sheet rows) are not real results.
-  // A recruiter's own drivers (Create form) are not leads Crystal works.
-  const scope = {
-    ...leadScope(user), isDemo, ownDriver: false, phoneE164: { notIn: OWNER_PHONES }, OR: [{ lastName: null }, { lastName: { notIn: TEST_LAST_NAMES } }],
-    ...(mine ? { assignedToId: user.id } : {}),
-  };
+  const scope = dashboardScope(user, mine, isDemo);
   const now = DateTime.now().setZone(ZONE);
   const p = period(sp, now);
   const since = p.from.toJSDate();
@@ -189,11 +176,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const recalled = recalledBy.reduce((n, r) => n + r._count, 0);
   const recallTab = async (sourceSystem: string) => ((await db.leadSourceRecord.findFirst({ where: { sourceSystem, ...recall }, select: { raw: true } }))?.raw as { tab?: string } | null)?.tab ?? sourceLabel(sourceSystem);
   const gaveAnswers = await callsWithAnswers([...answeredCalls, ...prevAnsweredCalls, ...chartCalls, ...rangeLeads.flatMap((l) => l.calls)].map((c) => c.id));
-  const talked = (c: CallRow) => (c.status ?? "COMPLETED") === "COMPLETED" && (DECIDED.includes(c.outcome ?? "") || gaveAnswers.has(c.id));
+  const talked = (c: CallRow) => isTalk(c, gaveAnswers);
   const prevAnswered = prevAnsweredCalls.filter(talked).length;
   // The same by driver: a driver called five times who talked once counts once.
   const calledDrivers = (await db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: PLACED, createdAt: inRange }, distinct: ["leadId"], select: { leadId: true } })).length;
-  const talkedDrivers = new Set(answeredCalls.filter(talked).map((c) => c.leadId)).size;
+  // Where the drivers Crystal talked to are now (recruiter's status, else what they told Crystal).
+  const talkedList = await talkedDrivers(scope, inRange);
+  const talkedGroups = groupCounts(talkedList);
+  const talkedHref = (group?: string) => `/talked?${new URLSearchParams({ since: since.toISOString(), until: until.toISOString(), who: mine ? "mine" : "all", ...(group ? { group } : {}) })}`;
   const pickedUp = answeredCalls.length;
   const answered = answeredCalls.filter(talked).length;
   const talkMins = answeredCalls.map((c) => (c.startedAt && c.endedAt ? Math.max(0, (c.endedAt.getTime() - c.startedAt.getTime()) / 60000) : 0));
@@ -271,12 +261,26 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <Stat label="New leads" icon="leads" tone="blue" n={newLeads} sub={<><Delta now={newLeads} prev={prevLeads} />{recalled > 0 && <> · +{recalled} old &quot;No answer&quot; leads re-called</>}</>} />
         <Stat label="AI calls placed" icon="phone" tone="violet" n={placed} sub={<Delta now={placed} prev={prevPlaced} />} />
         <Stat label="Talked to driver" icon="voice" tone="teal" n={`${pct(answered, placed)}%`} sub={<>{answered} of {placed} calls · {pickedUp - answered} picked up without a real talk (voicemail, call screening, hang-up) · <Delta now={answered} prev={prevAnswered} /></>} />
-        <Stat label="Drivers talked to" icon="users" tone="blue" n={`${pct(talkedDrivers, calledDrivers)}%`} sub={<>{talkedDrivers} of {calledDrivers} drivers called · each driver counted once, however many calls</>} />
+        <Stat label="Drivers talked to" icon="users" tone="blue" n={`${pct(talkedList.length, calledDrivers)}%`} sub={<>{talkedList.length} of {calledDrivers} drivers called · each driver counted once · <Link href={talkedHref()}>see who</Link></>} />
         <Stat label="Interested drivers" icon="star" tone="green" n={interestedLeads} sub={<Delta now={interestedLeads} prev={prevInterested} />} />
         <Stat label="CDL / med card received" icon="doc" tone="amber" n={docsLeads} sub={<Delta now={docsLeads} prev={prevDocs} />} />
         <Stat label="Speed to first call" icon="clock" tone="rose" n={mins(speed)} sub="median, lead in → first AI call" />
         <Stat label="Hired" icon="check" tone="green" n={hiredNow} sub={<>marked hired in this period · <Delta now={hiredNow} prev={hiredPrev} /></>} />
         <Stat label="Lead → hire" icon="jobs" tone="violet" n={`${pct(cohortHired, newLeads)}%`} sub={<>{cohortHired} of {newLeads} leads from this period hired so far · goal 6-10%</>} />
+      </div>
+
+      <div className="section">
+        <Card title={`The ${talkedList.length} drivers Crystal talked to: where they are now`} right={<Link className="small" href={talkedHref()}>See the list</Link>}>
+          <div className="talked-groups">
+            {talkedGroups.map((g) => (
+              <Link className="hbar" key={g.label} href={talkedHref(g.label)} title={`${g.label}: ${g.n}`} style={{ gridTemplateColumns: "210px 1fr 80px" }}>
+                <span>{g.label}</span><div className="bar-track"><div className="bar-fill" style={{ width: `${(g.n / (talkedGroups[0]?.n || 1)) * 100}%` }} /></div><span className="num">{g.n} <span className="muted">{pct(g.n, talkedList.length)}%</span></span>
+              </Link>
+            ))}
+          </div>
+          {!talkedList.length && <p className="muted">Crystal has not talked to a driver in this period.</p>}
+          <p className="small muted" style={{ margin: "8px 0 0" }}>The recruiter&apos;s status from the lead sheet or the site; drivers without one show what they told Crystal. Click a row for the drivers.</p>
+        </Card>
       </div>
 
       <div className="grid wide-left section">
