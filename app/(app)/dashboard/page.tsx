@@ -161,7 +161,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     db.lead.count({ where: { ...scope, ...fresh, createdAt: inPrev } }),
     db.callAttempt.count({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: PLACED, createdAt: inRange } }),
     db.callAttempt.count({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: PLACED, createdAt: inPrev } }),
-    db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: { in: [...ANSWERED] }, createdAt: inRange }, select: { id: true, outcome: true, startedAt: true, endedAt: true } }),
+    db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: { in: [...ANSWERED] }, createdAt: inRange }, select: { id: true, leadId: true, outcome: true, startedAt: true, endedAt: true } }),
     db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: { in: [...ANSWERED] }, createdAt: inPrev }, select: { id: true, outcome: true } }),
     db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, outcome: "INTERESTED", createdAt: inRange }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
     db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, outcome: "INTERESTED", createdAt: inPrev }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
@@ -191,6 +191,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const gaveAnswers = await callsWithAnswers([...answeredCalls, ...prevAnsweredCalls, ...chartCalls, ...rangeLeads.flatMap((l) => l.calls)].map((c) => c.id));
   const talked = (c: CallRow) => (c.status ?? "COMPLETED") === "COMPLETED" && (DECIDED.includes(c.outcome ?? "") || gaveAnswers.has(c.id));
   const prevAnswered = prevAnsweredCalls.filter(talked).length;
+  // The same by driver: a driver called five times who talked once counts once.
+  const calledDrivers = (await db.callAttempt.findMany({ where: { lead: scope, provider: { not: UPLOAD_PROVIDER }, status: PLACED, createdAt: inRange }, distinct: ["leadId"], select: { leadId: true } })).length;
+  const talkedDrivers = new Set(answeredCalls.filter(talked).map((c) => c.leadId)).size;
   const pickedUp = answeredCalls.length;
   const answered = answeredCalls.filter(talked).length;
   const talkMins = answeredCalls.map((c) => (c.startedAt && c.endedAt ? Math.max(0, (c.endedAt.getTime() - c.startedAt.getTime()) / 60000) : 0));
@@ -264,10 +267,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     <>
       <PageHead title={`${hello}, ${user.name.split(" ")[0]}`} sub={`${mine ? "Your leads" : "All leads"} · ${p.days === 1 ? p.to.toFormat("ccc, MMM d") : `${p.from.toFormat("MMM d")} – ${p.to.toFormat("MMM d")}`} (Central time)`} right={rangeTabs} />
 
-      <div className="stats four">
+      <div className="stats five">
         <Stat label="New leads" icon="leads" tone="blue" n={newLeads} sub={<><Delta now={newLeads} prev={prevLeads} />{recalled > 0 && <> · +{recalled} old &quot;No answer&quot; leads re-called</>}</>} />
         <Stat label="AI calls placed" icon="phone" tone="violet" n={placed} sub={<Delta now={placed} prev={prevPlaced} />} />
         <Stat label="Talked to driver" icon="voice" tone="teal" n={`${pct(answered, placed)}%`} sub={<>{answered} of {placed} calls · {pickedUp - answered} picked up without a real talk (voicemail, call screening, hang-up) · <Delta now={answered} prev={prevAnswered} /></>} />
+        <Stat label="Drivers talked to" icon="users" tone="blue" n={`${pct(talkedDrivers, calledDrivers)}%`} sub={<>{talkedDrivers} of {calledDrivers} drivers called · each driver counted once, however many calls</>} />
         <Stat label="Interested drivers" icon="star" tone="green" n={interestedLeads} sub={<Delta now={interestedLeads} prev={prevInterested} />} />
         <Stat label="CDL / med card received" icon="doc" tone="amber" n={docsLeads} sub={<Delta now={docsLeads} prev={prevDocs} />} />
         <Stat label="Speed to first call" icon="clock" tone="rose" n={mins(speed)} sub="median, lead in → first AI call" />

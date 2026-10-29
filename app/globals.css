@@ -277,6 +277,7 @@ button.secondary.is-busy::after { border-color: #cbd5e1; border-top-color: var(-
 
 /* Dashboard KPI row: two even rows of four on wide screens. */
 @media (min-width: 1100px) { .stats.four { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 1300px) { .stats.five { grid-template-columns: repeat(5, 1fr); } }
 
 /* Driver profile popup (Leads) */
 .dp-backdrop { place-items: start center; overflow-y: auto; padding: 32px 16px; }
