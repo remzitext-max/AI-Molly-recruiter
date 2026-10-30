@@ -153,6 +153,9 @@ model Organization {
   /// When the recruiters are at work, Tashkent time ("17:00-03:00"); empty = always. Outside it
   /// Crystal books a recruiter callback instead of transferring.
   officeHours        String?
+  /// The company name a team's drivers hear on calls and read in texts ("Arslon LLC");
+  /// empty = the main company's name.
+  companyName        String?
   createdAt DateTime   @default(now())
   users     User[]
   campaigns Campaign[]

@@ -31,6 +31,11 @@ describe("recruiting teams", () => {
     expect(await isOwner(org.users[0])).toBe(false);
     expect(await isOwner(base.admin)).toBe(true);
     expect(await companyName(org)).toBe("Demo Freight"); // drivers hear the company, not the team
+    // A team with its own company ("Arslon LLC") is called and texted in that name.
+    await updateTeam(base.admin, org.id, { name: "First team", sheetLink: LINK, transferPhone: "(314) 555-0101", companyName: " Arslon LLC " });
+    expect(await companyName(await db.organization.findUniqueOrThrow({ where: { id: org.id } }))).toBe("Arslon LLC");
+    await updateTeam(base.admin, org.id, { name: "First team", sheetLink: LINK, transferPhone: "(314) 555-0101", companyName: "" });
+    expect(await companyName(await db.organization.findUniqueOrThrow({ where: { id: org.id } }))).toBe("Demo Freight");
 
     const mine = await addLead(base, { phone: "(214) 555-0177" });
     if (mine.result !== "created") throw new Error("no lead");
@@ -74,8 +79,8 @@ describe("recruiting teams", () => {
     await db.campaign.update({ where: { id: base.campaign.id }, data: { isDemo: false } });
     const r = await createTeam(base.admin, { name: "First team", managerName: "Andy", managerEmail: "andy@first.local", password: "x".repeat(12), sheetLink: LINK });
     if (!("orgId" in r)) throw new Error(JSON.stringify(r));
-    expect(await updateTeam(base.admin, r.orgId, { name: "First team", sheetLink: LINK, recall: { minDays: 60, maxDays: 7, perDay: 5 } })).toEqual({ error: "Re-call days: the second number must be bigger than the first" });
-    await updateTeam(base.admin, r.orgId, { name: "First team", sheetLink: LINK, recall: { minDays: 7, maxDays: 60, perDay: 5 } });
+    expect(await updateTeam(base.admin, r.orgId!, { name: "First team", sheetLink: LINK, recall: { minDays: 60, maxDays: 7, perDay: 5 } })).toEqual({ error: "Re-call days: the second number must be bigger than the first" });
+    await updateTeam(base.admin, r.orgId!, { name: "First team", sheetLink: LINK, recall: { minDays: 7, maxDays: 60, perDay: 5 } });
     const camp = await db.campaign.findFirstOrThrow({ where: { orgId: r.orgId } });
     expect(camp).toMatchObject({ recallMinDays: 7, recallMaxDays: 60, recallPerDay: 5 });
 

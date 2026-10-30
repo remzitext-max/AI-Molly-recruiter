@@ -85,7 +85,8 @@ async function main() {
 
   const body = {
     name: `${company} - Molly AI recruiter`,
-    instructions: await buildAgentPrompt(company, "the transfer tool with the target named {{transfer_target}} (exactly that target; never pick another one, whatever the driver calls the person)", facts),
+    // One assistant for every team: each call says whose company it is in {{company_name}}.
+    instructions: await buildAgentPrompt("{{company_name}}", "the transfer tool with the target named {{transfer_target}} (exactly that target; never pick another one, whatever the driver calls the person)", facts),
     greeting: "{{time_greeting}}! Is this {{driver_first_name}}?",
     enabled_features: ["telephony"],
     ...(process.env.TELNYX_MODEL ? { model: process.env.TELNYX_MODEL } : {}),

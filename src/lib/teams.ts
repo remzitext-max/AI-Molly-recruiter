@@ -1,6 +1,6 @@
 // Recruiting teams: other organizations on the same site. A team's logins see only the
-// team's leads and dashboard; Crystal calls its leads under the company's name and offer,
-// transfers its drivers to the team's own number and posts its cards to its own Telegram group.
+// team's leads and dashboard; Crystal calls its leads with the company's offer, in the team's
+// own company name when one is set, transfers its drivers to the team's own number and posts its cards to its own Telegram group.
 import type { User } from "@prisma/client";
 import { db } from "./db";
 import { hashPassword } from "./auth";
@@ -16,6 +16,8 @@ export interface TeamInput {
   sheetLink?: string;
   transferPhone?: string;
   telegramChatId?: string;
+  /** The company name the team's drivers hear ("Arslon LLC"); empty = the main company's name. */
+  companyName?: string;
   /** Recruiters' hours in Tashkent time, "17:00-05:00"; empty = always at work. */
   officeHours?: string;
   /** Re-call "No answer" drivers from the team's sheet tabs who applied minDays-maxDays ago; minDays 0 = off. */
@@ -42,7 +44,8 @@ function teamFields(t: TeamInput) {
   if (chat && !/^-?\d{5,20}$/.test(chat)) return { error: "Telegram chat id is a number like -1001234567890" };
   const officeHours = t.officeHours === undefined ? DEFAULT_TEAM_HOURS : normalizeOfficeHours(t.officeHours);
   if (officeHours === undefined) return { error: "Office hours look like 17:00-05:00 (Tashkent time)" };
-  return { data: { name, sheetSpreadsheetId: sheet?.spreadsheetId ?? null, sheetPoolTab: sheet?.tab ?? null, transferPhoneE164: phone, telegramChatId: chat, officeHours } };
+  const companyName = t.companyName === undefined ? {} : { companyName: t.companyName.trim().slice(0, 80) || null };
+  return { data: { name, ...companyName, sheetSpreadsheetId: sheet?.spreadsheetId ?? null, sheetPoolTab: sheet?.tab ?? null, transferPhoneE164: phone, telegramChatId: chat, officeHours } };
 }
 
 /** Creates the team, its campaign (a copy of the main one, same offer) and its manager's login. */
