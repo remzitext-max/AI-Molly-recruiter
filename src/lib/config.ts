@@ -84,6 +84,17 @@ export const config = {
     get pageId() { return env("META_PAGE_ID"); },
     get adAccountId() { const v = env("META_AD_ACCOUNT_ID"); return v ? (v.startsWith("act_") ? v : `act_${v}`) : undefined; },
     get datasetId() { return env("META_DATASET_ID"); },
+    /**
+     * A team's dataset in another business that the system user can't be given: its own
+     * Conversions API token from Events Manager, "datasetId=token,datasetId=token".
+     */
+    datasetToken(datasetId: string): string | undefined {
+      for (const pair of (env("META_DATASET_TOKENS") ?? "").split(",")) {
+        const i = pair.indexOf("=");
+        if (i > 0 && pair.slice(0, i).trim() === datasetId) return pair.slice(i + 1).trim() || undefined;
+      }
+      return undefined;
+    },
     get graphVersion() { return env("META_GRAPH_VERSION") ?? "v23.0"; },
   },
   telegram: {

@@ -203,9 +203,15 @@ describe("Facebook lead ads", () => {
       await sendMetaStageEvent(lead.id, "INTERESTED");
       expect(urls.some((u) => u.includes("/ARS/events"))).toBe(true);
       expect(urls.some((u) => u.includes("/DS/events"))).toBe(false);
+      // A dataset of another business can use its own Conversions API token.
+      process.env.META_DATASET_TOKENS = "ARS=ARSTOKEN";
+      await db.activityEvent.deleteMany({});
+      await sendMetaStageEvent(lead.id, "DOCS_RECEIVED");
+      expect(urls.at(-1)).toContain("/ARS/events?access_token=ARSTOKEN");
     } finally {
       spy.mockRestore();
       for (const k of Object.keys(env)) delete process.env[k];
+      delete process.env.META_DATASET_TOKENS;
     }
   });
 

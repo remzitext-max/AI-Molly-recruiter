@@ -69,7 +69,9 @@ const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 export async function sendLeadEvent(e: { eventName: string; time: Date; fbLeadId?: string | null; phoneE164: string; eventId: string; datasetId?: string | null }) {
   const userData: Record<string, unknown> = { ph: [sha(e.phoneE164.replace(/\D/g, ""))] };
   if (e.fbLeadId) userData.lead_id = e.fbLeadId;
-  const res = await providerFetch(`${base()}/${e.datasetId || config.meta.datasetId}/events?access_token=${encodeURIComponent(config.meta.accessToken ?? "")}`, {
+  const dataset = e.datasetId || config.meta.datasetId || "";
+  const token = config.meta.datasetToken(dataset) ?? config.meta.accessToken ?? "";
+  const res = await providerFetch(`${base()}/${dataset}/events?access_token=${encodeURIComponent(token)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     timeoutMs: 30_000,
