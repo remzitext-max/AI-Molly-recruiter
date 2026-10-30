@@ -12,7 +12,10 @@ import { getAdapters } from "../adapters/registry";
 import { normalizePhone } from "./phone";
 import { config } from "./config";
 import { log } from "./redact";
-import { recallNoAnswerLeads, type SheetTab } from "./sheet-recall";
+import { recallNoAnswerLeads, teamTarget, type SheetTab } from "./sheet-recall";
+import { teamSource } from "./team-sheets";
+import { getSheetConnection } from "./sheets-sync";
+import type { Mapping } from "./import";
 import { copySheetStatus } from "./recruiter-status";
 import { assignFromSheetTabs } from "./assignment";
 import { processRowsOf, saveProcessRows } from "./on-process";
@@ -107,7 +110,7 @@ export async function syncHiringFromSheet(now = new Date()) {
   // The "On process" page: every recruiter tab's drivers on their way in, called by Crystal or not.
   const main = await db.organization.findFirst({ where: { isMain: true }, orderBy: { createdAt: "asc" }, select: { id: true } });
   if (main && read.length) await saveProcessRows(main.id, read.flatMap(({ title, snap }) => processRowsOf(title, snap!.headers, snap!.rows, normalizePhone)), now);
-  const t = await readTeamSheets(latest);
+  const t = await readTeamSheets(latest, now);
   tabs += t.tabs; updated += t.updated;
   const known = new Map((await db.sheetLeadStatus.findMany()).map((r) => [r.phoneE164, r]));
   const movedTab: { phoneE164: string; tab: string }[] = [];
@@ -120,7 +123,7 @@ export async function syncHiringFromSheet(now = new Date()) {
   }
   // Only a move between tabs reassigns, so a transfer made on the site is not undone every 15 minutes.
   const assigned = await assignFromSheetTabs(movedTab);
-  const recalled = await recallNoAnswerLeads(read, now);
+  const recalled = (await recallNoAnswerLeads(read, now)) + t.recalled;
   return { tabs, updated, sent, recalled, assigned };
 }
 
@@ -128,12 +131,13 @@ export async function syncHiringFromSheet(now = new Date()) {
  * Recruiting teams' own sheets (Teams page): every tab is read for their leads only, so a
  * team recruiter's status stops Crystal and a move to their tab assigns the lead to them.
  * A phone in the main sheet keeps the main sheet's status. Facebook events for these
- * sheets come from reportOtherTeamSheets, like the other teams'.
+ * sheets come from reportOtherTeamSheets, like the other teams'. Their "No answer" drivers
+ * are re-called with the team's campaign settings, like the main sheet's.
  */
-async function readTeamSheets(latest: Map<string, { tab: string; status: string }>) {
-  const src = getAdapters().sheets;
+async function readTeamSheets(latest: Map<string, { tab: string; status: string }>, now: Date) {
   const mainPhones = new Set(latest.keys());
-  let tabs = 0, updated = 0;
+  let tabs = 0, updated = 0, recalled = 0;
+  const mainMapping = ((await getSheetConnection())?.mapping as Mapping | null) ?? null;
   const teams = await db.organization.findMany({ where: { isMain: false, sheetSpreadsheetId: { not: null } } });
   for (const org of teams) {
     const id = org.sheetSpreadsheetId!;
@@ -159,8 +163,11 @@ async function readTeamSheets(latest: Map<string, { tab: string; status: string 
         }
       }
     }
+    const campaign = await db.campaign.findFirst({ where: { orgId: org.id }, orderBy: [{ isDemo: "asc" }, { createdAt: "asc" }], select: { id: true } });
+    const read: SheetTab[] = list.flatMap(({ title, gid, snap }) => (snap ? [{ title, gid, snap }] : []));
+    if (campaign && read.length) recalled += await recallNoAnswerLeads(read, now, teamTarget(org.id, campaign.id, (gid) => `${teamSource(org.id)}:${gid}`, mainMapping));
   }
-  return { tabs, updated };
+  return { tabs, updated, recalled };
 }
 
 /**

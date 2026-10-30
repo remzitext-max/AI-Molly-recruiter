@@ -18,6 +18,15 @@ export interface TeamInput {
   telegramChatId?: string;
   /** Recruiters' hours in Tashkent time, "17:00-05:00"; empty = always at work. */
   officeHours?: string;
+  /** Re-call "No answer" drivers from the team's sheet tabs who applied minDays-maxDays ago; minDays 0 = off. */
+  recall?: { minDays: number; maxDays: number; perDay: number };
+}
+
+function recallFields(r: NonNullable<TeamInput["recall"]>) {
+  const n = (v: number, lo: number, hi: number, d: number) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : d);
+  const recallMinDays = n(r.minDays, 0, 365, 0), recallMaxDays = n(r.maxDays, 1, 365, 60);
+  if (recallMinDays > 0 && recallMaxDays <= recallMinDays) return { error: "Re-call days: the second number must be bigger than the first" };
+  return { data: { recallMinDays, recallMaxDays, recallPerDay: n(r.perDay, 1, 200, 25) } };
 }
 
 function teamFields(t: TeamInput) {
@@ -77,7 +86,10 @@ export async function updateTeam(owner: Pick<User, "id" | "orgId">, orgId: strin
   if (!team) return { error: "Team not found" };
   const f = teamFields(t);
   if ("error" in f) return { error: f.error };
+  const recall = t.recall ? recallFields(t.recall) : null;
+  if (recall && "error" in recall) return { error: recall.error };
   await db.organization.update({ where: { id: orgId }, data: f.data });
+  if (recall) await db.campaign.updateMany({ where: { orgId }, data: recall.data });
   // Another sheet or Pool tab: its rows already there are remembered again, not called.
   if (team.sheetSpreadsheetId !== f.data.sheetSpreadsheetId || team.sheetPoolTab !== f.data.sheetPoolTab) {
     await db.sourceConnection.deleteMany({ where: { id: teamConnId(orgId) } });

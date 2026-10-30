@@ -29,7 +29,10 @@ async function create(fd: FormData) {
 async function save(fd: FormData) {
   "use server";
   const u = await requireOwner();
-  const r = await updateTeam(u, g(fd, "id"), { name: g(fd, "name"), sheetLink: g(fd, "sheetLink"), transferPhone: g(fd, "transferPhone"), telegramChatId: g(fd, "telegramChatId"), officeHours: g(fd, "officeHours") });
+  const r = await updateTeam(u, g(fd, "id"), {
+    name: g(fd, "name"), sheetLink: g(fd, "sheetLink"), transferPhone: g(fd, "transferPhone"), telegramChatId: g(fd, "telegramChatId"), officeHours: g(fd, "officeHours"),
+    recall: { minDays: Number(g(fd, "recallMinDays")), maxDays: Number(g(fd, "recallMaxDays")), perDay: Number(g(fd, "recallPerDay")) },
+  });
   if ("error" in r) redirect(`/teams?error=${encodeURIComponent(r.error!)}`);
   await flash(r.transferChanged ? `Saved. ${SETUP_NOTE}` : "Your changes are saved");
   revalidatePath("/teams");
@@ -51,7 +54,7 @@ export default async function Teams({ searchParams }: { searchParams: Promise<{ 
   const owner = await requireOwner();
   const sp = await searchParams;
   const main = await db.organization.findUniqueOrThrow({ where: { id: owner.orgId }, select: { name: true, officeHours: true } });
-  const teams = await db.organization.findMany({ where: { isMain: false }, orderBy: { createdAt: "asc" }, include: { _count: { select: { leads: true } }, users: { orderBy: { createdAt: "asc" }, select: { name: true, email: true, role: true } } } });
+  const teams = await db.organization.findMany({ where: { isMain: false }, orderBy: { createdAt: "asc" }, include: { _count: { select: { leads: true } }, campaigns: { orderBy: [{ isDemo: "asc" }, { createdAt: "asc" }], take: 1, select: { recallMinDays: true, recallMaxDays: true, recallPerDay: true } }, users: { orderBy: { createdAt: "asc" }, select: { name: true, email: true, role: true } } } });
   const conns = new Map((await db.sourceConnection.findMany({ where: { id: { in: teams.map((t) => teamConnId(t.id)) } } })).map((c) => [c.orgId, c]));
   return (
     <>
@@ -66,6 +69,7 @@ export default async function Teams({ searchParams }: { searchParams: Promise<{ 
       </Card>
       {teams.map((t) => {
         const c = conns.get(t.id);
+        const camp = t.campaigns[0];
         const summary = c?.lastSummary as { baselineRows?: number; checkedRows?: number; imported?: Record<string, number> | null } | null;
         return (
           <Card key={t.id} title={t.name} right={<span className="small muted">{t._count.leads} leads · {t.users.length} logins</span>}>
@@ -87,6 +91,20 @@ export default async function Teams({ searchParams }: { searchParams: Promise<{ 
                 <div><label>Transfer number (driver asks for a person)</label><input name="transferPhone" type="tel" defaultValue={t.transferPhoneE164 ?? ""} autoComplete="off" placeholder="+1…" /></div>
                 <div><label>Telegram group chat id (optional)</label><input name="telegramChatId" defaultValue={t.telegramChatId ?? ""} autoComplete="off" placeholder="-100…" /></div>
                 <div><label>Office hours, Tashkent time{hoursNow(t.officeHours)}</label><input name="officeHours" defaultValue={t.officeHours ?? ""} autoComplete="off" placeholder="17:00-05:00" /><div className="small muted">{HOURS_HELP}</div></div>
+                {camp && (
+                  <div>
+                    <label>Old &quot;No answer&quot; leads: Crystal calls the ones who applied</label>
+                    <div className="inline">
+                      <input type="number" name="recallMinDays" defaultValue={camp.recallMinDays} min={0} max={365} style={{ width: 70 }} />
+                      <span className="small">to</span>
+                      <input type="number" name="recallMaxDays" defaultValue={camp.recallMaxDays} min={1} max={365} style={{ width: 70 }} />
+                      <span className="small">days ago, at most</span>
+                      <input type="number" name="recallPerDay" defaultValue={camp.recallPerDay} min={1} max={200} style={{ width: 70 }} />
+                      <span className="small">a day</span>
+                    </div>
+                    <div className="small muted">From the team&apos;s recruiter tabs, never-called drivers only, 2 calls each, newest first. First number 0 = off.</div>
+                  </div>
+                )}
               </div>
               <div style={{ marginTop: 12 }}><button className="secondary">Save</button></div>
             </form>
