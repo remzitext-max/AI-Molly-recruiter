@@ -174,14 +174,14 @@ async function readTeamSheets(latest: Map<string, { tab: string; status: string 
  * One good sheet status to Facebook, once per driver and event across every team's sheet.
  * Returns false when it was already sent (from a sheet, or by Crystal / the site).
  */
-async function reportSheetStatus(phone: string, event: string, status: string, tab: string, lead: { id: string; fbLeadId: string | null } | null, now: Date) {
+async function reportSheetStatus(phone: string, event: string, status: string, tab: string, lead: { id: string; fbLeadId: string | null } | null, now: Date, datasetId?: string | null) {
   const key = { phoneE164: phone, eventName: event };
   if (await db.metaSheetEvent.findUnique({ where: { phoneE164_eventName: key } })) return false;
   const row = { ...key, tab: tab.slice(0, 100), status: status.slice(0, 100) };
   // Crystal's own "Interested" (or a stage set on the site) already went to Facebook.
   const already = lead && (await db.activityEvent.count({ where: { leadId: lead.id, type: "META_EVENT", message: { startsWith: `Sent "${event}"` } } }));
   if (already) { await db.metaSheetEvent.create({ data: row }); return false; }
-  const r = await sendLeadEvent({ eventName: event, time: now, fbLeadId: lead?.fbLeadId, phoneE164: phone, eventId: `sheet:${phone}:${event}` });
+  const r = await sendLeadEvent({ eventName: event, time: now, fbLeadId: lead?.fbLeadId, phoneE164: phone, eventId: `sheet:${phone}:${event}`, datasetId });
   await db.metaSheetEvent.create({ data: row });
   if (lead) await recordEvent({ leadId: lead.id, actorType: "SYSTEM", type: "META_EVENT", message: `Sent "${event}" to Facebook (sheet ${tab} tab: ${status})${r.events_received ? "" : ": not confirmed"}` });
   return true;
@@ -195,8 +195,10 @@ const OTHER_TEAMS_PER_RUN = 150;
 async function reportOtherTeamSheets(now: Date) {
   const src = getAdapters().sheets;
   let sent = 0;
-  const teamSheets = (await db.organization.findMany({ where: { isMain: false, sheetSpreadsheetId: { not: null } }, select: { sheetSpreadsheetId: true } })).map((o) => o.sheetSpreadsheetId!);
-  for (const id of new Set([...config.googleSheets.metaSpreadsheets, ...teamSheets])) {
+  // A team with its own Facebook dataset (another company's ads) reports there.
+  const datasets = new Map((await db.organization.findMany({ where: { isMain: false, sheetSpreadsheetId: { not: null } }, select: { sheetSpreadsheetId: true, metaDatasetId: true } }))
+    .map((o) => [o.sheetSpreadsheetId!, o.metaDatasetId]));
+  for (const id of new Set([...config.googleSheets.metaSpreadsheets, ...datasets.keys()])) {
     if (id === config.googleSheets.spreadsheetId) continue;
     const tabs = await readAllTabs(id).catch((e) => { log.warn("other team sheet not readable (share it with the service account)", { id, error: String(e) }); return []; });
     for (const { title, snap } of tabs) {
@@ -210,7 +212,7 @@ async function reportOtherTeamSheets(now: Date) {
         if (!hit || !phone) continue;
         if (sent >= OTHER_TEAMS_PER_RUN) return sent;
         const lead = await db.lead.findFirst({ where: { phoneE164: phone, isDemo: false }, orderBy: { createdAt: "desc" }, select: { id: true, fbLeadId: true } });
-        if (await reportSheetStatus(phone, hit.event, status, title, lead, now)) sent++;
+        if (await reportSheetStatus(phone, hit.event, status, title, lead, now, datasets.get(id))) sent++;
       }
     }
   }

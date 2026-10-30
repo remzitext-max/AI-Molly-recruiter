@@ -66,10 +66,10 @@ export async function campaignSpend(since: string, until: string): Promise<Campa
 const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 
 /** One CRM stage event for a lead ad lead (Conversions API, action_source system_generated). */
-export async function sendLeadEvent(e: { eventName: string; time: Date; fbLeadId?: string | null; phoneE164: string; eventId: string }) {
+export async function sendLeadEvent(e: { eventName: string; time: Date; fbLeadId?: string | null; phoneE164: string; eventId: string; datasetId?: string | null }) {
   const userData: Record<string, unknown> = { ph: [sha(e.phoneE164.replace(/\D/g, ""))] };
   if (e.fbLeadId) userData.lead_id = e.fbLeadId;
-  const res = await providerFetch(`${base()}/${config.meta.datasetId}/events?access_token=${encodeURIComponent(config.meta.accessToken ?? "")}`, {
+  const res = await providerFetch(`${base()}/${e.datasetId || config.meta.datasetId}/events?access_token=${encodeURIComponent(config.meta.accessToken ?? "")}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     timeoutMs: 30_000,

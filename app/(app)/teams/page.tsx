@@ -20,7 +20,7 @@ async function create(fd: FormData) {
   const r = await createTeam(u, {
     name: g(fd, "name"), managerName: g(fd, "managerName"), managerEmail: g(fd, "managerEmail"), password: g(fd, "password"),
     sheetLink: g(fd, "sheetLink"), transferPhone: g(fd, "transferPhone"), telegramChatId: g(fd, "telegramChatId"), officeHours: g(fd, "officeHours"),
-    companyName: g(fd, "companyName"),
+    companyName: g(fd, "companyName"), metaDatasetId: g(fd, "metaDatasetId"),
   });
   if ("error" in r) redirect(`/teams?error=${encodeURIComponent(r.error!)}`);
   await flash(`Team created. ${g(fd, "transferPhone").trim() ? SETUP_NOTE : "Add the team's transfer number when you have it"}`);
@@ -32,7 +32,7 @@ async function save(fd: FormData) {
   const u = await requireOwner();
   const r = await updateTeam(u, g(fd, "id"), {
     name: g(fd, "name"), sheetLink: g(fd, "sheetLink"), transferPhone: g(fd, "transferPhone"), telegramChatId: g(fd, "telegramChatId"), officeHours: g(fd, "officeHours"),
-    companyName: g(fd, "companyName"),
+    companyName: g(fd, "companyName"), metaDatasetId: g(fd, "metaDatasetId"),
     recall: { minDays: Number(g(fd, "recallMinDays")), maxDays: Number(g(fd, "recallMaxDays")), perDay: Number(g(fd, "recallPerDay")) },
   });
   if ("error" in r) redirect(`/teams?error=${encodeURIComponent(r.error!)}`);
@@ -90,6 +90,7 @@ export default async function Teams({ searchParams }: { searchParams: Promise<{ 
               <div className="grid two">
                 <div><label>Team name</label><input name="name" defaultValue={t.name} required autoComplete="off" /></div>
                 <div><label>Company name drivers hear (empty = {main.name})</label><input name="companyName" defaultValue={t.companyName ?? ""} autoComplete="off" placeholder={main.name} /></div>
+                <div><label>Own Facebook dataset id (optional; empty = {main.name}&apos;s)</label><input name="metaDatasetId" defaultValue={t.metaDatasetId ?? ""} autoComplete="off" inputMode="numeric" /><div className="small muted">Good leads (Interested, Documents, Qualified, Hired) go to this dataset. The Crystal AI system user needs access to it.</div></div>
                 <div><label>Lead sheet link (open the Pool tab, copy the address)</label><input name="sheetLink" defaultValue={sheetLinkOf(t)} autoComplete="off" placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=…" /></div>
                 <div><label>Transfer number (driver asks for a person)</label><input name="transferPhone" type="tel" defaultValue={t.transferPhoneE164 ?? ""} autoComplete="off" placeholder="+1…" /></div>
                 <div><label>Telegram group chat id (optional)</label><input name="telegramChatId" defaultValue={t.telegramChatId ?? ""} autoComplete="off" placeholder="-100…" /></div>
@@ -119,6 +120,7 @@ export default async function Teams({ searchParams }: { searchParams: Promise<{ 
           <div className="grid two">
             <div><label>Team name *</label><input name="name" required autoComplete="off" placeholder="First team" /></div>
             <div><label>Company name drivers hear (empty = {main.name})</label><input name="companyName" autoComplete="off" placeholder={main.name} /></div>
+            <div><label>Own Facebook dataset id (optional; empty = {main.name}&apos;s)</label><input name="metaDatasetId" autoComplete="off" inputMode="numeric" /></div>
             <div><label>Lead sheet link (open the Pool tab, copy the address)</label><input name="sheetLink" autoComplete="off" placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=…" /></div>
             <div><label>Manager&apos;s name *</label><input name="managerName" required autoComplete="off" /></div>
             <div><label>Manager&apos;s login email *</label><input name="managerEmail" type="email" required autoComplete="off" /></div>

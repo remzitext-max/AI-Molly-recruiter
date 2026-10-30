@@ -18,6 +18,8 @@ export interface TeamInput {
   telegramChatId?: string;
   /** The company name the team's drivers hear ("Arslon LLC"); empty = the main company's name. */
   companyName?: string;
+  /** The team's own Facebook dataset id for good-lead events; empty = the company's. */
+  metaDatasetId?: string;
   /** Recruiters' hours in Tashkent time, "17:00-05:00"; empty = always at work. */
   officeHours?: string;
   /** Re-call "No answer" drivers from the team's sheet tabs who applied minDays-maxDays ago; minDays 0 = off. */
@@ -45,7 +47,10 @@ function teamFields(t: TeamInput) {
   const officeHours = t.officeHours === undefined ? DEFAULT_TEAM_HOURS : normalizeOfficeHours(t.officeHours);
   if (officeHours === undefined) return { error: "Office hours look like 17:00-05:00 (Tashkent time)" };
   const companyName = t.companyName === undefined ? {} : { companyName: t.companyName.trim().slice(0, 80) || null };
-  return { data: { name, ...companyName, sheetSpreadsheetId: sheet?.spreadsheetId ?? null, sheetPoolTab: sheet?.tab ?? null, transferPhoneE164: phone, telegramChatId: chat, officeHours } };
+  const dataset = t.metaDatasetId?.trim() || null;
+  if (dataset && !/^\d{6,25}$/.test(dataset)) return { error: "Facebook dataset id is a number like 1700668337730105" };
+  const metaDatasetId = t.metaDatasetId === undefined ? {} : { metaDatasetId: dataset };
+  return { data: { name, ...companyName, ...metaDatasetId, sheetSpreadsheetId: sheet?.spreadsheetId ?? null, sheetPoolTab: sheet?.tab ?? null, transferPhoneE164: phone, telegramChatId: chat, officeHours } };
 }
 
 /** Creates the team, its campaign (a copy of the main one, same offer) and its manager's login. */

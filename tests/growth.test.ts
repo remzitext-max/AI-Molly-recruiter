@@ -190,6 +190,25 @@ describe("Facebook lead ads", () => {
     expect(await db.lead.findFirstOrThrow({ where: { phoneE164: "+12395550108" } })).toMatchObject({ fbLeadId: null, fbCampaign: null });
   });
 
+  it("sends a team's good leads to the team's own dataset", async () => {
+    Object.assign(process.env, env);
+    const base = await seedBase();
+    const team = await db.organization.create({ data: { name: "Arslon", isMain: false, companyName: "Arslon LLC", metaDatasetId: "ARS" } });
+    const r = await addLead(base, { phone: "(214) 555-0188" });
+    if (r.result !== "created") throw new Error("no lead");
+    const lead = await db.lead.update({ where: { id: r.leadId }, data: { orgId: team.id, isDemo: false, createdAt: new Date(Date.now() - 3 * 3600_000) } });
+    const urls: string[] = [];
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (u) => { urls.push(String(u)); return new Response(JSON.stringify({ events_received: 1, data: [] })); });
+    try {
+      await sendMetaStageEvent(lead.id, "INTERESTED");
+      expect(urls.some((u) => u.includes("/ARS/events"))).toBe(true);
+      expect(urls.some((u) => u.includes("/DS/events"))).toBe(false);
+    } finally {
+      spy.mockRestore();
+      for (const k of Object.keys(env)) delete process.env[k];
+    }
+  });
+
   it("waits for the Facebook lead ID on a fresh lead before sending", async () => {
     Object.assign(process.env, env);
     const base = await seedBase();

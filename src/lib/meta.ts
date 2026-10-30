@@ -15,6 +15,12 @@ export const metaLeadsConfigured = () => !!(config.meta.accessToken && config.me
 export const metaSpendConfigured = () => !!(config.meta.accessToken && config.meta.adAccountId);
 export const metaEventsConfigured = () => !!(config.meta.accessToken && config.meta.datasetId);
 
+/** Where a team's events go: its own dataset (another company's ads), else the company's. */
+export async function datasetFor(orgId: string | null | undefined) {
+  const org = orgId ? await db.organization.findUnique({ where: { id: orgId }, select: { metaDatasetId: true } }) : null;
+  return org?.metaDatasetId || config.meta.datasetId || null;
+}
+
 /** Stage names sent to Meta as CRM events. */
 export type MetaStage = PipelineStatus | "HIRED";
 export const META_STAGE_EVENTS: Partial<Record<MetaStage, string>> = {
@@ -77,6 +83,6 @@ export async function sendMetaStageEvent(leadId: string, stage: MetaStage, now =
   if (!lead.fbLeadId && metaLeadsConfigured() && now.getTime() - lead.createdAt.getTime() < 2 * 3600_000) {
     return { rescheduleAt: new Date(now.getTime() + 15 * 60_000), reason: "WAITING_FOR_FB_LEAD_ID" };
   }
-  const r = await sendLeadEvent({ eventName, time: now, fbLeadId: lead.fbLeadId, phoneE164: lead.phoneE164, eventId: `${leadId}:${eventName}` });
+  const r = await sendLeadEvent({ eventName, time: now, fbLeadId: lead.fbLeadId, phoneE164: lead.phoneE164, eventId: `${leadId}:${eventName}`, datasetId: await datasetFor(lead.orgId) });
   await recordEvent({ leadId, actorType: "SYSTEM", type: "META_EVENT", message: `Sent "${eventName}" to Facebook${lead.fbLeadId ? "" : " (matched by phone only)"}${r.events_received ? "" : ": not confirmed"}` });
 }
