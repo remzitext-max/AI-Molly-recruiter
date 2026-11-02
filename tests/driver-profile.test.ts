@@ -34,8 +34,10 @@ describe("driver profile popup and PDF", () => {
     expect(p.timeline[0]).toMatchObject({ who: "Molly", what: "Spoke with Ray" });
 
     // Another org's user cannot open it.
-    const other = await db.organization.create({ data: { name: "Other" } });
+    // Another team's manager cannot open it; the owner (an admin of a main company) can.
+    const other = await db.organization.create({ data: { name: "Other", isMain: false } });
     expect(await loadDriverProfile({ ...base.admin, orgId: other.id }, lead.id)).toBeNull();
+    expect(await loadDriverProfile({ ...base.molly, orgId: other.id }, lead.id)).toBeNull();
 
     // Emoji and other characters the PDF font cannot draw are dropped, not an error.
     const pdf = await profilePdf(p, "Admin");
