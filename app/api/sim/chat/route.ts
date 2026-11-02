@@ -19,7 +19,7 @@ export async function POST(req: Request) {
   const facts = v ? FactsSchema.parse(v.facts) : [];
   const fill = (s: string) => s.replace(/\{company\}/g, org.name).replace(/\{recruiterPhone\}/g, "our office");
   const brain = new RecruitingBrain({
-    companyName: org.name, recruiterName: "Molly", driverFirstName: "Marcus", driverTimezone: "America/Chicago", facts,
+    companyName: org.name, recruiterName: "our recruiter", driverFirstName: "Marcus", driverTimezone: "America/Chicago", facts,
     disclosure: fill(settings.aiDisclosure), recordingNotice: settings.recordingEnabled ? settings.recordingNotice : null,
     voicemailMessage: fill(settings.voicemailMessage), uploadLinkTtlMinutes: settings.uploadLinkTtlMinutes,
   }, body.input.type === "start" ? undefined : body.state ?? undefined);

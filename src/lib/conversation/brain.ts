@@ -61,7 +61,7 @@ export const DEFAULT_SLOTS: SlotSpec[] = [
 
 export interface BrainContext {
   companyName: string;
-  recruiterName: string; // "Molly"
+  recruiterName: string; // "our recruiter"
   driverFirstName?: string | null;
   driverTimezone?: string | null;
   knownSlots?: Partial<Record<SlotKey, string>>;
@@ -140,7 +140,7 @@ export class RecruitingBrain {
         return this.end(`You're now being connected to ${this.ctx.recruiterName}, a member of our recruiting team. Thanks for your time.`, [], "HUMAN_REQUESTED");
       }
       s.phase = "CALLBACK_ASK";
-      return { say: `I'm sorry, ${this.ctx.recruiterName} isn't available right this moment. What's a good time for her to call you back?`, actions: [], end: false };
+      return { say: `I'm sorry, ${this.ctx.recruiterName} isn't available right this moment. What's a good time for them to call you back?`, actions: [], end: false };
     }
     if (input.type === "silence") {
       s.silence++;
@@ -168,7 +168,7 @@ export class RecruitingBrain {
     }
     if (looksLikeInjection(text)) {
       actions.push({ type: "injection_attempt", raw: text });
-      pre.push("I can only share the approved details for this position, and Molly makes all final decisions.");
+      pre.push("I can only share the approved details for this position, and our recruiting team makes all final decisions.");
     }
     if (wantsHuman(text) || (s.phase === "BOT_QUESTION" && isAffirmative(text))) {
       s.phase = "TRANSFERRING";
@@ -177,7 +177,7 @@ export class RecruitingBrain {
     if (isAskingIfBot(text)) {
       s.resume = s.phase === "TIME_CHECK" || s.phase === "BOT_QUESTION" ? "INTERVIEW" : s.phase;
       s.phase = "BOT_QUESTION";
-      return { say: `Yes, I'm an AI assistant working with ${this.ctx.recruiterName}. I can answer basic questions and get you set up with her. Would you rather talk to ${this.ctx.recruiterName} directly?`, actions, end: false };
+      return { say: `Yes, I'm an AI assistant working with ${this.ctx.recruiterName}. I can answer basic questions and get you set up with them. Would you rather talk to ${this.ctx.recruiterName} directly?`, actions, end: false };
     }
     if (s.phase === "BOT_QUESTION") {
       s.phase = s.resume ?? "INTERVIEW";
@@ -259,7 +259,7 @@ export class RecruitingBrain {
         if (!interest) { s.slots.offer_interest = { value: "Interested", status: "CAPTURED" }; actions.push({ type: "record_slot", key: "offer_interest", value: "Interested", raw: text, status: "CAPTURED" }); }
         if (this.ctx.cdlBySms === false) {
           s.phase = "WRAP";
-          return { say: [...pre, `Great. ${this.ctx.recruiterName} will reach out to go over next steps and get a copy of your CDL. Anything you'd like me to pass along to her?`].join(" "), actions, end: false };
+          return { say: [...pre, `Great. ${this.ctx.recruiterName} will reach out to go over next steps and get a copy of your CDL. Anything you'd like me to pass along?`].join(" "), actions, end: false };
         }
         s.phase = "CDL_LINK";
         return { say: [...pre, `Great. The next step is a copy of your CDL so ${this.ctx.recruiterName} can review it. Can I text a secure upload link to this number?`].join(" "), actions, end: false };

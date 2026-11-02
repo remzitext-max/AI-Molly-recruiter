@@ -35,7 +35,7 @@ export default async function Knowledge() {
   return (
     <>
       <h1>Offers &amp; approved knowledge</h1>
-      <p className="muted">The AI may only state facts published here, word for word. Anything missing or unconfirmed is captured as a question for Molly. Each call records which version was discussed.</p>
+      <p className="muted">The AI may only state facts published here, word for word. Anything missing or unconfirmed is captured as a question for the recruiter. Each call records which version was discussed.</p>
       {offers.map((o) => (
         <Card key={o.id} title={o.name} right={<form action={newDraft}><input type="hidden" name="offerId" value={o.id} /><button className="secondary">New draft version</button></form>}>
           <p className="small muted">Used by: {o.campaigns.map((c) => c.name).join(", ") || "no campaign"}</p>

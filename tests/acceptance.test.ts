@@ -97,7 +97,7 @@ describe("2/3. approved answers vs unknown questions", () => {
     expect(qs.map((q) => q.question).join(" ")).toMatch(/sign-on bonus/);
     const call = await lastCall(id);
     const agent = (call.transcript as { speaker: string; text: string }[]).filter((t) => t.speaker === "agent").map((t) => t.text).join(" ");
-    expect(agent).toMatch(/Molly will confirm/);
+    expect(agent).toMatch(/our recruiter will confirm/);
     expect(agent).not.toMatch(/\$\d|bonus is|pets are/i);
     expect(await db.task.count({ where: { leadId: id, type: "UNANSWERED_QUESTION" } })).toBeGreaterThan(0);
   });

@@ -7,7 +7,7 @@ import { db } from "./db";
 import { canonicalStatus, RECRUITER_STATUSES } from "./recruiter-status";
 import { tabForUser } from "./assignment";
 
-export interface SheetRowIn { phoneE164: string; tab: string; status: string; appliedAt: Date | null }
+export interface SheetRowIn { phoneE164: string; tab: string; status: string; appliedAt: Date | null; name?: string | null; experience?: string | null }
 
 // The sheet's "Applied" times are US Central.
 const SHEET_ZONE = "America/Chicago";
@@ -40,11 +40,14 @@ export function sheetRowsOf(tab: string, headers: string[], rows: string[][], ph
   const col = (re: RegExp) => headers.findIndex((h) => re.test(h.trim()));
   const phoneI = col(/^phone$/i), statusI = col(/^status$/i), appliedI = col(/^applied/i);
   if (phoneI < 0 || statusI < 0) return [];
+  const nameI = col(/^(full |driver(?:'s)? )?name$/i), firstI = col(/^first ?name$/i), lastI = col(/^last ?name$/i), expI = col(/experience/i);
   const out: SheetRowIn[] = [];
   for (const r of rows) {
     const phoneE164 = phoneOf(r[phoneI] ?? "");
     if (!phoneE164) continue;
-    out.push({ phoneE164, tab: tab.slice(0, 100), status: sheetStatus(r[statusI]), appliedAt: appliedI >= 0 ? parseApplied(r[appliedI]) : null });
+    const name = (nameI >= 0 ? r[nameI] : [firstI >= 0 ? r[firstI] ?? "" : "", lastI >= 0 ? r[lastI] ?? "" : ""].join(" "))?.trim().slice(0, 120) || null;
+    const experience = expI >= 0 ? r[expI]?.trim().slice(0, 120) || null : null;
+    out.push({ phoneE164, tab: tab.slice(0, 100), status: sheetStatus(r[statusI]), appliedAt: appliedI >= 0 ? parseApplied(r[appliedI]) : null, name, experience });
   }
   return out;
 }
@@ -55,7 +58,7 @@ export function onePerPhone(rows: SheetRowIn[]) {
   for (const r of rows) {
     const o = by.get(r.phoneE164);
     const better = !o || (isPool(o.tab) && !isPool(r.tab)) || (isPool(o.tab) === isPool(r.tab) && UNWORKED.has(o.status) && !UNWORKED.has(r.status));
-    if (better) by.set(r.phoneE164, { ...r, appliedAt: r.appliedAt ?? o?.appliedAt ?? null });
+    if (better) by.set(r.phoneE164, { ...r, appliedAt: r.appliedAt ?? o?.appliedAt ?? null, name: r.name || o?.name || null, experience: r.experience || o?.experience || null });
   }
   return [...by.values()];
 }
@@ -66,8 +69,11 @@ export async function saveSheetRows(orgId: string, rows: SheetRowIn[], now = new
   const old = new Map((await db.sheetRow.findMany({ where: { orgId } })).map((r) => [r.phoneE164, r]));
   for (const r of fresh) {
     const o = old.get(r.phoneE164);
-    if (o && o.tab === r.tab && o.status === r.status && (o.appliedAt?.getTime() ?? null) === (r.appliedAt?.getTime() ?? null)) continue;
-    await db.sheetRow.upsert({ where: { orgId_phoneE164: { orgId, phoneE164: r.phoneE164 } }, create: { orgId, ...r, seenAt: now }, update: { ...r, seenAt: now } });
+    const data = { ...r, name: r.name ?? null, experience: r.experience ?? null };
+    if (o && o.tab === r.tab && o.status === r.status && o.statusAt && o.name === data.name && o.experience === data.experience && (o.appliedAt?.getTime() ?? null) === (r.appliedAt?.getTime() ?? null)) continue;
+    // A new row has had its status since it applied; a changed status starts now.
+    const statusAt = !o ? r.appliedAt ?? now : o.status !== r.status ? now : o.statusAt ?? o.appliedAt ?? now;
+    await db.sheetRow.upsert({ where: { orgId_phoneE164: { orgId, phoneE164: r.phoneE164 } }, create: { orgId, ...data, statusAt, seenAt: now }, update: { ...data, statusAt, seenAt: now } });
   }
   const keep = new Set(fresh.map((r) => r.phoneE164));
   const gone = [...old.keys()].filter((p) => !keep.has(p));

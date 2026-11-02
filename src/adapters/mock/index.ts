@@ -84,7 +84,7 @@ export class MockExtractor implements DocumentExtractor {
 export class MockSynth implements VoiceSynthesizer {
   key = "mock-voice-synthesis";
   isMock = true;
-  status() { return mockStatus("voice_synthesis", "Mock voice", "Placeholder tone audio. This is NOT Molly's voice."); }
+  status() { return mockStatus("voice_synthesis", "Mock voice", "Placeholder tone audio. This is NOT Crystal's voice."); }
   async synthesize(text: string) {
     const t0 = Date.now();
     const rate = 8000;

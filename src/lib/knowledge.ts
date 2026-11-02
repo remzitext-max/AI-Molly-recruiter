@@ -15,7 +15,7 @@ export const FactSchema = z.object({
   title: z.string().min(1).max(200),
   content: z.string().max(1200), // exact approved wording the agent may say
   keywords: z.array(z.string().max(60)).default([]),
-  confirmed: z.boolean().default(true), // false = known gap; agent must defer to Molly
+  confirmed: z.boolean().default(true), // false = known gap; agent must defer to the recruiter
 });
 export type Fact = z.infer<typeof FactSchema>;
 export const FactsSchema = z.array(FactSchema).superRefine((facts, ctx) => {

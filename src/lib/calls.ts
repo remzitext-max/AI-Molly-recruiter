@@ -423,7 +423,7 @@ export async function applyAgentAction(attemptId: string, input: unknown): Promi
     }
     case "unanswered_question": {
       await db.unansweredQuestion.create({ data: { leadId: lead.id, callAttemptId: attemptId, question: redactText(action.question).slice(0, 1000) } });
-      await upsertTask(lead.id, "UNANSWERED_QUESTION", "Driver question needs Molly's answer", lead.assignedToId, redactText(action.question).slice(0, 500), undefined, `question:${attemptId}:${action.question.slice(0, 60)}`);
+      await upsertTask(lead.id, "UNANSWERED_QUESTION", "Driver question needs a recruiter's answer", lead.assignedToId, redactText(action.question).slice(0, 500), undefined, `question:${attemptId}:${action.question.slice(0, 60)}`);
       await recordEvent({ leadId: lead.id, actorType: "AI", type: "UNANSWERED_QUESTION", message: `Question captured for recruiter (no approved answer): "${redactText(action.question).slice(0, 200)}"`, data: { reason: action.reason } });
       return { ok: true };
     }
@@ -644,7 +644,7 @@ export async function simulateCallJob(job: Job) {
   if (lead.state || lead.zip) known.home_location ??= [lead.state, lead.zip].filter(Boolean).join(" ");
 
   const brain = new RecruitingBrain({
-    companyName: company, recruiterName: "Molly", driverFirstName: lead.firstName, driverTimezone: lead.timezone,
+    companyName: company, recruiterName: "our recruiter", driverFirstName: lead.firstName, driverTimezone: lead.timezone,
     knownSlots: known, facts, disclosure: fill(settings.aiDisclosure),
     recordingNotice: settings.recordingEnabled ? settings.recordingNotice : null,
     voicemailMessage: fill(settings.voicemailMessage), uploadLinkTtlMinutes: settings.uploadLinkTtlMinutes, cdlBySms: settings.cdlBySms,

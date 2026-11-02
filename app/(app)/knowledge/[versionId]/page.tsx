@@ -62,7 +62,7 @@ export default async function VersionPage({ params, searchParams }: { params: Pr
       <form action={save}>
         <input type="hidden" name="versionId" value={v.id} />
         <Card>
-          <p className="small muted">Content is the exact wording the assistant may say. Keep it short and factual. Never include guarantees you cannot honor. Uncheck “confirmed” for anything still pending: the assistant will defer to Molly.</p>
+          <p className="small muted">Content is the exact wording the assistant may say. Keep it short and factual. Never include guarantees you cannot honor. Uncheck “confirmed” for anything still pending: the assistant will defer to the recruiter.</p>
           <table>
             <thead><tr><th>Key</th><th>Category</th><th>Title</th><th>Approved wording</th><th>Match keywords</th><th>Confirmed</th>{editable && <th>Remove</th>}</tr></thead>
             <tbody>

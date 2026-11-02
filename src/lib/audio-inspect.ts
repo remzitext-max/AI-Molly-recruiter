@@ -47,7 +47,7 @@ export function inspectAudio(buf: Buffer, fileName: string): AudioReport {
   if (r.clippedPct! > 0.1) issues.push(`${r.clippedPct}% of samples are clipped; re-record with lower input gain.`);
   if (r.peakDbfs! < -12) issues.push(`Recording is quiet (peak ${r.peakDbfs} dBFS); aim for peaks around -6 to -3 dBFS.`);
   if (r.silencePct! > 35) issues.push(`${r.silencePct}% of the file is near-silence; trim long pauses.`);
-  notes.push("This check cannot confirm that only Molly is speaking or that there is no background noise: listen to the full file before use.");
+  notes.push("This check cannot confirm that only one person is speaking or that there is no background noise: listen to the full file before use.");
   r.ok = issues.length === 0;
   return r;
 }

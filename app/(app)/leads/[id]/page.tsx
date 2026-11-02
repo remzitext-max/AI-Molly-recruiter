@@ -372,7 +372,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
       </Card>
 
       {lead.questions.length > 0 && (
-        <Card title="Driver questions for Molly">
+        <Card title="Driver questions for the recruiter">
           <table><tbody>
             {lead.questions.map((q) => (
               <tr key={q.id}><td>“{q.question}”</td><td><Badge v={q.status} /></td>

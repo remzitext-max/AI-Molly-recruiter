@@ -31,7 +31,7 @@ describe("lead sheet rows for the dashboards", () => {
       { phoneE164: "+1", tab: "Ben", status: "No answer", appliedAt: null },
       { phoneE164: "+1", tab: "Molly", status: "Application", appliedAt: null },
     ]);
-    expect(one).toEqual([{ phoneE164: "+1", tab: "Molly", status: "Application", appliedAt: at }]);
+    expect(one).toEqual([{ phoneE164: "+1", tab: "Molly", status: "Application", appliedAt: at, name: null, experience: null }]);
     expect(orderStatuses(["Hired", "Odd", "New", "Call back"])).toEqual(["New", "Call back", "Hired", "Odd"]);
   });
 
@@ -78,5 +78,31 @@ describe("booked recruiter calls", () => {
   it("opens RingCentral with the number typed in", () => {
     expect(ringCentralHref("+13145550101", false)).toBe("rcapp://r/call?number=13145550101");
     expect(ringCentralHref("+13145550101", true)).toBe("rcmobile://call?number=13145550101");
+  });
+});
+
+describe("the board", () => {
+  it("counts each status, marks stuck drivers and shows a recruiter only their tab", async () => {
+    const { loadBoard, toneOf } = await import("@/lib/board");
+    const base = await seedBase();
+    const now = new Date("2026-11-02T20:00:00Z"), day = 86400_000;
+    await saveSheetRows(base.org.id, [
+      { phoneE164: "+12145550101", tab: "Molly", status: "Need to bring", appliedAt: new Date(now.getTime() - 9 * day), name: "Ken Wu", experience: "3 years" },
+      { phoneE164: "+12145550102", tab: "Molly", status: "Need to bring", appliedAt: new Date(now.getTime() - 1 * day) },
+      { phoneE164: "+12145550103", tab: "Alex", status: "Application", appliedAt: new Date(now.getTime() - 2 * day) },
+      { phoneE164: "+12145550104", tab: "Pool", status: "New", appliedAt: new Date(now.getTime() - 2 * day) },
+      { phoneE164: "+12145550105", tab: "Pool", status: "New", appliedAt: new Date(now.getTime() - 60 * day) },
+      { phoneE164: "+12145550106", tab: "Molly", status: "No answer", appliedAt: now },
+    ], new Date(now.getTime() - 9 * day));
+    const admin = await db.user.findFirstOrThrow({ where: { orgId: base.org.id, role: "ADMIN" } });
+    const all = await loadBoard(admin, [base.org.id], undefined, now);
+    const col = (s: string, b = all) => b.columns.find((c) => c.status === s)!;
+    expect(col("Need to bring").drivers.map((d) => [d.name, d.tone])).toEqual([["Ken Wu", "late"], ["(no name)", "ok"]]);
+    expect(col("Need to bring").lateText).toBe("1 stuck 5d+");
+    expect(col("New").drivers).toHaveLength(1); // the 60-day-old one is not new any more
+    expect(col("Application").drivers[0].recruiterId).toBe(base.alex.id);
+    const mine = await loadBoard(base.molly, [base.org.id], undefined, now);
+    expect(mine.columns.flatMap((c) => c.drivers).map((d) => d.phone).sort()).toEqual(["+12145550101", "+12145550102"]);
+    expect(toneOf("Need approval", 2.5 * day)).toBe("warn");
   });
 });

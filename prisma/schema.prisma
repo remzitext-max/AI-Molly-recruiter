@@ -1,4 +1,4 @@
-// Molly AI recruiting assistant - data model.
+// Crystal AI recruiting assistant - data model.
 // Pipeline status, call-attempt status, document status and contact permission
 // are deliberately separate so a failed call never erases application progress.
 
@@ -221,13 +221,13 @@ model SystemSetting {
   missedCallSmsText          String    @default("{company} recruiting team: Hi {first}, it's {persona}. We just tried to call you about the truck driving job you applied for. When is a good time to call you back? Reply STOP to opt out.")
   /// Optional second missed-call text sent right after the first (the offer). Empty = none.
   missedCallSmsOffer         String    @default("")
-  /// One line per recruiter sheet tab: "Molly = @username". No @username: the card says "Before processed by Molly".
+  /// One line per recruiter sheet tab: "Ben = @username". No @username: the card says "Before processed by Ben".
   recruiterTelegram          String    @default("")
   recruiterTransfer          String    @default("")
   /// Fit score rules (see src/lib/fit-score.ts); empty = the company's published requirements.
   fitRules                   Json?
-  aiDisclosure               String    @default("Hi, this is the AI recruiting assistant for {company}, calling on behalf of Molly, one of our recruiters.")
-  voicemailMessage           String    @default("Hi, this is the AI recruiting assistant for {company}, calling for Molly about a truck driving position you applied for. You can reach Molly at {recruiterPhone}. Thanks!")
+  aiDisclosure               String    @default("Hi, this is the AI recruiting assistant for {company}, calling on behalf of our recruiting team.")
+  voicemailMessage           String    @default("Hi, this is the AI recruiting assistant for {company}, calling about a truck driving position you applied for. You can reach our recruiting team at {recruiterPhone}. Thanks!")
   updatedAt                  DateTime  @updatedAt
 }
 
@@ -680,9 +680,14 @@ model SheetRow {
   status    String
   appliedAt DateTime?
   seenAt    DateTime  @default(now())
+  name       String?
+  experience String?
+  /// When the row got its current status (as first seen by the sync).
+  statusAt   DateTime?
 
   @@unique([orgId, phoneE164])
   @@index([orgId, appliedAt])
+  @@index([orgId, status])
 }
 
 /// A driver a recruiter is bringing in (sheet status Need to bring / Need approval / Application),
