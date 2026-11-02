@@ -88,17 +88,18 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
   const talkedHref = (group?: string) => `/talked?${new URLSearchParams({ since: p.since.toISOString(), until: p.until.toISOString(), who: "all", ...(view.team !== "all" && view.owner ? { team: view.team } : {}), ...(group ? { group } : {}) })}`;
 
   // The owner's row per team.
-  const teamRows = view.owner && view.team === "all" ? await Promise.all(view.orgs.map(async (o) => {
+  const teamRows = view.owner && view.team === "all" ? view.orgs.map((o) => {
     const t = tabs.filter((x) => tabsOf(x, o.id));
-    const orgScope = teamsScope([o.id], config.mode === "demo");
+    const mine = rangeLeads.filter((l) => l.orgId === o.id);
     return {
       ...o,
-      leads: rangeLeads.filter((l) => l.orgId === o.id).length,
-      crystal: (await talkedDrivers(orgScope, range)).length,
+      leads: mine.length,
+      called: mine.filter((l) => l.calls[0]).length,
+      crystal: mine.filter((l) => l.calls.some(talked)).length,
       sheet: sum(t, (x) => x.total), reached: sum(t, talkedBy), application: sum(t, (x) => countOf(x, "Application")), hired: sum(t, (x) => countOf(x, "Hired", "Our driver – working")),
       onProcess: onProcess.find((x) => x.orgId === o.id)?._count ?? 0,
     };
-  })) : [];
+  }) : [];
 
   const placedMins = chartCalls.filter((c) => c.createdAt >= p.since && c.createdAt < p.until && c.status === "COMPLETED")
     .reduce((s, c) => s + (c.startedAt && c.endedAt ? Math.max(1, Math.ceil((c.endedAt.getTime() - c.startedAt.getTime()) / 60000)) : 1), 0);
@@ -110,12 +111,15 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
           <Card title="Teams" flush>
             <div className="table-scroll">
               <table>
-                <thead><tr><th>Team</th><th className="num">New leads</th><th className="num">Talked to Crystal</th><th className="num">Sheet leads</th><th className="num">Reached by recruiter</th><th className="num">On process now</th><th className="num">Application</th><th className="num">Hired</th></tr></thead>
+                <thead><tr><th>Team</th><th className="num">New leads</th><th className="num" title="New leads of this period that Crystal called">Called by Crystal</th><th className="num" title="New leads of this period that talked with Crystal">Talked to Crystal</th><th className="num">Sheet leads</th><th className="num">Reached by recruiter</th><th className="num">On process now</th><th className="num">Application</th><th className="num">Hired</th></tr></thead>
                 <tbody>
                   {teamRows.map((t) => (
                     <tr key={t.id} data-href={`/dashboard?team=${t.id}`} className="clickable">
                       <td><strong>{t.name}</strong></td>
-                      <td className="num">{t.leads}</td><td className="num">{t.crystal}</td><td className="num">{t.sheet}</td>
+                      <td className="num">{t.leads}</td>
+                      <td className="num">{t.called} <span className="muted">{pct(t.called, t.leads)}%</span></td>
+                      <td className="num">{t.crystal} <span className="muted">{pct(t.crystal, t.leads)}%</span></td>
+                      <td className="num">{t.sheet}</td>
                       <td className="num">{t.reached} <span className="muted">{pct(t.reached, t.sheet)}%</span></td>
                       <td className="num">{t.onProcess}</td><td className="num">{t.application}</td><td className="num">{t.hired}</td>
                     </tr>
@@ -123,7 +127,7 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
                 </tbody>
               </table>
             </div>
-            <p className="small muted" style={{ margin: "8px 14px 12px" }}>Sheet columns count the drivers who applied in this period, by their status in each team&apos;s lead sheet now. Click a team for its dashboard.</p>
+            <p className="small muted" style={{ margin: "8px 14px 12px" }}>Crystal columns count this period&apos;s new leads (percent of new leads). Sheet columns count the drivers who applied in this period, by their status in each team&apos;s lead sheet now. Click a team for its dashboard.</p>
           </Card>
         </div>
       )}
