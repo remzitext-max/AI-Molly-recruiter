@@ -40,7 +40,7 @@ export default async function Board({ searchParams }: { searchParams: Promise<Re
       )}
       <BoardStrip columns={columns} showRecruiter={manager} />
       <p className="small muted" style={{ marginTop: 14 }}>
-        Click a status to see its drivers, then a driver for their profile. Red = stuck (New untouched 24h+, Call back 2 days+, Need to bring 5 days+, Need approval 3 days+, Application 7 days+), yellow = getting slow. New shows the last 30 days; Hired the last 30 days.
+        Click a status to see its drivers, then a driver for their profile. Red = stuck (New untouched 24h+, Call back 2 days+, Need to bring 5 days+, Need approval 3 days+, Application 7 days+), yellow = getting slow. New, Call back, Need to talk and Need teammate show drivers who applied in the last 30 days; Hired the last 30 days.
       </p>
       <LeadPopup />
     </>

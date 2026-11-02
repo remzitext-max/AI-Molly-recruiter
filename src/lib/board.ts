@@ -21,6 +21,10 @@ export const BOARD_COLUMNS = [
 
 // New leads older than this are not "new" any more; Hired shows the last 30 days.
 const NEW_WINDOW = 30 * D, HIRED_WINDOW = 30 * D;
+// Call back / Need to talk / Need teammate rows of drivers who applied over 30 days ago are
+// old backlog, not today's work (the sheet keeps hundreds of them).
+const TALK_WINDOW = 30 * D;
+const TALK = new Set(["Call back", "Need to talk", "Need teammate"]);
 
 export type Tone = "ok" | "warn" | "late";
 export interface BoardDriver {
@@ -71,6 +75,7 @@ export async function loadBoard(user: Pick<User, "id" | "role">, orgIds: string[
     const ageMs = Math.max(0, now.getTime() - since.getTime());
     if (r.status === "New" && now.getTime() - (r.appliedAt ?? since).getTime() > NEW_WINDOW) continue;
     if (r.status === "Hired" && ageMs > HIRED_WINDOW) continue;
+    if (TALK.has(r.status) && now.getTime() - (r.appliedAt ?? since).getTime() > TALK_WINDOW) continue;
     const o = owner.get(`${r.orgId}|${r.tab.toLowerCase()}`) ?? null;
     const l = lead.get(`${r.orgId}|${r.phoneE164}`);
     const name = r.name || (l ? [l.firstName, l.lastName].filter(Boolean).join(" ") : "") || "(no name)";
