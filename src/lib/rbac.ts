@@ -15,8 +15,17 @@ export function leadScope(user: Pick<User, "id" | "role" | "orgId">): Prisma.Lea
   return user.role === "ADMIN" ? { orgId: user.orgId } : { orgId: user.orgId, assignedToId: user.id };
 }
 
+/**
+ * What a user may open and read: the owner (an admin of the main company) every team's
+ * leads, so the all-teams dashboards, Board and search open any driver; others leadScope.
+ */
+export async function readScope(user: Pick<User, "id" | "role" | "orgId">): Promise<Prisma.LeadWhereInput> {
+  if (user.role === "ADMIN" && (await db.organization.findUnique({ where: { id: user.orgId }, select: { isMain: true } }))?.isMain) return {};
+  return leadScope(user);
+}
+
 export async function canAccessLead(user: Pick<User, "id" | "role" | "orgId">, leadId: string) {
-  const lead = await db.lead.findFirst({ where: { id: leadId, ...leadScope(user) }, select: { id: true } });
+  const lead = await db.lead.findFirst({ where: { id: leadId, ...(await readScope(user)) }, select: { id: true } });
   return !!lead;
 }
 

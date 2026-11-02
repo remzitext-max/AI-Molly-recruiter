@@ -4,6 +4,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Icon } from "./icons";
+import { TopSearch } from "./top-search";
 
 const KEY = "crystal-nav-collapsed";
 
@@ -42,10 +43,7 @@ export function Shell({ nav, right, children }: { nav: ReactNode; right: ReactNo
           <button type="button" className="menu-btn" onClick={toggle} aria-label={collapsed ? "Open menu" : "Collapse menu"} title={collapsed ? "Open menu" : "Collapse menu"}>
             <Icon name="menu" size={20} />
           </button>
-          <form action="/leads" method="get" className="search top-search">
-            <Icon name="search" size={16} />
-            <input name="q" placeholder="Search drivers by name or phone…" aria-label="Search leads" />
-          </form>
+          <TopSearch />
           <div className="topbar-right">{right}</div>
         </div>
         {children}

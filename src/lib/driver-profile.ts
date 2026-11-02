@@ -2,7 +2,7 @@
 // written to the downloadable PDF, so both always say the same thing.
 import { DateTime } from "luxon";
 import { db } from "./db";
-import { leadScope } from "./rbac";
+import { leadScope, readScope } from "./rbac";
 import { config } from "./config";
 import { getSettings } from "./settings";
 import { answersOf, fitRulesFrom, fitScore, fitTone } from "./fit-score";
@@ -68,7 +68,7 @@ export function splitEmployers(text: string | null | undefined): string[] {
 /** The profile of one lead the viewer may see, or null. */
 export async function loadDriverProfile(user: Viewer, id: string): Promise<DriverProfile | null> {
   const l = await db.lead.findFirst({
-    where: { id, ...leadScope(user) },
+    where: { id, ...(await readScope(user)) },
     include: {
       assignedTo: true, sourceRecords: true, screening: true,
       calls: { orderBy: { createdAt: "desc" }, take: 20 },

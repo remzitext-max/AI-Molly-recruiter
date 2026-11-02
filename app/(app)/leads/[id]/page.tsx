@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { isOwner, requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { assertAdmin, assertLeadAccess, leadScope } from "@/lib/rbac";
+import { assertAdmin, assertLeadAccess, leadScope, readScope } from "@/lib/rbac";
 import { assignLead, transferLead } from "@/lib/assignment";
 import { optOutLead, scheduleLeadCall, stopAiCalls } from "@/lib/leads";
 import { deleteDocument } from "@/lib/documents";
@@ -233,7 +233,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
   const user = await requireUser();
   const owner = await isOwner(user);
   const lead = await db.lead.findFirst({
-    where: { id, ...leadScope(user) },
+    where: { id, ...(await readScope(user)) },
     include: {
       assignedTo: true, campaign: true, sourceRecords: true, permissions: { orderBy: { createdAt: "desc" } },
       screening: { orderBy: { key: "asc" } }, calls: { orderBy: { createdAt: "desc" } }, messages: { orderBy: { createdAt: "desc" } },
