@@ -27,7 +27,7 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
     db.lead.groupBy({ by: ["assignedToId"], where: { ...scope, createdAt: p.range }, _count: true }),
     talkedDrivers(scope, p.range),
     scheduledByRecruiter(view.orgIds),
-    Promise.all(view.orgIds.map((orgId) => loadOnProcess({ id: user.id, role: "ADMIN", orgId }))).then((x) => x.flat()),
+    Promise.all(view.orgIds.map((orgId) => loadOnProcess({ id: user.id, role: "ADMIN", orgId }).then((x) => x.map((d) => ({ ...d, orgId }))))).then((x) => x.flat()),
   ]);
   const teamName = new Map(view.orgs.map((o) => [o.id, o.name]));
   const rows = users.map((u) => {
@@ -35,7 +35,7 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
     const sum = (f: (x: TabStats) => number) => t.reduce((n, x) => n + f(x), 0);
     const sheet = sum((x) => x.total), reached = sum(talkedBy);
     return {
-      ...u, tab: t.map((x) => x.tab).join(", "), sheet, reached,
+      ...u, tab: t.map((x) => x.tab).join(", "), noLogin: false, sheet, reached,
       noAnswer: sum((x) => countOf(x, "No answer", "New")),
       notInterested: sum((x) => countOf(x, "Not interested", "Not qualified", "Declined", "SAP", "Changed his mind")),
       application: sum((x) => countOf(x, "Application")), hired: sum((x) => countOf(x, "Hired", "Our driver – working")),
@@ -44,9 +44,18 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
       onProcess: process.filter((d) => d.recruiterId === u.id).length,
       booked: booked.get(u.id) ?? { open: 0, late: 0 },
     };
-  }).filter((r) => r.role === "RECRUITER" || r.sheet || r.leads)
-    .sort((a, b) => b.hired - a.hired || b.application - a.application || b.reached - a.reached || b.sheet - a.sheet);
-  const unowned = tabs.filter((t) => !t.recruiterId);
+  }).filter((r) => r.role === "RECRUITER" || r.sheet || r.leads);
+  // A tab in the lead sheet with no login here still is a recruiter: show their sheet numbers.
+  const unowned = tabs.filter((t) => !t.recruiterId && !/pool/i.test(t.tab));
+  for (const t of unowned) {
+    rows.push({
+      id: `tab:${t.orgId}:${t.tab}`, name: t.tab, role: "RECRUITER", orgId: t.orgId, tab: "", noLogin: true, sheet: t.total, reached: talkedBy(t),
+      noAnswer: countOf(t, "No answer", "New"), notInterested: countOf(t, "Not interested", "Not qualified", "Declined", "SAP", "Changed his mind"),
+      application: countOf(t, "Application"), hired: countOf(t, "Hired", "Our driver – working"),
+      leads: 0, crystal: 0, onProcess: process.filter((d) => d.orgId === t.orgId && d.tab?.toLowerCase() === t.tab.toLowerCase()).length, booked: { open: 0, late: 0 },
+    });
+  }
+  rows.sort((a, b) => b.hired - a.hired || b.application - a.application || b.reached - a.reached || b.sheet - a.sheet);
   const several = view.orgIds.length > 1;
 
   const tools = (
@@ -84,19 +93,19 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} {...(r.orgId === user.orgId ? { "data-href": `/leads?assigned=${r.id}`, className: "clickable" } : {})}>
-                  <td><div className="person"><div className="avatar">{initialsOf(r.name)}</div><div><strong>{r.name}</strong><div className="small muted">{r.tab ? `${r.tab} tab` : "no sheet tab found"}</div></div></div></td>
+                <tr key={r.id} {...(!r.noLogin && r.orgId === user.orgId ? { "data-href": `/leads?assigned=${r.id}`, className: "clickable" } : {})}>
+                  <td><div className="person"><div className="avatar">{initialsOf(r.name)}</div><div><strong>{r.name}</strong><div className="small muted">{r.noLogin ? "sheet tab only · no login on the site" : r.tab ? `${r.tab} tab` : "no sheet tab found"}</div></div></div></td>
                   {several && <td className="small">{teamName.get(r.orgId)}</td>}
                   <td className="num"><strong>{r.sheet}</strong></td>
                   <td className="num">{r.reached} <span className="muted">{pct(r.reached, r.sheet)}%</span></td>
                   <td className="num">{r.noAnswer}</td>
                   <td className="num">{r.notInterested}</td>
-                  <td className="num">{r.leads}</td>
-                  <td className="num">{r.crystal}</td>
+                  <td className="num">{r.noLogin ? "—" : r.leads}</td>
+                  <td className="num">{r.noLogin ? "—" : r.crystal}</td>
                   <td className="num">{r.onProcess}</td>
                   <td className="num">{r.application}</td>
                   <td className="num"><strong>{r.hired}</strong></td>
-                  <td className="num">{r.booked.open}{r.booked.late > 0 && <div className="small bad-text">{r.booked.late} overdue</div>}</td>
+                  <td className="num">{r.noLogin ? "—" : r.booked.open}{r.booked.late > 0 && <div className="small bad-text">{r.booked.late} overdue</div>}</td>
                 </tr>
               ))}
               {!rows.length && <tr><td colSpan={several ? 12 : 11} className="muted">No recruiters yet. Add them on the Users page.</td></tr>}
@@ -105,7 +114,7 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
         </div>
         <p className="small muted" style={{ margin: "8px 14px 12px" }}>
           Sheet columns are the recruiter&apos;s own tab in the lead sheet (read every 15 minutes), counting drivers who applied in this period by their status now. Click a recruiter of your team for their leads.
-          {unowned.length > 0 && <> Tabs without a recruiter login: {unowned.map((t) => `${t.tab} (${t.total})`).join(", ")}.</>}
+          {unowned.length > 0 && <> Recruiters marked &quot;no login&quot; have a tab in the sheet but no login here, so Crystal&apos;s numbers and booked calls can&apos;t be counted for them; add them on the Users page.</>}
         </p>
       </Card>
     </>
