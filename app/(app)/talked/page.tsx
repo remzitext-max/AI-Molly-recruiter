@@ -4,7 +4,8 @@ import { config } from "@/lib/config";
 import { Card, PageHead, fmt, initialsOf } from "@/components/ui";
 import { LeadPopup } from "@/components/lead-popup";
 import { statusTone } from "@/lib/recruiter-status";
-import { dashboardScope, groupCounts, talkedDrivers } from "@/lib/talked";
+import { dashboardScope, groupCounts, talkedDrivers, teamsScope } from "@/lib/talked";
+import { teamView } from "@/lib/dashboard-view";
 
 const day = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Chicago" });
 
@@ -15,10 +16,13 @@ export default async function Talked({ searchParams }: { searchParams: Promise<R
   const until = sp.until && !isNaN(Date.parse(sp.until)) ? new Date(sp.until) : new Date();
   const since = sp.since && !isNaN(Date.parse(sp.since)) ? new Date(sp.since) : new Date(until.getTime() - 7 * 86400_000);
   const mine = (sp.who ?? (user.role === "ADMIN" ? "all" : "mine")) === "mine";
-  const all = await talkedDrivers(dashboardScope(user, mine, config.mode === "demo"), { gte: since, lt: until });
+  // The owner's "all" covers every team, like their dashboard (or the team picked there).
+  const view = user.role === "ADMIN" && !mine ? await teamView(user, sp.team) : null;
+  const scope = view?.owner ? teamsScope(view.orgIds, config.mode === "demo") : dashboardScope(user, mine, config.mode === "demo");
+  const all = await talkedDrivers(scope, { gte: since, lt: until });
   const groups = groupCounts(all);
   const rows = sp.group ? all.filter((d) => d.group === sp.group) : all;
-  const href = (group?: string) => `/talked?${new URLSearchParams({ since: since.toISOString(), until: until.toISOString(), who: mine ? "mine" : "all", ...(group ? { group } : {}) })}`;
+  const href = (group?: string) => `/talked?${new URLSearchParams({ since: since.toISOString(), until: until.toISOString(), who: mine ? "mine" : "all", ...(sp.team ? { team: sp.team } : {}), ...(group ? { group } : {}) })}`;
   return (
     <>
       <PageHead

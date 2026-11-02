@@ -9,6 +9,7 @@ import { BASIC_FIELDS, PROFILE_FIELDS } from "@/lib/profile-fields";
 import type { DriverProfile } from "@/lib/driver-profile";
 import { DriverProfileView } from "./driver-profile-view";
 import { Icon } from "./icons";
+import { CallNow } from "./call-now";
 
 type Loaded = DriverProfile & { options: { statuses: string[]; recruiters: { id: string; name: string }[] } };
 
@@ -83,10 +84,15 @@ export function LeadPopup() {
     <div className="modal-backdrop dp-backdrop" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div className="dp-modal" role="dialog" aria-modal="true" aria-label="Driver profile">
         <div className="dp-bar">
-          {p && !editing && <button type="button" className="secondary" onClick={() => setEditing(true)}>Edit profile</button>}
-          <a className="btn secondary" href={`/api/leads/${id}/pdf`}><Icon name="download" size={16} />Download PDF</a>
-          <a className="btn secondary" href={`/leads/${id}`}>Open full page</a>
-          <button type="button" className="secondary dp-close" onClick={close} aria-label="Close">✕</button>
+          <div className="dp-bar-actions">
+            {p && <CallNow phone={p.phone} />}
+            {p && !editing && <button type="button" className="secondary" onClick={() => setEditing(true)}>Edit profile</button>}
+            <a className="btn secondary" href={`/api/leads/${id}/pdf`}><Icon name="download" size={16} />Download PDF</a>
+            <a className="btn secondary" href={`/leads/${id}`}>Open full page</a>
+          </div>
+          <button type="button" className="dp-close" onClick={close} aria-label="Close" title="Close (Esc)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
         </div>
         <div className="dp-body">
           {error ? <p className="alert error">{error}</p> : !p ? <p className="muted">Loading…</p> : (

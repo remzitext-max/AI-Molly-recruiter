@@ -66,7 +66,7 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
   const keep = (v: string) => { const q = new URLSearchParams(Object.entries(sp).filter(([k, x]) => x && k !== "view" && k !== "pipeline") as [string, string][]); if (v) q.set("view", v); const t = q.toString(); return t ? `/leads?${t}` : "/leads"; };
   return (
     <>
-      <PageHead title="Leads" sub="Every driver Crystal is working, newest activity first. Click a driver to see the profile and download it as PDF." right={<div className="row"><Link className="btn" href="/leads/create"><Icon name="plus" size={16} />Create form</Link>{owner && <Link className="btn secondary" href="/leads/new">Add lead</Link>}</div>} />
+      <PageHead title="Leads" sub={`${user.role === "ADMIN" ? "Every driver of your team" : "Your drivers"}, newest activity first. Click a driver to see the profile and download it as PDF.`} right={<div className="row"><Link className="btn" href="/leads/create"><Icon name="plus" size={16} />Create form</Link>{owner && <Link className="btn secondary" href="/leads/new">Add lead</Link>}</div>} />
       <div className="tabs">
         {VIEWS.map((v) => <Link key={v.key} href={keep(v.key)} className={`tab ${!sp.pipeline && v.key === view.key ? "on" : ""}`}>{v.label}<span className="c">{countOf(v)}</span></Link>)}
       </div>
@@ -77,18 +77,19 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
           <select name="pipeline" defaultValue={sp.pipeline ?? ""}><option value="">Any pipeline status</option>{PIPE.map((p) => <option key={p} value={p}>{p.replace(/_/g, " ").toLowerCase()}</option>)}</select>
           <select name="status" defaultValue={sp.status ?? ""}><option value="">Any recruiter status</option>{RECRUITER_STATUSES.map((p) => <option key={p} value={p}>{p}</option>)}</select>
           <select name="docs" defaultValue={sp.docs ?? ""}><option value="">Any document status</option>{DOCS.map((p) => <option key={p} value={p}>{p.toLowerCase()}</option>)}</select>
-          <select name="assigned" defaultValue={sp.assigned ?? ""}>
-            <option value="">Anyone</option><option value="me">Assigned to me</option>
-            {user.role === "ADMIN" && <option value="none">Unassigned</option>}
-            {recruiters.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
+          {user.role === "ADMIN" && (
+            <select name="assigned" defaultValue={sp.assigned ?? ""}>
+              <option value="">Anyone</option><option value="me">Assigned to me</option><option value="none">Unassigned</option>
+              {recruiters.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          )}
           {config.mode === "demo" && <select name="data" defaultValue={sp.data ?? ""}><option value="">Demo + live</option><option value="demo">Demo only</option><option value="live">Live only</option></select>}
           <button type="submit">Filter</button>
         </form>
       </Card>
       <Card flush>
         <table>
-          <thead><tr><th>Lead</th><th>Phone</th><th>Fit</th><th>Pipeline</th><th>Last call</th><th>Documents</th><th>Assigned</th><th>Next contact</th></tr></thead>
+          <thead><tr><th>Lead</th><th>Phone</th><th>Fit</th><th>Pipeline</th><th>Last call</th><th>Documents</th>{user.role === "ADMIN" && <th>Assigned</th>}<th>Next contact</th></tr></thead>
           <tbody>
             {leads.map((l) => (
               <tr key={l.id} data-profile={l.id} className="clickable">
@@ -98,11 +99,11 @@ export default async function Leads({ searchParams }: { searchParams: Promise<Re
                 <td>{l.recruiterStatus && <><span className={`badge ${statusTone(l.recruiterStatus)}`}>{l.recruiterStatus}</span> </>}<Badge v={l.pipelineStatus} />{l.hireStage !== "NONE" && <> <Badge v={HIRE_LABEL[l.hireStage]} tone={l.hireStage === "HIRED" ? "ok" : ["NOT_HIRED", "SAFETY_DECLINED"].includes(l.hireStage) ? "bad" : "info"} /></>}{l.queueReason && <div className="small muted">{l.queueReason}</div>}</td>
                 <td>{l.calls[0] ? <><Badge v={l.calls[0].status} /> <span className="small muted">{l.calls[0].outcome?.toLowerCase().replace(/_/g, " ")}</span>{endedBy(l.calls[0]) && <div className="small muted">{endedBy(l.calls[0])}</div>}</> : <span className="muted">—</span>}</td>
                 <td><Badge v={l.documentStatus} /></td>
-                <td className="small">{l.assignedTo?.name ?? <span className="muted">unassigned</span>}</td>
+                {user.role === "ADMIN" && <td className="small">{l.assignedTo?.name ?? <span className="muted">unassigned</span>}</td>}
                 <td className="small">{fmt(l.nextContactAt)}</td>
               </tr>
             ))}
-            {!leads.length && <tr><td colSpan={8} className="muted">No leads match.</td></tr>}
+            {!leads.length && <tr><td colSpan={user.role === "ADMIN" ? 8 : 7} className="muted">No leads match.</td></tr>}
           </tbody>
         </table>
       </Card>

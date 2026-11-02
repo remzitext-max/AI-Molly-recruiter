@@ -19,6 +19,7 @@ import type { Mapping } from "./import";
 import { copySheetStatus } from "./recruiter-status";
 import { assignFromSheetTabs } from "./assignment";
 import { processRowsOf, saveProcessRows } from "./on-process";
+import { saveSheetRows, sheetRowsOf } from "./sheet-rows";
 import type { SheetSnapshot } from "../adapters/types";
 
 export const HIRE_STAGES: HireStage[] = ["NONE", "PROCESSING", "APPLICATION", "ORIENTATION", "HIRED", "SAFETY_DECLINED", "NOT_HIRED"];
@@ -109,7 +110,10 @@ export async function syncHiringFromSheet(now = new Date()) {
   if (meta) sent += await reportOtherTeamSheets(now);
   // The "On process" page: every recruiter tab's drivers on their way in, called by Crystal or not.
   const main = await db.organization.findFirst({ where: { isMain: true }, orderBy: { createdAt: "asc" }, select: { id: true } });
-  if (main && read.length) await saveProcessRows(main.id, read.flatMap(({ title, snap }) => processRowsOf(title, snap!.headers, snap!.rows, normalizePhone)), now);
+  if (main && read.length) {
+    await saveProcessRows(main.id, read.flatMap(({ title, snap }) => processRowsOf(title, snap!.headers, snap!.rows, normalizePhone)), now);
+    await saveSheetRows(main.id, read.flatMap(({ title, snap }) => sheetRowsOf(title, snap!.headers, snap!.rows, normalizePhone)), now);
+  }
   const t = await readTeamSheets(latest, now);
   tabs += t.tabs; updated += t.updated;
   const known = new Map((await db.sheetLeadStatus.findMany()).map((r) => [r.phoneE164, r]));
@@ -143,7 +147,10 @@ async function readTeamSheets(latest: Map<string, { tab: string; status: string 
     const id = org.sheetSpreadsheetId!;
     const list = await readAllTabs(id).catch((e) => { log.warn("team sheet not readable (share it with the service account)", { team: org.name, error: String(e) }); return []; });
     const theirs = new Set((await db.lead.findMany({ where: { orgId: org.id, isDemo: false }, select: { phoneE164: true } })).map((l) => l.phoneE164));
-    if (list.length) await saveProcessRows(org.id, list.flatMap(({ title, snap }) => (snap ? processRowsOf(title, snap.headers, snap.rows, normalizePhone) : [])));
+    if (list.length) {
+      await saveProcessRows(org.id, list.flatMap(({ title, snap }) => (snap ? processRowsOf(title, snap.headers, snap.rows, normalizePhone) : [])));
+      await saveSheetRows(org.id, list.flatMap(({ title, snap }) => (snap ? sheetRowsOf(title, snap.headers, snap.rows, normalizePhone) : [])), now);
+    }
     for (const { title, snap } of list) {
       const phoneI = snap?.headers.findIndex((h) => /^phone$/i.test(h)) ?? -1;
       const statusI = snap?.headers.findIndex((h) => /^status$/i.test(h)) ?? -1;

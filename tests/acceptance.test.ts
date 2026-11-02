@@ -319,7 +319,7 @@ describe("7/8. secure CDL upload and access", () => {
 });
 
 describe("9. recruiter permissions", () => {
-  it("recruiters see every candidate of their company, not another company's", async () => {
+  it("recruiters see only their own candidates, managers the whole company", async () => {
     const base = await seedBase();
     const a = (await addLead(base)) as { leadId: string };
     const b = (await addLead(base)) as { leadId: string };
@@ -327,11 +327,14 @@ describe("9. recruiter permissions", () => {
     const lb = await db.lead.findUniqueOrThrow({ where: { id: b.leadId } });
     expect(la.assignedToId).not.toBe(lb.assignedToId); // round robin
     const mollyLeads = await db.lead.findMany({ where: leadScope(base.molly) });
-    expect(mollyLeads.length).toBe(2);
+    expect(mollyLeads.length).toBe(1);
+    expect(await db.lead.count({ where: leadScope(base.admin) })).toBe(2);
     const mollyOwns = la.assignedToId === base.molly.id ? la.id : lb.id;
     const notMine = mollyOwns === la.id ? lb.id : la.id;
-    expect(await canAccessLead(base.molly, notMine)).toBe(true);
-    expect(await canAccessLead({ ...base.molly, orgId: "another-company" }, notMine)).toBe(false);
+    expect(await canAccessLead(base.molly, mollyOwns)).toBe(true);
+    expect(await canAccessLead(base.molly, notMine)).toBe(false);
+    expect(await canAccessLead(base.admin, notMine)).toBe(true);
+    expect(await canAccessLead({ ...base.molly, orgId: "another-company" }, mollyOwns)).toBe(false);
   });
 });
 

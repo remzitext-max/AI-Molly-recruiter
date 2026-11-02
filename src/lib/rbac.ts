@@ -7,12 +7,12 @@ export class ForbiddenError extends Error {
 }
 
 /**
- * Prisma filter restricting leads to what this user may see: every lead of the company,
- * for recruiters too (the team shares one lead sheet, so any recruiter may pick up any
- * driver). Admin-only pages (Settings, Users, Facebook ads) stay admin-only.
+ * Prisma filter restricting leads to what this user may see: a manager sees every lead of
+ * their team, a recruiter only the drivers assigned to them (their sheet tab), so nobody
+ * else's leads get in the way. Admin-only pages (Settings, Users, Facebook ads) stay admin-only.
  */
 export function leadScope(user: Pick<User, "id" | "role" | "orgId">): Prisma.LeadWhereInput {
-  return { orgId: user.orgId };
+  return user.role === "ADMIN" ? { orgId: user.orgId } : { orgId: user.orgId, assignedToId: user.id };
 }
 
 export async function canAccessLead(user: Pick<User, "id" | "role" | "orgId">, leadId: string) {

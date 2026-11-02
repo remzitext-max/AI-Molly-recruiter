@@ -670,6 +670,21 @@ model SheetLeadStatus {
   seenAt    DateTime @default(now())
 }
 
+/// Every row of every tab of a team's lead sheet (phone, tab, status, applied date), read every
+/// 15 minutes: the dashboards count the recruiters' statuses exactly as the sheet shows them.
+model SheetRow {
+  id        String    @id @default(cuid())
+  orgId     String
+  phoneE164 String
+  tab       String
+  status    String
+  appliedAt DateTime?
+  seenAt    DateTime  @default(now())
+
+  @@unique([orgId, phoneE164])
+  @@index([orgId, appliedAt])
+}
+
 /// A driver a recruiter is bringing in (sheet status Need to bring / Need approval / Application),
 /// read from every recruiter tab every 15 minutes, whether or not Crystal ever called them.
 model SheetDriver {

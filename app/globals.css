@@ -355,3 +355,31 @@ button.secondary.is-busy::after { border-color: #cbd5e1; border-top-color: var(-
 .talked-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); column-gap: 28px; }
 .talked-groups a.hbar { color: inherit; text-decoration: none; border-radius: 6px; }
 .talked-groups a.hbar:hover { background: var(--surface-2, rgba(0,0,0,.03)); }
+
+/* Driver profile popup: actions on the left of the bar, a quiet round close button on the right. */
+.dp-bar { justify-content: space-between; align-items: center; flex-wrap: nowrap; gap: 12px; padding: 12px 12px 8px 24px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.dp-bar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.dp-close { width: 38px; height: 38px; padding: 0; border-radius: 50%; border: 0; background: transparent; color: var(--muted); display: grid; place-items: center; flex: none; box-shadow: none; }
+.dp-close:hover { background: #eef1f6; color: var(--text); box-shadow: none !important; }
+.dp-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.call-now { background: #059669; border-color: #059669; color: #fff; }
+.call-now:hover { background: #047857 !important; color: #fff; box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3) !important; }
+@media (max-width: 860px) { .dp-bar { padding: 10px 8px 8px 14px; align-items: flex-start; } }
+
+/* A recruiter's booked calls at the top of their dashboard. */
+.calls-due { background: #fff; border: 1px solid #f5c26b; border-left: 4px solid var(--amber); border-radius: 14px; padding: 16px 18px; margin-bottom: 18px; box-shadow: var(--shadow); }
+.calls-due.empty { border-color: var(--border); border-left-color: var(--border-strong); }
+.calls-due-head { display: flex; align-items: center; gap: 12px; }
+.calls-due-head h2 { margin: 0; font-size: 17px; }
+.calls-due .chip { background: #fef3c7; color: var(--amber); }
+.calls-due.empty .chip { background: #eef1f6; color: var(--muted); }
+.call-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 0 2px; margin-top: 12px; border-top: 1px solid var(--border); }
+.call-row.late .avatar { background: var(--bad-weak); color: var(--bad); }
+
+/* Wide tables (the recruiters' sheet statuses) scroll sideways inside their card. */
+.table-scroll { overflow-x: auto; }
+.board th .badge { white-space: nowrap; }
+.board td, .board th { white-space: nowrap; }
+.group-row td { background: #f6f8fc; font-weight: 600; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+@media (min-width: 1100px) { .stats.six { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 1300px) { .stats.six { grid-template-columns: repeat(6, 1fr); } }

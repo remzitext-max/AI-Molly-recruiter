@@ -31,6 +31,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <NavLink href="/leads" icon="leads" label="Leads" />
       <NavLink href="/process" icon="check" label="On process" />
       <NavLink href="/tasks" icon="tasks" label="Tasks" />
+      {admin && <NavLink href="/recruiters" icon="users" label="Recruiters" />}
       {owner && (
         <>
           <div className="nav-group">Recruiting</div>

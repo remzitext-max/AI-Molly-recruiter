@@ -16,9 +16,18 @@ const OWNER_PHONES = ["+18162913808", "+18158461661"];
  */
 export function dashboardScope(user: Pick<User, "id" | "role" | "orgId">, mine: boolean, isDemo: boolean): Prisma.LeadWhereInput {
   return {
-    ...leadScope(user), isDemo, ownDriver: false, phoneE164: { notIn: OWNER_PHONES }, OR: [{ lastName: null }, { lastName: { notIn: TEST_LAST_NAMES } }],
+    ...leadScope(user), ...countedLeads(isDemo),
     ...(mine ? { assignedToId: user.id } : {}),
   };
+}
+
+/** The same filter for any set of teams (the owner's dashboard covers every team). */
+export function teamsScope(orgIds: string[], isDemo: boolean): Prisma.LeadWhereInput {
+  return { orgId: { in: orgIds }, ...countedLeads(isDemo) };
+}
+
+function countedLeads(isDemo: boolean): Prisma.LeadWhereInput {
+  return { isDemo, ownDriver: false, phoneE164: { notIn: OWNER_PHONES }, OR: [{ lastName: null }, { lastName: { notIn: TEST_LAST_NAMES } }] };
 }
 
 /** Outcomes that are a decision the driver made in the call. */
