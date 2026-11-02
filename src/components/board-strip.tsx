@@ -12,7 +12,8 @@ const age = (ms: number) => {
   return h < 1 ? `${Math.max(1, Math.round(ms / 60_000))}m` : h < 48 ? `${Math.round(h)}h` : `${Math.round(h / 24)}d`;
 };
 
-export function BoardStrip({ columns, showRecruiter }: { columns: BoardColumn[]; showRecruiter: boolean }) {
+/** `stuck`: the cards count only stuck drivers ("Needs a push" on the dashboard). */
+export function BoardStrip({ columns, showRecruiter, stuck = false }: { columns: BoardColumn[]; showRecruiter: boolean; stuck?: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
   const col = columns.find((c) => c.status === open) ?? null;
 
@@ -30,11 +31,11 @@ export function BoardStrip({ columns, showRecruiter }: { columns: BoardColumn[];
     <>
       <div className="board-strip">
         {columns.map((c) => (
-          <button key={c.status} type="button" className={`board-card${c.late ? " has-late" : ""}`} onClick={() => setOpen(c.status)} disabled={!c.drivers.length}>
+          <button key={c.status} type="button" className={`board-card${c.late ? " has-late" : ""}${stuck ? " stuck" : ""}`} onClick={() => setOpen(c.status)} disabled={!c.drivers.length}>
             <span className="board-k">{c.status}</span>
-            <span className="board-n">{c.drivers.length}</span>
-            <span className={c.late ? "board-late" : "board-ok"}>
-              {c.late ? c.lateText : c.status === "Hired" ? "last 30 days" : c.avgMs != null ? `avg ${age(c.avgMs)}` : "none"}
+            <span className={`board-n${stuck && c.drivers.length ? " bad-text" : ""}`}>{c.drivers.length}</span>
+            <span className={c.late && !stuck ? "board-late" : "board-ok"}>
+              {stuck ? c.rule : c.late ? c.lateText : c.status === "Hired" ? "last 30 days" : c.avgMs != null ? `avg ${age(c.avgMs)}` : "none"}
             </span>
           </button>
         ))}
@@ -46,7 +47,7 @@ export function BoardStrip({ columns, showRecruiter }: { columns: BoardColumn[];
             <div className="board-modal-head">
               <div>
                 <h2>{col.status} <span className="muted">{col.drivers.length}</span></h2>
-                {col.late > 0 && <div className="small board-late">{col.lateText}</div>}
+                {stuck ? <div className="small board-late">{col.rule}</div> : col.late > 0 && <div className="small board-late">{col.lateText}</div>}
               </div>
               <button type="button" className="secondary dp-close" aria-label="Close" onClick={() => setOpen(null)}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M18 6L6 18M6 6l12 12" /></svg>

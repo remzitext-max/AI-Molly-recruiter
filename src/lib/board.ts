@@ -9,14 +9,14 @@ const H = 3600_000, D = 24 * H;
 
 /** The columns, in the sheet's order, and when a driver counts as slow (warn) or stuck (late). */
 export const BOARD_COLUMNS = [
-  { status: "New", warn: 12 * H, late: 24 * H, lateText: (n: number) => `${n} untouched 24h+` },
-  { status: "Call back", warn: 1 * D, late: 2 * D, lateText: (n: number) => `${n} waiting 2d+` },
-  { status: "Need to talk", warn: 1 * D, late: 2 * D, lateText: (n: number) => `${n} waiting 2d+` },
-  { status: "Need teammate", warn: 3 * D, late: 7 * D, lateText: (n: number) => `${n} waiting 7d+` },
-  { status: "Need to bring", warn: 3 * D, late: 5 * D, lateText: (n: number) => `${n} stuck 5d+` },
-  { status: "Need approval", warn: 2 * D, late: 3 * D, lateText: (n: number) => `${n} stuck 3d+` },
-  { status: "Application", warn: 5 * D, late: 7 * D, lateText: (n: number) => `${n} stuck 7d+` },
-  { status: "Hired", warn: Infinity, late: Infinity, lateText: () => "" },
+  { status: "New", warn: 12 * H, late: 24 * H, rule: "untouched 24h+" },
+  { status: "Call back", warn: 1 * D, late: 2 * D, rule: "waiting 2d+" },
+  { status: "Need to talk", warn: 1 * D, late: 2 * D, rule: "waiting 2d+" },
+  { status: "Need teammate", warn: 3 * D, late: 7 * D, rule: "waiting 7d+" },
+  { status: "Need to bring", warn: 3 * D, late: 5 * D, rule: "stuck 5d+" },
+  { status: "Need approval", warn: 2 * D, late: 3 * D, rule: "stuck 3d+" },
+  { status: "Application", warn: 5 * D, late: 7 * D, rule: "stuck 7d+" },
+  { status: "Hired", warn: Infinity, late: Infinity, rule: "" },
 ] as const;
 
 // New leads older than this are not "new" any more; Hired shows the last 30 days.
@@ -24,10 +24,10 @@ const NEW_WINDOW = 30 * D, HIRED_WINDOW = 30 * D;
 
 export type Tone = "ok" | "warn" | "late";
 export interface BoardDriver {
-  key: string; leadId: string | null; name: string; phone: string; status: string; tab: string;
+  key: string; orgId: string; leadId: string | null; name: string; phone: string; status: string; tab: string;
   recruiter: string | null; recruiterId: string | null; team: string; since: string; ageMs: number; tone: Tone; detail: string;
 }
-export interface BoardColumn { status: string; drivers: BoardDriver[]; late: number; lateText: string; avgMs: number | null }
+export interface BoardColumn { status: string; drivers: BoardDriver[]; late: number; lateText: string; rule: string; avgMs: number | null }
 
 export function toneOf(status: string, ageMs: number): Tone {
   const c = BOARD_COLUMNS.find((x) => x.status === status);
@@ -41,7 +41,7 @@ const DOCS: Record<string, string> = { RECEIVED: "CDL/med card in", REQUESTED: "
  * The board for the given teams. `recruiterId` keeps one recruiter's tab only (a recruiter
  * always gets their own). Drivers are sorted stuck first, then the longest waiting.
  */
-export async function loadBoard(user: Pick<User, "id" | "role">, orgIds: string[], recruiterId?: string, now = new Date()): Promise<{ columns: BoardColumn[]; recruiters: { id: string; name: string; n: number }[] }> {
+export async function loadBoard(user: Pick<User, "id" | "role">, orgIds: string[], recruiterId?: string, now = new Date()): Promise<{ columns: BoardColumn[]; recruiters: { id: string; name: string; n: number }[]; all: BoardDriver[] }> {
   const statuses = BOARD_COLUMNS.map((c) => c.status as string);
   const [rows, users, orgs] = await Promise.all([
     db.sheetRow.findMany({ where: { orgId: { in: orgIds }, status: { in: statuses } } }),
@@ -75,7 +75,7 @@ export async function loadBoard(user: Pick<User, "id" | "role">, orgIds: string[
     const l = lead.get(`${r.orgId}|${r.phoneE164}`);
     const name = r.name || (l ? [l.firstName, l.lastName].filter(Boolean).join(" ") : "") || "(no name)";
     all.push({
-      key: r.id, leadId: l?.id ?? null, name, phone: r.phoneE164, status: r.status, tab: r.tab,
+      key: r.id, orgId: r.orgId, leadId: l?.id ?? null, name, phone: r.phoneE164, status: r.status, tab: r.tab,
       recruiter: o?.name ?? (/pool/i.test(r.tab) ? null : r.tab), recruiterId: o?.id ?? null, team: teamName.get(r.orgId) ?? "",
       since: since.toISOString(), ageMs, tone: toneOf(r.status, ageMs),
       detail: [r.experience, l ? DOCS[l.documentStatus] : null].filter(Boolean).join(" · "),
@@ -92,10 +92,16 @@ export async function loadBoard(user: Pick<User, "id" | "role">, orgIds: string[
       .sort((a, b) => c.status === "Hired" ? a.ageMs - b.ageMs : rank[a.tone] - rank[b.tone] || b.ageMs - a.ageMs);
     const late = drivers.filter((d) => d.tone === "late").length;
     return {
-      status: c.status, drivers, late, lateText: late ? c.lateText(late) : "",
+      status: c.status, drivers, late, lateText: late ? `${late} ${c.rule}` : "", rule: c.rule,
       avgMs: drivers.length ? drivers.reduce((s, d) => s + d.ageMs, 0) / drivers.length : null,
     };
   });
-  return { columns, recruiters };
+  return { columns, recruiters, all };
+}
+
+/** Only the stuck drivers of the columns that can get stuck, for "Needs a push". */
+export function stuckColumns(columns: BoardColumn[]): BoardColumn[] {
+  return columns.filter((c) => c.rule && c.status !== "Need teammate")
+    .map((c) => ({ ...c, drivers: c.drivers.filter((d) => d.tone === "late") }));
 }
 

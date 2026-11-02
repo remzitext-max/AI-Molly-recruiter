@@ -19,6 +19,8 @@ import { pct, type Period } from "@/lib/dashboard-view";
 import { Card, Stat, fmt, initialsOf } from "@/components/ui";
 import { BarRow } from "@/components/dash-parts";
 import { CallNow } from "@/components/call-now";
+import { BoardStrip } from "@/components/board-strip";
+import { loadBoard, stuckColumns } from "@/lib/board";
 
 async function callMade(fd: FormData) {
   "use server";
@@ -33,7 +35,7 @@ const fullName = (l: { firstName: string | null; lastName: string | null }) => [
 export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | "role" | "orgId" | "name">; p: Period }) {
   const scope = dashboardScope(user, true, config.mode === "demo");
   const fresh = { sourceRecords: { none: { sourceRecordId: { startsWith: RECALL_PREFIX } } } };
-  const [calls, newLeads, talked, interested, docs, onProcess, tabs] = await Promise.all([
+  const [calls, newLeads, talked, interested, docs, onProcess, tabs, board] = await Promise.all([
     scheduledCalls(user),
     db.lead.count({ where: { ...scope, ...fresh, createdAt: p.range } }),
     talkedDrivers(scope, p.range),
@@ -41,7 +43,10 @@ export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | 
     db.document.findMany({ where: { lead: scope, uploadedAt: p.range }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
     loadOnProcess(user),
     tabStats([user.orgId], p.range),
+    loadBoard(user, [user.orgId]),
   ]);
+  const stuck = stuckColumns(board.columns);
+  const stuckTotal = stuck.reduce((n, c) => n + c.drivers.length, 0);
   const mine = tabs.filter((t) => t.recruiterId === user.id);
   const byStatus: Record<string, number> = {};
   for (const t of mine) for (const [s, n] of Object.entries(t.byStatus)) byStatus[s] = (byStatus[s] ?? 0) + n;
@@ -81,6 +86,10 @@ export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | 
         })}
       </div>
 
+      <div className="sec-label">Needs a push {stuckTotal > 0 ? <span className="bad-text">· {stuckTotal} of your drivers</span> : <span>· nothing stuck</span>} <Link href="/board" className="sec-link">My board →</Link></div>
+      <div className="section"><BoardStrip columns={stuck} showRecruiter={false} stuck /></div>
+
+      <div className="sec-label">This period</div>
       <div className="stats six">
         <Stat label="My new leads" icon="leads" tone="blue" n={newLeads} sub="assigned to you in this period" />
         <Stat label="Talked to Crystal" icon="voice" tone="teal" n={talked.length} sub={<Link href={`/talked?${new URLSearchParams({ since: p.since.toISOString(), until: p.until.toISOString(), who: "mine" })}`}>see who</Link>} />
