@@ -133,7 +133,9 @@ export async function buildPreview(sheet: ParsedSheet, mapping: Mapping, sourceS
   const teamIdx = sheet.headers.findIndex((h) => TEAM_ANSWER_HEADER.test(h.trim()));
   const position = (row: string[]) => {
     const t = teamIdx >= 0 ? (row[teamIdx] ?? "").trim() : "";
-    if (t && !/^(-|n\/?a|none)$/i.test(t)) return "team";
+    // The board writes "Both ready" / "Needs partner" / "Wants solo" / "(no answer)".
+    if (/solo/i.test(t)) return "solo";
+    if (t && !/^(-|n\/?a|none|\(?no answer\)?)$/i.test(t)) return "team";
     const v = posIdx >= 0 ? row[posIdx] ?? "" : "";
     return /team/i.test(v) ? "team" : /solo/i.test(v) ? "solo" : "";
   };
