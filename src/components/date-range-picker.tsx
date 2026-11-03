@@ -3,7 +3,7 @@
 // two months of calendar on the right. Click a day for the start and another for
 // the end (or the same day twice for one day), then Update.
 import { useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "./icons";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -18,6 +18,7 @@ type Props = { from: string; to: string; today: string; label: string };
 export function DateRangePicker({ from, to, today, label }: Props) {
   const router = useRouter();
   const params = useSearchParams();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [a, setA] = useState(from);
   const [b, setB] = useState<string | null>(to);
@@ -50,7 +51,8 @@ export function DateRangePicker({ from, to, today, label }: Props) {
     q.set("from", f <= e ? f : e);
     q.set("to", f <= e ? e : f);
     setOpen(false);
-    router.push(`/dashboard?${q}`);
+    // Stay on the page the picker is on (Dashboard, Recruiters...).
+    router.push(`${pathname}?${q}`);
   };
   const pick = (d: string) => {
     if (d > today) return;
