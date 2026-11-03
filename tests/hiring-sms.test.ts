@@ -84,6 +84,19 @@ describe("texts from the recruiter's own number", () => {
   });
 });
 
+describe("team leads from the team form's partner answer", () => {
+  it("marks a row with a Team answer as team even when Source is the company name", async () => {
+    const base = await seedBase();
+    const csv = Buffer.from("Name,Phone,Source,Team answer\nTeam Guy,(214) 555-0181,ARSLON,\"No, I need a partner\"\nSolo Guy,(214) 555-0182,ARSLON,\n");
+    const { createImportPreview, commitBatch } = await import("@/lib/import");
+    const b = await createImportPreview({ fileName: "arslon.csv", data: csv, campaignId: base.campaign.id, userId: base.admin.id, orgId: base.org.id, isDemo: true });
+    await commitBatch(b.id, base.admin);
+    const raw = async (phone: string) => (await db.leadSourceRecord.findFirstOrThrow({ where: { lead: { phoneE164: phone } } })).raw as { position?: string };
+    expect((await raw("+12145550181")).position).toBe("team");
+    expect((await raw("+12145550182")).position).toBeUndefined();
+  });
+});
+
 describe("missed-call texts: greeting + offer", () => {
   it("fills the driver's name and position, then sends the offer as a second text", async () => {
     const base = await seedBase();

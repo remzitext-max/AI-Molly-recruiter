@@ -94,6 +94,7 @@ const GUESS: Record<TargetField, RegExp> = {
 // Optional Facebook lead-ad columns (e.g. added by Make.com). Read by header name,
 // outside the reviewed mapping, so adding them to a sheet needs no re-setup.
 const POSITION_HEADER = /^(source|position|driver ?type|solo ?\/ ?team)$/i;
+const TEAM_ANSWER_HEADER = /^(team ?answer|.*team ?partner.*)$/i;
 
 const FB_COLUMNS = {
   fbLeadId: /^((fb|facebook) ?lead ?id|leadgen ?id)$/i,
@@ -127,7 +128,15 @@ export async function buildPreview(sheet: ParsedSheet, mapping: Mapping, sourceS
   const fbCol = (row: string[], k: keyof typeof FB_COLUMNS) => (fbIdx[k] >= 0 ? row[fbIdx[k]] ?? "" : "").trim();
   // Solo or team, from a "Source" / "Position" column (the lead board writes SOLO or TEAM there).
   const posIdx = sheet.headers.findIndex((h) => POSITION_HEADER.test(h.trim()));
-  const position = (row: string[]) => { const v = posIdx >= 0 ? row[posIdx] ?? "" : ""; return /team/i.test(v) ? "team" : /solo/i.test(v) ? "solo" : ""; };
+  // Arslon's team form asks "Are you applying with a team partner?": any answer there (the
+  // board's "Team answer" column) means the driver came from the team ad, whatever Source says.
+  const teamIdx = sheet.headers.findIndex((h) => TEAM_ANSWER_HEADER.test(h.trim()));
+  const position = (row: string[]) => {
+    const t = teamIdx >= 0 ? (row[teamIdx] ?? "").trim() : "";
+    if (t && !/^(-|n\/?a|none)$/i.test(t)) return "team";
+    const v = posIdx >= 0 ? row[posIdx] ?? "" : "";
+    return /team/i.test(v) ? "team" : /solo/i.test(v) ? "solo" : "";
+  };
   const seenPhones = new Map<string, number>();
   const seenIds = new Set<string>();
   const out: PreviewRow[] = [];
