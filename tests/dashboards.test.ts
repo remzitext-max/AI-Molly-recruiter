@@ -105,4 +105,21 @@ describe("the board", () => {
     expect(mine.columns.flatMap((c) => c.drivers).map((d) => d.phone).sort()).toEqual(["+12145550101", "+12145550102"]);
     expect(toneOf("Need approval", 2.5 * day)).toBe("warn");
   });
+
+  it("lists the drivers behind the Application / Hired numbers (applied in the period)", async () => {
+    const { sheetDrivers } = await import("@/lib/board");
+    const base = await seedBase();
+    const now = new Date("2026-11-03T18:00:00Z"), day = 86400_000;
+    await saveSheetRows(base.org.id, [
+      { phoneE164: "+12145550111", tab: "Alex", status: "Application", appliedAt: new Date(now.getTime() - 2 * day), name: "In Range" },
+      { phoneE164: "+12145550112", tab: "Alex", status: "Application", appliedAt: new Date(now.getTime() - 20 * day), name: "Too Old" },
+      { phoneE164: "+12145550113", tab: "Molly", status: "Our driver – working", appliedAt: new Date(now.getTime() - 3 * day), name: "Working Now" },
+      { phoneE164: "+12145550114", tab: "Molly", status: "Need to bring", appliedAt: new Date(now.getTime() - 1 * day) },
+    ], now);
+    const range = { gte: new Date(now.getTime() - 7 * day), lt: now };
+    const apps = await sheetDrivers([base.org.id], ["Application"], range, now);
+    expect(apps.map((d) => [d.name, d.recruiterId])).toEqual([["In Range", base.alex.id]]);
+    const hired = await sheetDrivers([base.org.id], ["Hired", "Our driver – working"], range, now);
+    expect(hired.map((d) => d.name)).toEqual(["Working Now"]);
+  });
 });

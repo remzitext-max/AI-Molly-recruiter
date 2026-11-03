@@ -47,45 +47,17 @@ const DOCS: Record<string, string> = { RECEIVED: "CDL/med card in", REQUESTED: "
  */
 export async function loadBoard(user: Pick<User, "id" | "role">, orgIds: string[], recruiterId?: string, now = new Date()): Promise<{ columns: BoardColumn[]; recruiters: { id: string; name: string; n: number }[]; all: BoardDriver[] }> {
   const statuses = BOARD_COLUMNS.map((c) => c.status as string);
-  const [rows, users, orgs] = await Promise.all([
-    db.sheetRow.findMany({ where: { orgId: { in: orgIds }, status: { in: statuses } } }),
-    db.user.findMany({ where: { orgId: { in: orgIds }, active: true }, select: { id: true, name: true, sheetTab: true, orgId: true } }),
-    db.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true } }),
-  ]);
-  // Which login owns which tab, per team (same rule as assignment: the tab named like the user).
-  const owner = new Map<string, { id: string; name: string } | null>();
-  for (const orgId of orgIds) {
-    const tabs = [...new Set(rows.filter((r) => r.orgId === orgId).map((r) => r.tab))];
-    for (const t of tabs) {
-      const o = users.filter((u) => u.orgId === orgId && tabForUser(u, tabs)?.toLowerCase() === t.toLowerCase());
-      owner.set(`${orgId}|${t.toLowerCase()}`, o.length === 1 ? o[0] : null);
-    }
-  }
-  const leads = await db.lead.findMany({
-    where: { orgId: { in: orgIds }, isDemo: false, phoneE164: { in: [...new Set(rows.map((r) => r.phoneE164))] } },
-    select: { id: true, orgId: true, phoneE164: true, firstName: true, lastName: true, documentStatus: true },
-  });
-  const lead = new Map(leads.map((l) => [`${l.orgId}|${l.phoneE164}`, l]));
-  const teamName = new Map(orgs.map((o) => [o.id, o.name]));
-
-  const all: BoardDriver[] = [];
-  for (const r of rows) {
-    if (/pool/i.test(r.tab) && r.status !== "New") continue;
+  const rows = await db.sheetRow.findMany({ where: { orgId: { in: orgIds }, status: { in: statuses } } });
+  const kept = rows.filter((r) => {
+    if (/pool/i.test(r.tab) && r.status !== "New") return false;
     const since = r.statusAt ?? r.appliedAt ?? r.seenAt;
     const ageMs = Math.max(0, now.getTime() - since.getTime());
-    if (r.status === "New" && now.getTime() - (r.appliedAt ?? since).getTime() > NEW_WINDOW) continue;
-    if (r.status === "Hired" && ageMs > HIRED_WINDOW) continue;
-    if (TALK.has(r.status) && now.getTime() - (r.appliedAt ?? since).getTime() > TALK_WINDOW) continue;
-    const o = owner.get(`${r.orgId}|${r.tab.toLowerCase()}`) ?? null;
-    const l = lead.get(`${r.orgId}|${r.phoneE164}`);
-    const name = r.name || (l ? [l.firstName, l.lastName].filter(Boolean).join(" ") : "") || "(no name)";
-    all.push({
-      key: r.id, orgId: r.orgId, leadId: l?.id ?? null, name, phone: r.phoneE164, status: r.status, tab: r.tab,
-      recruiter: o?.name ?? (/pool/i.test(r.tab) ? null : r.tab), recruiterId: o?.id ?? null, team: teamName.get(r.orgId) ?? "",
-      since: since.toISOString(), ageMs, tone: toneOf(r.status, ageMs),
-      detail: [r.experience, l ? DOCS[l.documentStatus] : null].filter(Boolean).join(" · "),
-    });
-  }
+    if (r.status === "New" && now.getTime() - (r.appliedAt ?? since).getTime() > NEW_WINDOW) return false;
+    if (r.status === "Hired" && ageMs > HIRED_WINDOW) return false;
+    if (TALK.has(r.status) && now.getTime() - (r.appliedAt ?? since).getTime() > TALK_WINDOW) return false;
+    return true;
+  });
+  const all = await driversOf(kept, orgIds, now, rows);
   const recruiters = [...new Map(all.filter((d) => d.recruiter).map((d) => [d.recruiterId ?? `tab:${d.recruiter}`, d.recruiter!])).entries()]
     .map(([id, name]) => ({ id, name, n: all.filter((d) => (d.recruiterId ?? `tab:${d.recruiter}`) === id).length }))
     .sort((a, b) => b.n - a.n);
@@ -102,6 +74,53 @@ export async function loadBoard(user: Pick<User, "id" | "role">, orgIds: string[
     };
   });
   return { columns, recruiters, all };
+}
+
+type SheetRowRec = Awaited<ReturnType<typeof db.sheetRow.findMany>>[number];
+
+/** Sheet rows as board drivers: who owns the tab, the team, the site profile if Crystal has one. */
+async function driversOf(rows: SheetRowRec[], orgIds: string[], now: Date, tabRows: SheetRowRec[] = rows): Promise<BoardDriver[]> {
+  const [users, orgs, leads] = await Promise.all([
+    db.user.findMany({ where: { orgId: { in: orgIds }, active: true }, select: { id: true, name: true, sheetTab: true, orgId: true } }),
+    db.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true } }),
+    db.lead.findMany({
+      where: { orgId: { in: orgIds }, isDemo: false, phoneE164: { in: [...new Set(rows.map((r) => r.phoneE164))] } },
+      select: { id: true, orgId: true, phoneE164: true, firstName: true, lastName: true, documentStatus: true },
+    }),
+  ]);
+  // Which login owns which tab, per team (same rule as assignment: the tab named like the user).
+  const owner = new Map<string, { id: string; name: string } | null>();
+  for (const orgId of orgIds) {
+    const tabs = [...new Set(tabRows.filter((r) => r.orgId === orgId).map((r) => r.tab))];
+    for (const t of tabs) {
+      const o = users.filter((u) => u.orgId === orgId && tabForUser(u, tabs)?.toLowerCase() === t.toLowerCase());
+      owner.set(`${orgId}|${t.toLowerCase()}`, o.length === 1 ? o[0] : null);
+    }
+  }
+  const lead = new Map(leads.map((l) => [`${l.orgId}|${l.phoneE164}`, l]));
+  const teamName = new Map(orgs.map((o) => [o.id, o.name]));
+  return rows.map((r) => {
+    const since = r.statusAt ?? r.appliedAt ?? r.seenAt;
+    const ageMs = Math.max(0, now.getTime() - since.getTime());
+    const o = owner.get(`${r.orgId}|${r.tab.toLowerCase()}`) ?? null;
+    const l = lead.get(`${r.orgId}|${r.phoneE164}`);
+    const name = r.name || (l ? [l.firstName, l.lastName].filter(Boolean).join(" ") : "") || "(no name)";
+    return {
+      key: r.id, orgId: r.orgId, leadId: l?.id ?? null, name, phone: r.phoneE164, status: r.status, tab: r.tab,
+      recruiter: o?.name ?? (/pool/i.test(r.tab) ? null : r.tab), recruiterId: o?.id ?? null, team: teamName.get(r.orgId) ?? "",
+      since: since.toISOString(), ageMs, tone: toneOf(r.status, ageMs),
+      detail: [r.experience, l ? DOCS[l.documentStatus] : null].filter(Boolean).join(" · "),
+    };
+  });
+}
+
+/**
+ * The drivers behind a dashboard number: sheet rows with these statuses whose driver applied
+ * in the range (the same rows tabStats counts), newest status first.
+ */
+export async function sheetDrivers(orgIds: string[], statuses: string[], range: { gte: Date; lt: Date }, now = new Date()): Promise<BoardDriver[]> {
+  const rows = await db.sheetRow.findMany({ where: { orgId: { in: orgIds }, status: { in: statuses }, appliedAt: range } });
+  return (await driversOf(rows, orgIds, now)).sort((a, b) => a.ageMs - b.ageMs);
 }
 
 /** Only the stuck drivers of the columns that can get stuck, for "Needs a push". */

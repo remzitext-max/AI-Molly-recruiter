@@ -14,8 +14,8 @@ import { ON_PROCESS } from "@/lib/on-process";
 import { statusTone } from "@/lib/recruiter-status";
 import { ZONE, pct, type Period, type TeamView } from "@/lib/dashboard-view";
 import { Card, Stat, initialsOf } from "@/components/ui";
-import { BoardStrip } from "@/components/board-strip";
-import { loadBoard, stuckColumns, type BoardDriver } from "@/lib/board";
+import { BoardStrip, DriverStat } from "@/components/board-strip";
+import { loadBoard, sheetDrivers, stuckColumns, type BoardDriver } from "@/lib/board";
 import { scheduledCalls } from "@/lib/scheduled-calls";
 import { BarRow, Delta } from "@/components/dash-parts";
 
@@ -57,8 +57,6 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
   const talked = (c: { id: string; status?: string; outcome: string | null }) => isTalk(c, gave);
 
   const reached = sum(tabs, talkedBy), sheetTotal = sum(tabs, (t) => t.total);
-  const applications = sum(tabs, (t) => countOf(t, "Application"));
-  const sheetHired = sum(tabs, (t) => countOf(t, "Hired", "Our driver – working"));
   const onProcessNow = onProcess.reduce((n, o) => n + o._count, 0);
   const speed = median(rangeLeads.filter((l) => l.calls[0]).map((l) => (l.calls[0].createdAt.getTime() - l.createdAt.getTime()) / 60000));
   const cohortHired = rangeLeads.filter((l) => l.hireStage === "HIRED").length;
@@ -93,7 +91,10 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
     .reduce((s, c) => s + (c.startedAt && c.endedAt ? Math.max(1, Math.ceil((c.endedAt.getTime() - c.startedAt.getTime()) / 60000)) : 1), 0);
   const cohortTalked = funnel[2].n;
   const all = view.team === "all" && teamRows.length > 1;
-  const [board, booked] = await Promise.all([loadBoard(user, view.orgIds), all ? Promise.resolve([]) : scheduledCalls(user, new Date(), view.orgIds)]);
+  const [board, booked, appDrivers, hiredDrivers] = await Promise.all([
+    loadBoard(user, view.orgIds), all ? Promise.resolve([]) : scheduledCalls(user, new Date(), view.orgIds),
+    sheetDrivers(view.orgIds, ["Application"], range), sheetDrivers(view.orgIds, ["Hired", "Our driver – working"], range),
+  ]);
   const stuck = stuckColumns(board.columns);
   const stuckTotal = stuck.reduce((n, c) => n + c.drivers.length, 0);
   const now = Date.now();
@@ -106,8 +107,8 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
         <Stat label="Talked to Crystal" icon="voice" tone="teal" n={`${pct(cohortTalked, newLeads)}%`} sub={<>{cohortTalked} of {newLeads} new leads · <Link href={talkedHref()}>see who</Link></>} />
         <Stat label="Reached by recruiters" icon="users" tone="violet" n={`${pct(reached, sheetTotal)}%`} sub={`${reached} of ${sheetTotal} sheet leads`} />
         <Stat label="On process now" icon="check" tone="blue" n={onProcessNow} sub={<Link href="/process">open the list</Link>} />
-        <Stat label="Application" icon="jobs" tone="amber" n={applications} sub="applied in this period" />
-        <Stat label="Hired" icon="star" tone="green" n={sheetHired} sub="applied in this period" />
+        <DriverStat label="Application" icon="jobs" tone="amber" drivers={appDrivers} showRecruiter sub="applied in this period" />
+        <DriverStat label="Hired" icon="star" tone="green" drivers={hiredDrivers} showRecruiter sub="applied in this period" />
       </div>
 
       <div className="sec-label">Needs a push {stuckTotal > 0 ? <span className="bad-text">· {stuckTotal} drivers</span> : <span>· nothing stuck</span>} <Link href={`/board${view.owner && view.team !== "all" ? `?team=${view.team}` : ""}`} className="sec-link">Board →</Link></div>

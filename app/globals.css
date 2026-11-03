@@ -395,6 +395,12 @@ button.secondary.is-busy::after { border-color: #cbd5e1; border-top-color: var(-
 .board-card:focus-visible { outline: 2px solid var(--accent, #4f46e5); outline-offset: 2px; }
 .board-card:disabled { cursor: default; opacity: 0.55; }
 .board-card.has-late { border-color: rgba(220, 38, 38, 0.35); }
+.stat-btn { font: inherit; color: inherit; text-align: left; width: 100%; cursor: pointer; display: block; }
+.stat-btn:hover:not(:disabled) { border-color: var(--accent, #4f46e5); }
+.stat-btn:focus-visible { outline: 2px solid var(--accent, #4f46e5); outline-offset: 2px; }
+.stat-btn:disabled { cursor: default; }
+.stat-btn:disabled:hover { transform: none; box-shadow: var(--shadow); }
+.stat-btn .link-text { color: var(--accent, #4f46e5); }
 .board-k { font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
 .board-n { font-size: 30px; font-weight: 700; line-height: 1.1; }
 .board-late { font-size: 12px; color: #dc2626; }

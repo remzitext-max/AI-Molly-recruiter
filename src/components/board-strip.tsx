@@ -2,10 +2,11 @@
 // The Board's status cards: each shows how many drivers have that status and how many are
 // stuck. A click opens the list of those drivers; a click on a driver opens their profile
 // (LeadPopup listens for data-profile clicks anywhere on the page).
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { BoardColumn, BoardDriver } from "@/lib/board";
 import { initialsOf } from "./ui";
 import { CallNow } from "./call-now";
+import { Icon } from "./icons";
 
 const age = (ms: number) => {
   const h = ms / 3600_000;
@@ -16,16 +17,6 @@ const age = (ms: number) => {
 export function BoardStrip({ columns, showRecruiter, stuck = false }: { columns: BoardColumn[]; showRecruiter: boolean; stuck?: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
   const col = columns.find((c) => c.status === open) ?? null;
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      // A profile opened on top closes first.
-      if (e.key === "Escape" && !document.querySelector(".dp-backdrop")) setOpen(null);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
 
   return (
     <>
@@ -41,24 +32,55 @@ export function BoardStrip({ columns, showRecruiter, stuck = false }: { columns:
         ))}
       </div>
 
-      {col && (
-        <div className="modal-backdrop board-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setOpen(null); }}>
-          <div className="board-modal" role="dialog" aria-label={col.status}>
-            <div className="board-modal-head">
-              <div>
-                <h2>{col.status} <span className="muted">{col.drivers.length}</span></h2>
-                {stuck ? <div className="small board-late">{col.rule}</div> : col.late > 0 && <div className="small board-late">{col.lateText}</div>}
-              </div>
-              <button type="button" className="secondary dp-close" aria-label="Close" onClick={() => setOpen(null)}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M18 6L6 18M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <div className="board-list">
-              {col.drivers.map((d) => <Row key={d.key} d={d} showRecruiter={showRecruiter} />)}
-            </div>
+      {col && <DriverModal title={col.status} drivers={col.drivers} note={stuck ? col.rule : col.late > 0 ? col.lateText : ""} showRecruiter={showRecruiter} onClose={() => setOpen(null)} />}
+    </>
+  );
+}
+
+/** The list of drivers behind a status card or a dashboard number. */
+function DriverModal({ title, drivers, note, showRecruiter, onClose }: { title: string; drivers: BoardDriver[]; note?: string; showRecruiter: boolean; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // A profile opened on top closes first.
+      if (e.key === "Escape" && !document.querySelector(".dp-backdrop")) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="modal-backdrop board-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="board-modal" role="dialog" aria-label={title}>
+        <div className="board-modal-head">
+          <div>
+            <h2>{title} <span className="muted">{drivers.length}</span></h2>
+            {note && <div className="small board-late">{note}</div>}
           </div>
+          <button type="button" className="secondary dp-close" aria-label="Close" onClick={onClose}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </button>
         </div>
-      )}
+        <div className="board-list">
+          {drivers.map((d) => <Row key={d.key} d={d} showRecruiter={showRecruiter} />)}
+          {!drivers.length && <p className="muted small">No drivers.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A dashboard number (same look as Stat) that opens the list of its drivers on click. */
+export function DriverStat({ label, sub, icon, tone, drivers, showRecruiter }: {
+  label: string; sub?: ReactNode; icon?: string; tone?: "blue" | "violet" | "teal" | "green" | "amber" | "rose"; drivers: BoardDriver[]; showRecruiter: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  return (
+    <>
+      <button type="button" className={`stat stat-btn${tone ? ` tone-${tone}` : ""}`} onClick={() => setOpen(true)} disabled={!drivers.length} title={drivers.length ? "See the drivers" : undefined}>
+        <div className="top"><div className="l">{label}</div>{icon && <span className="chip"><Icon name={icon} size={18} /></span>}</div>
+        <div className="n">{drivers.length}</div>{sub && <div className="d">{sub}{drivers.length > 0 && <> · <span className="link-text">see who</span></>}</div>}
+      </button>
+      {open && <DriverModal title={label} drivers={drivers} showRecruiter={showRecruiter} onClose={close} />}
     </>
   );
 }

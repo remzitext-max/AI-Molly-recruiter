@@ -19,8 +19,8 @@ import { pct, type Period } from "@/lib/dashboard-view";
 import { Card, Stat, fmt, initialsOf } from "@/components/ui";
 import { BarRow } from "@/components/dash-parts";
 import { CallNow } from "@/components/call-now";
-import { BoardStrip } from "@/components/board-strip";
-import { loadBoard, stuckColumns } from "@/lib/board";
+import { BoardStrip, DriverStat } from "@/components/board-strip";
+import { loadBoard, sheetDrivers, stuckColumns } from "@/lib/board";
 
 async function callMade(fd: FormData) {
   "use server";
@@ -35,7 +35,7 @@ const fullName = (l: { firstName: string | null; lastName: string | null }) => [
 export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | "role" | "orgId" | "name">; p: Period }) {
   const scope = dashboardScope(user, true, config.mode === "demo");
   const fresh = { sourceRecords: { none: { sourceRecordId: { startsWith: RECALL_PREFIX } } } };
-  const [calls, newLeads, talked, interested, docs, onProcess, tabs, board] = await Promise.all([
+  const [calls, newLeads, talked, interested, docs, onProcess, tabs, board, hiredAll] = await Promise.all([
     scheduledCalls(user),
     db.lead.count({ where: { ...scope, ...fresh, createdAt: p.range } }),
     talkedDrivers(scope, p.range),
@@ -44,7 +44,9 @@ export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | 
     loadOnProcess(user),
     tabStats([user.orgId], p.range),
     loadBoard(user, [user.orgId]),
+    sheetDrivers([user.orgId], ["Hired", "Our driver – working"], p.range),
   ]);
+  const hired = hiredAll.filter((d) => d.recruiterId === user.id);
   const stuck = stuckColumns(board.columns);
   const stuckTotal = stuck.reduce((n, c) => n + c.drivers.length, 0);
   const mine = tabs.filter((t) => t.recruiterId === user.id);
@@ -96,7 +98,7 @@ export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | 
         <Stat label="Interested" icon="star" tone="green" n={interested} sub="said yes to Crystal" />
         <Stat label="CDL / med card in" icon="doc" tone="amber" n={docs} />
         <Stat label="On process now" icon="check" tone="violet" n={onProcess.length} sub={<Link href="/process">open the list</Link>} />
-        <Stat label="Hired" icon="check" tone="green" n={(byStatus["Hired"] ?? 0) + (byStatus["Our driver – working"] ?? 0)} sub="sheet status, applied in this period" />
+        <DriverStat label="Hired" icon="check" tone="green" drivers={hired} showRecruiter={false} sub="sheet status, applied in this period" />
       </div>
 
       <div className="grid two section">
