@@ -18,7 +18,7 @@ import { integrationStatuses, setAdapterOverride } from "@/adapters/registry";
 import { mockSmsOutbox } from "@/adapters/mock";
 import { handleInboundSms, sendCdlLink } from "@/lib/messaging";
 import { verifySignature, signPayload } from "@/lib/webhook-auth";
-import { sendCallReport, buildCallReport } from "@/lib/telegram";
+import { sendCallReport, buildCallReport, callWorthPosting } from "@/lib/telegram";
 
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(2000, 7)]);
 
@@ -629,6 +629,17 @@ describe("Telegram driver card", () => {
     expect(note).toContain("called Frank D (26 sec): no answers collected");
     expect(note).toContain("+18124065861");
     expect(note).toMatch(/will try again \(attempt 1 of \d\)/);
+
+    // Only real conversations of a minute or more (or a transfer) go to the group.
+    expect(await callWorthPosting(a.id)).toBe(true);
+    expect(await callWorthPosting(unanswered.id)).toBe(false);
+    expect(await callWorthPosting(short.id)).toBe(false);
+    const longVm = await db.callAttempt.create({ data: { leadId: quiet.id, provider: "telnyx", idempotencyKey: "tg-4", status: "COMPLETED", startedAt: t0, endedAt: new Date(t0.getTime() + 75_000),
+      transcript: [{ speaker: "driver", text: "The person you are trying to reach is not available." }] } });
+    expect(await callWorthPosting(longVm.id)).toBe(false);
+    const quickTransfer = await db.callAttempt.create({ data: { leadId: quiet.id, provider: "telnyx", idempotencyKey: "tg-5", status: "COMPLETED", outcome: "HUMAN_REQUESTED", startedAt: t0, endedAt: new Date(t0.getTime() + 30_000),
+      transcript: [{ speaker: "agent", text: "Connecting you now. [transfer: Dennis]" }] } });
+    expect(await callWorthPosting(quickTransfer.id)).toBe(true);
   });
 });
 

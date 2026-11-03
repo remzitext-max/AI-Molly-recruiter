@@ -190,8 +190,31 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
   ].join("\n");
 }
 
+/** Calls shorter than this are not posted (voicemail, a quick hang-up, a "call me later"). */
+export const TELEGRAM_MIN_CALL_SECS = 60;
+
+/**
+ * Whether a finished call goes to the Telegram group at all (Remzi, 2026-11-03: recruiters only
+ * want real conversations). Posted: a transfer to a recruiter, or an answered call of a minute
+ * or more where the driver talked (answers saved or a decision). Not posted: no answer, busy,
+ * voicemail, short calls, long voicemails. The site still shows every attempt.
+ */
+export async function callWorthPosting(attemptId: string): Promise<boolean> {
+  const a = await db.callAttempt.findUnique({ where: { id: attemptId }, include: { lead: { include: { screening: true } } } });
+  if (!a || !a.startedAt || !a.endedAt || a.status === "VOICEMAIL") return false;
+  const transferred = Array.isArray(a.transcript) && (a.transcript as { text?: string }[]).some((t) => /\[transfer\b/.test(String(t.text ?? "")));
+  if (transferred) return true;
+  const secs = (a.endedAt.getTime() - a.startedAt.getTime()) / 1000;
+  if (secs < TELEGRAM_MIN_CALL_SECS) return false;
+  const n = ((a.metrics as { callNotes?: CallNotes } | null)?.callNotes ?? {}) as CallNotes;
+  return a.lead.screening.some((f) => f.callAttemptId === a.id && f.reportedValue && !["english_level", "first_name"].includes(f.key))
+    || ["INTERESTED", "NOT_INTERESTED", "CALLBACK", "HUMAN_REQUESTED"].includes(a.outcome ?? "")
+    || ["interested", "not_interested", "call_later"].includes(n.result ?? "");
+}
+
 export async function sendCallReport(attemptId: string) {
   if (!telegramConfigured()) return { sent: false, reason: "not configured" };
+  if (!(await callWorthPosting(attemptId))) return { sent: false, reason: "not a conversation" };
   const text = await buildCallReport(attemptId);
   if (!text) return { sent: false, reason: "nothing to report" };
   const a = await db.callAttempt.findUnique({ where: { id: attemptId }, include: { lead: true } });
