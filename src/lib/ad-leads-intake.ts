@@ -15,7 +15,7 @@ export async function acceptAdLead(p: AdLead): Promise<IngestResult | { result: 
   const r = await ingestLead(p.lead, { orgId: campaign.orgId, campaignId: campaign.id, isDemo: isDemo || campaign.isDemo, scheduleOutreach: !p.sapYes });
   if (r.result === "created" && p.sapYes) await recordEvent({ leadId: r.leadId, actorType: "SYSTEM", type: "NOTE", message: "Answered yes to SAP on the ad form; no automatic call" });
   if ((r.result === "created" || r.result === "merged") && config.adLeadsSheetId) {
-    await enqueue("sheet.ad-lead", { row: adLeadRow(p, r.result === "merged" ? "already in system" : p.sapYes ? "SAP yes: no call" : "calling") }, { idempotencyKey: `sheet.ad-lead:${r.leadId}`, maxAttempts: 8 });
+    await enqueue("sheet.ad-lead", { row: adLeadRow(p, r.result === "merged" ? "Already in system" : p.sapYes ? "SAP yes: will not call" : "Will call", r.leadId) }, { idempotencyKey: `sheet.ad-lead:${r.leadId}`, maxAttempts: 8 });
   }
   return r;
 }

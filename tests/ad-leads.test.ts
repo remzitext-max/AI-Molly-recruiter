@@ -58,10 +58,9 @@ describe("ad leads sheet", () => {
     const { adLeadRow } = await import("@/lib/ad-leads-sheet");
     const p = parseAdLead({ platform: "tiktok", name: "Ann Lee", phone: "+13125550111", state: "IL", position: "Solo", experience: "3 years", sap: "No", campaign: "TBT test" });
     if ("error" in p) throw new Error(p.error);
-    const row = adLeadRow(p, "calling", new Date("2026-11-05T15:00:00Z"));
-    expect(row.slice(1, 9)).toEqual(["TikTok", "Ann Lee", "+13125550111", "", "IL", "Solo", "3 years", ""]);
+    const row = adLeadRow(p, "Will call", "lead1", new Date("2026-11-05T15:00:00Z"));
+    expect(row.slice(1)).toEqual(["TikTok", "Ann Lee", "+13125550111", "", "IL", "Solo", "3 years", "No", "lead1", "Will call"]);
     expect(row[0]).toContain("09:00");
-    expect(row[10]).toBe("TBT test");
 
     await seedBase();
     process.env.AD_LEADS_SHEET_ID = "https://docs.google.com/spreadsheets/d/abc_DEF-1/edit#gid=0";
