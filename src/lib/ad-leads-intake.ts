@@ -14,8 +14,10 @@ export async function acceptAdLead(p: AdLead): Promise<IngestResult | { result: 
   if (!campaign) return { result: "no_campaign" };
   const r = await ingestLead(p.lead, { orgId: campaign.orgId, campaignId: campaign.id, isDemo: isDemo || campaign.isDemo, scheduleOutreach: !p.sapYes });
   if (r.result === "created" && p.sapYes) await recordEvent({ leadId: r.leadId, actorType: "SYSTEM", type: "NOTE", message: "Answered yes to SAP on the ad form; no automatic call" });
-  if ((r.result === "created" || r.result === "merged") && config.adLeadsSheetId) {
-    await enqueue("sheet.ad-lead", { row: adLeadRow(p, r.result === "merged" ? "Already in system" : p.sapYes ? "SAP yes: will not call" : "Will call", r.leadId) }, { idempotencyKey: `sheet.ad-lead:${r.leadId}`, maxAttempts: 8 });
+  if (r.result !== "invalid" && config.adLeadsSheetId) {
+    // Every application gets a row, a repeat one too: recruiters should see a driver who applied again.
+    const note = r.result === "created" ? (p.sapYes ? "SAP yes: will not call" : "Will call") : "Applied again (already in system)";
+    await enqueue("sheet.ad-lead", { row: adLeadRow(p, note, r.leadId) }, { idempotencyKey: r.result === "created" ? `sheet.ad-lead:${r.leadId}` : undefined, maxAttempts: 8 });
   }
   return r;
 }
