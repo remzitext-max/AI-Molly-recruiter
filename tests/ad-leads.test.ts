@@ -75,3 +75,21 @@ describe("ad leads sheet", () => {
     } finally { delete process.env.AD_LEADS_SHEET_ID; }
   });
 });
+
+describe("public apply page", () => {
+  beforeEach(async () => { await resetDb(); });
+  const apply = (body: Record<string, string>, ip = "1.2.3.4") => import("../app/api/apply/route").then(({ POST: P }) =>
+    P(new Request("http://x/api/apply", { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json", "x-forwarded-for": ip } })));
+
+  it("creates a YouTube lead with consent, ignores bots, needs the checkbox", async () => {
+    await seedBase();
+    const base = { name: "Bob Ray", phone: "(214) 555-0199", state: "TX", position: "Solo", experience: "2-5 years", sap: "No", src: "youtube" };
+    expect((await apply({ ...base, consent: "" }, "9.9.9.1")).status).toBe(400);
+    expect((await apply({ ...base, consent: "yes", website: "spam" }, "9.9.9.2")).status).toBe(200);
+    expect(await db.lead.count()).toBe(0);
+    expect((await apply({ ...base, consent: "yes" }, "9.9.9.3")).status).toBe(200);
+    const lead = await db.lead.findFirstOrThrow();
+    expect(lead.firstName).toBe("Bob");
+    expect(await db.job.count({ where: { type: "lead.attempt-call" } })).toBeGreaterThan(0);
+  });
+});
