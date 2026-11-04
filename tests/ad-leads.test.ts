@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { parseAdLead } from "@/lib/ad-leads";
 import { POST } from "../app/api/webhooks/ad-leads/route";
@@ -90,5 +90,36 @@ describe("public apply page", () => {
     const lead = await db.lead.findFirstOrThrow();
     expect(lead.firstName).toBe("Bob");
     expect(await db.job.count({ where: { type: "lead.attempt-call" } })).toBeGreaterThan(0);
+  });
+});
+
+describe("YouTube / TikTok Telegram group", () => {
+  beforeEach(async () => { await resetDb(); process.env.AD_LEADS_KEY = "k-secret"; });
+
+  it("posts ad leads to their own group, tagging Molly", async () => {
+    process.env.TELEGRAM_BOT_TOKEN = "t"; process.env.TELEGRAM_CHAT_ID = "-555";
+    process.env.TELEGRAM_AD_LEADS_CHAT_ID = "1009998887776"; process.env.TELEGRAM_AD_LEADS_TAG = "molly_tbt";
+    const forms: FormData[] = [];
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_u, init) => {
+      forms.push(init!.body as FormData);
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 5 } }));
+    });
+    try {
+      await seedBase();
+      const r = await (await post(googleBody())).json();
+      const { sendNewAdLeadToTelegram, recruiterTags } = await import("@/lib/telegram");
+      expect(await recruiterTags(r.leadId)).toEqual(["@molly_tbt"]);
+      await db.lead.update({ where: { id: r.leadId }, data: { isDemo: false } });
+      await sendNewAdLeadToTelegram(r.leadId);
+      expect(forms[0].get("chat_id")).toBe("-1009998887776");
+      const text = String(forms[0].get("text"));
+      expect(text).toContain("@molly_tbt");
+      expect(text).toContain("New YouTube lead");
+      expect(text).toContain("Team");
+      expect(await db.job.count({ where: { type: "notify.telegram-ad-lead" } })).toBe(1);
+    } finally {
+      spy.mockRestore();
+      delete process.env.TELEGRAM_AD_LEADS_CHAT_ID; delete process.env.TELEGRAM_AD_LEADS_TAG;
+    }
   });
 });

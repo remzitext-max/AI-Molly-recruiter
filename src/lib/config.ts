@@ -113,6 +113,10 @@ export const config = {
   telegram: {
     get botToken() { return env("TELEGRAM_BOT_TOKEN"); },
     get chatId() { return env("TELEGRAM_CHAT_ID"); },
+    /** Group for YouTube / TikTok leads ("YT and TT leads"); a supergroup id pasted without its minus still works. */
+    get adLeadsChatId() { const v = env("TELEGRAM_AD_LEADS_CHAT_ID")?.replace(/\s+/g, ""); return v && /^100\d{8,}$/.test(v) ? `-${v}` : v; },
+    /** Who is tagged on those leads' messages, e.g. @molly_tbt (default: Molly's line in Settings). */
+    get adLeadsTag() { return env("TELEGRAM_AD_LEADS_TAG"); },
   },
   heygen: {
     get apiKey() { return env("HEYGEN_API_KEY"); },

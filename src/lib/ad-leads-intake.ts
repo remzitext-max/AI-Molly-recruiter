@@ -14,6 +14,7 @@ export async function acceptAdLead(p: AdLead): Promise<IngestResult | { result: 
   if (!campaign) return { result: "no_campaign" };
   const r = await ingestLead(p.lead, { orgId: campaign.orgId, campaignId: campaign.id, isDemo: isDemo || campaign.isDemo, scheduleOutreach: !p.sapYes });
   if (r.result === "created" && p.sapYes) await recordEvent({ leadId: r.leadId, actorType: "SYSTEM", type: "NOTE", message: "Answered yes to SAP on the ad form; no automatic call" });
+  if (r.result === "created") await enqueue("notify.telegram-ad-lead", { leadId: r.leadId }, { idempotencyKey: `notify.telegram-ad-lead:${r.leadId}` });
   if (r.result !== "invalid" && config.adLeadsSheetId) {
     // Every application gets a row, a repeat one too: recruiters should see a driver who applied again.
     const note = r.result === "created" ? (p.sapYes ? "SAP yes: will not call" : "Will call") : "Applied again (already in system)";

@@ -5,7 +5,7 @@ import { runRetentionSweep } from "../documents";
 import { pollGoogleSheet } from "../sheets-sync";
 import { pollTeamSheets } from "../team-sheets";
 import { db } from "../db";
-import { sendCallReport, sendConsentToTelegram, sendDocumentToTelegram, sendHiredToTelegram, sendRecruiterCallReminder, sendSmsReplyToTelegram } from "../telegram";
+import { sendNewAdLeadToTelegram, sendCallReport, sendConsentToTelegram, sendDocumentToTelegram, sendHiredToTelegram, sendRecruiterCallReminder, sendSmsReplyToTelegram } from "../telegram";
 import { fetchTelnyxTranscript } from "../telnyx-transcript";
 import { fillScreeningFromTranscript } from "../transcript-extract";
 import { log } from "../redact";
@@ -102,6 +102,9 @@ export const handlers: Record<string, JobHandler> = {
   "call.transcribe-upload": async (job) => {
     const { attemptId } = job.payload as { attemptId: string };
     await transcribeUpload(attemptId);
+  },
+  "notify.telegram-ad-lead": async (job) => {
+    await sendNewAdLeadToTelegram((job.payload as { leadId: string }).leadId);
   },
   "sheet.ad-lead": async (job) => {
     await appendAdLeadRow((job.payload as { row: string[] }).row);

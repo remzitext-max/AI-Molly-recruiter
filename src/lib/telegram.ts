@@ -39,6 +39,10 @@ export function parseRecruiterTelegram(text: string): Map<string, string> {
  * it to from the Pool). A recruiter no longer in the group is named instead.
  */
 export async function recruiterTags(leadId: string): Promise<string[]> {
+  if (await isAdLead(leadId)) {
+    const tag = await adLeadsTag();
+    if (tag) return [tag];
+  }
   const extra = config.googleSheets.extraTabs.filter((t) => t.tag);
   const lead = await db.lead.findUnique({ where: { id: leadId }, select: { sourceRecords: { select: { sourceSystem: true } } } });
   if (!lead) return [];
@@ -50,6 +54,22 @@ export async function recruiterTags(leadId: string): Promise<string[]> {
     else if (!tags.length) tags.push(`👤 Before processed by ${esc(tab)}`);
   }
   return [...new Set(tags)];
+}
+
+/** Sources of video-ad leads (YouTube via Google Ads, TikTok). */
+export const AD_LEAD_SOURCES = ["GOOGLE_ADS", "TIKTOK", "AD_LEADS"];
+
+/** A lead that first came from a YouTube / TikTok ad (a driver already on a board stays with that board's group). */
+export async function isAdLead(leadId: string): Promise<boolean> {
+  const first = await db.leadSourceRecord.findFirst({ where: { leadId }, orderBy: { createdAt: "asc" }, select: { sourceSystem: true } });
+  return !!first && AD_LEAD_SOURCES.includes(first.sourceSystem);
+}
+
+/** Molly for now: she and Crystal work the YouTube / TikTok leads. */
+async function adLeadsTag(): Promise<string | null> {
+  const t = config.telegram.adLeadsTag?.trim();
+  if (t) return t.startsWith("@") ? t : `@${t}`;
+  return parseRecruiterTelegram((await getSettings()).recruiterTelegram).get("molly") || null;
 }
 
 export function telegramConfigured() {
@@ -66,7 +86,9 @@ async function postToGroup(method: string, body: Record<string, string | Blob>, 
   if (!token || !config.telegram.chatId) throw new Error("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not configured");
   const lead = leadId ? await db.lead.findUnique({ where: { id: leadId }, select: { telegramThread: true, org: { select: { isMain: true, telegramChatId: true } } } }) : null;
   // A team's drivers go to the team's own group, never to the company's; no group, no message.
-  const configured = !lead || lead.org.isMain ? config.telegram.chatId : lead.org.telegramChatId;
+  let configured = !lead || lead.org.isMain ? config.telegram.chatId : lead.org.telegramChatId;
+  // YouTube / TikTok drivers have their own group.
+  if (leadId && config.telegram.adLeadsChatId && (await isAdLead(leadId))) configured = config.telegram.adLeadsChatId;
   if (!configured) return;
   const [threadChat, threadMsg] = (lead?.telegramThread ?? "").split(":");
   const post = async (chatId: string) => {
@@ -210,6 +232,31 @@ export async function callWorthPosting(attemptId: string): Promise<boolean> {
   return a.lead.screening.some((f) => f.callAttemptId === a.id && f.reportedValue && !["english_level", "first_name"].includes(f.key))
     || ["INTERESTED", "NOT_INTERESTED", "CALLBACK", "HUMAN_REQUESTED"].includes(a.outcome ?? "")
     || ["interested", "not_interested", "call_later"].includes(n.result ?? "");
+}
+
+/** "New YouTube lead" message in the ad leads group; the call card later replies under it. */
+export async function sendNewAdLeadToTelegram(leadId: string) {
+  if (!telegramConfigured()) return { sent: false, reason: "not configured" };
+  const l = await db.lead.findUnique({ where: { id: leadId }, include: { sourceRecords: { orderBy: { createdAt: "asc" }, take: 1 } } });
+  if (!l || l.isDemo) return { sent: false, reason: "nothing to send" };
+  const rec = l.sourceRecords[0];
+  const src = rec?.sourceSystem === "TIKTOK" ? "TikTok" : rec?.sourceSystem === "GOOGLE_ADS" ? "YouTube" : "Video ad";
+  const a = ((rec?.raw as { answers?: Record<string, string> } | null)?.answers ?? {}) as Record<string, string>;
+  const ans = (re: RegExp) => Object.entries(a).find(([k, v]) => re.test(k) && v.trim())?.[1]?.trim();
+  const sap = ans(/sap|drug|alcohol/);
+  const sapYes = !!sap && /^(y|yes|true)/i.test(sap);
+  await sendTelegram([
+    ...(await recruiterTags(l.id)),
+    `🆕 New ${src} lead`,
+    `🗒 ${esc([l.firstName, l.lastName].filter(Boolean).join(" ") || "Driver")}`,
+    `☎️ ${esc(l.phoneE164)}`,
+    ...(l.state ? [`📍 ${esc(l.state)}`] : []),
+    ...(ans(/^position$|solo|team/) ? [`🚛 ${esc(ans(/^position$|solo|team/)!)}`] : []),
+    ...(ans(/experience|years/) ? [`🪪 CDL-A: ${esc(ans(/experience|years/)!)}`] : []),
+    ...(sap ? [`⚠️ SAP: ${esc(sap)}`] : []),
+    sapYes ? `🤖 ${config.agentPersona.name} will not call (SAP yes)` : `🤖 ${config.agentPersona.name} will call`,
+  ].join("\n"), l.id);
+  return { sent: true };
 }
 
 export async function sendCallReport(attemptId: string) {
