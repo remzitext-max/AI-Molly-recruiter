@@ -80,11 +80,11 @@ export class GoogleSheetsSource implements SheetLeadSource {
     };
   }
 
-  private async token(): Promise<string> {
-    const missing = this.missing();
-    if (missing.length) throw new LiveContactBlockedError(`Google Sheets is not configured (missing ${missing.join(", ")})`);
+  private async token(write = false): Promise<string> {
     const g = config.googleSheets;
-    const scope = this.statusColumn ? "https://www.googleapis.com/auth/spreadsheets" : "https://www.googleapis.com/auth/spreadsheets.readonly";
+    const missing = write ? [!g.serviceAccountEmail && "GOOGLE_SERVICE_ACCOUNT_EMAIL", !g.privateKey && "GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY"].filter(Boolean) as string[] : this.missing();
+    if (missing.length) throw new LiveContactBlockedError(`Google Sheets is not configured (missing ${missing.join(", ")})`);
+    const scope = write || this.statusColumn ? "https://www.googleapis.com/auth/spreadsheets" : "https://www.googleapis.com/auth/spreadsheets.readonly";
     const key = `${g.serviceAccountEmail}|${scope}`;
     if (tokenCache && tokenCache.key === key && tokenCache.exp > Date.now() + 60_000) return tokenCache.token;
     const res = await providerFetch(TOKEN_URL, {
@@ -147,6 +147,17 @@ export class GoogleSheetsSource implements SheetLeadSource {
     const res = await providerFetch(url, { headers: { authorization: `Bearer ${await this.token()}` }, timeoutMs: 60_000 });
     const j = (await res.json()) as { valueRanges?: { range: string; values?: unknown[][] }[] };
     return titles.map((t, i) => snapshot(j.valueRanges?.[i] ?? { range: quote(t) }));
+  }
+
+  /** Append one row to the first tab of another spreadsheet (needs Editor share); writes `header` first when A1 is empty. */
+  async appendRow(sheetId: string, header: string[], row: string[]) {
+    const auth = { authorization: `Bearer ${await this.token(true)}`, "content-type": "application/json" };
+    const base = `${API}/${encodeURIComponent(sheetId)}/values`;
+    const top = (await (await providerFetch(`${base}/A1:A1`, { headers: auth })).json()) as { values?: unknown[][] };
+    const rows = top.values?.[0]?.[0] ? [row] : [header, row];
+    await providerFetch(`${base}/A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+      method: "POST", headers: auth, body: JSON.stringify({ majorDimension: "ROWS", values: rows }),
+    });
   }
 
   async writeStatus(sourceRecordId: string, text: string, phoneColumn?: string) {

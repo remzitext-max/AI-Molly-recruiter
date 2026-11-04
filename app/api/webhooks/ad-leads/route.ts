@@ -5,6 +5,8 @@ import { safeEqual } from "@/lib/crypto";
 import { ingestLead } from "@/lib/leads";
 import { recordEvent } from "@/lib/activity";
 import { parseAdLead } from "@/lib/ad-leads";
+import { adLeadRow } from "@/lib/ad-leads-sheet";
+import { enqueue } from "@/lib/jobs/queue";
 
 // Lead intake for YouTube (Google Ads lead form webhook) and TikTok (via Make/Zapier).
 // URL: /api/webhooks/ad-leads?platform=google|tiktok[&key=...]; Google sends the key as google_key.
@@ -25,5 +27,8 @@ export async function POST(req: Request) {
   if (!campaign) return NextResponse.json({ error: "No campaign" }, { status: 400 });
   const r = await ingestLead(p.lead, { orgId: campaign.orgId, campaignId: campaign.id, isDemo: isDemo || campaign.isDemo, scheduleOutreach: !p.sapYes });
   if (r.result === "created" && p.sapYes) await recordEvent({ leadId: r.leadId, actorType: "SYSTEM", type: "NOTE", message: "Answered yes to SAP on the ad form; no automatic call" });
+  if ((r.result === "created" || r.result === "merged") && config.adLeadsSheetId) {
+    await enqueue("sheet.ad-lead", { row: adLeadRow(p, r.result === "merged" ? "already in system" : p.sapYes ? "SAP yes: no call" : "calling") }, { idempotencyKey: `sheet.ad-lead:${r.leadId}`, maxAttempts: 8 });
+  }
   return NextResponse.json(r, { status: r.result === "invalid" ? 400 : 200 });
 }

@@ -50,3 +50,28 @@ describe("ad platform leads (YouTube / TikTok)", () => {
     expect(await db.job.count({ where: { type: "lead.attempt-call" } })).toBe(0);
   });
 });
+
+describe("ad leads sheet", () => {
+  beforeEach(async () => { await resetDb(); process.env.AD_LEADS_KEY = "k-secret"; });
+
+  it("builds a row with the Source column and queues it when AD_LEADS_SHEET_ID is set", async () => {
+    const { adLeadRow } = await import("@/lib/ad-leads-sheet");
+    const p = parseAdLead({ platform: "tiktok", name: "Ann Lee", phone: "+13125550111", state: "IL", position: "Solo", experience: "3 years", sap: "No", campaign: "TBT test" });
+    if ("error" in p) throw new Error(p.error);
+    const row = adLeadRow(p, "calling", new Date("2026-11-05T15:00:00Z"));
+    expect(row.slice(1, 9)).toEqual(["TikTok", "Ann Lee", "+13125550111", "", "IL", "Solo", "3 years", ""]);
+    expect(row[0]).toContain("09:00");
+    expect(row[10]).toBe("TBT test");
+
+    await seedBase();
+    process.env.AD_LEADS_SHEET_ID = "https://docs.google.com/spreadsheets/d/abc_DEF-1/edit#gid=0";
+    try {
+      const r = await (await post(googleBody())).json();
+      expect(r.result).toBe("created");
+      const job = await db.job.findFirstOrThrow({ where: { type: "sheet.ad-lead" } });
+      expect((job.payload as { row: string[] }).row[1]).toBe("YouTube");
+      const { config } = await import("@/lib/config");
+      expect(config.adLeadsSheetId).toBe("abc_DEF-1");
+    } finally { delete process.env.AD_LEADS_SHEET_ID; }
+  });
+});

@@ -31,7 +31,8 @@ export type JobType =
   | "lead.reengage-scan"
   | "document.read"
   | "meta.sync-leads"
-  | "meta.send-event";
+  | "meta.send-event"
+  | "sheet.ad-lead";
 
 export async function enqueue(
   type: JobType,

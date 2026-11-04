@@ -14,6 +14,7 @@ import { reengageScan } from "../reengage";
 import { readDocument } from "../document-read";
 import { syncHiringFromSheet } from "../hiring";
 import { transcribeUpload } from "../recruiter-upload";
+import { appendAdLeadRow } from "../ad-leads-sheet";
 import { sendMetaStageEvent, syncMetaLeads, type MetaStage } from "../meta";
 
 export const handlers: Record<string, JobHandler> = {
@@ -101,6 +102,9 @@ export const handlers: Record<string, JobHandler> = {
   "call.transcribe-upload": async (job) => {
     const { attemptId } = job.payload as { attemptId: string };
     await transcribeUpload(attemptId);
+  },
+  "sheet.ad-lead": async (job) => {
+    await appendAdLeadRow((job.payload as { row: string[] }).row);
   },
   "notify.telegram-consent": async (job) => {
     const { consentId } = job.payload as { consentId: string };

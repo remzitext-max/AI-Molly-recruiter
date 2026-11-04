@@ -35,6 +35,11 @@ export const config = {
   get adLeadsCampaignId(): string | undefined {
     return env("AD_LEADS_CAMPAIGN_ID");
   },
+  /** Spreadsheet (id or full link) where YouTube/TikTok leads are appended; shared with the service account as Editor. */
+  get adLeadsSheetId(): string | undefined {
+    const v = env("AD_LEADS_SHEET_ID");
+    return v ? (/\/d\/([A-Za-z0-9_-]+)/.exec(v)?.[1] ?? v.trim()) : undefined;
+  },
   // Live provider credentials. Presence is checked, never exposed to the browser.
   retell: {
     get apiKey() { return env("RETELL_API_KEY"); },

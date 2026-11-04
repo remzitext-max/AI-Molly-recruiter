@@ -55,6 +55,8 @@ export interface SheetLeadSource {
   readSheet(range?: string, spreadsheetId?: string): Promise<SheetSnapshot>;
   /** Every tab in the spreadsheet, or in another one shared with the service account (live sheets only). */
   listTabs?(spreadsheetId?: string): Promise<{ title: string; gid: string }[]>;
+  /** Append a row to another spreadsheet's first tab (live sheets only). */
+  appendRow?(spreadsheetId: string, header: string[], row: string[]): Promise<void>;
   /** Several tabs by name in one request (live sheets only); same order as `titles`. */
   readTabs?(titles: string[], spreadsheetId?: string): Promise<SheetSnapshot[]>;
   /** sourceRecordId "phone:+1..." matches the row by phone number in `phoneColumn`. */
