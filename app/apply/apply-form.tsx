@@ -16,7 +16,7 @@ export function ApplyForm({ src, campaign, ad }: { src: string; campaign: string
     setState("done");
   }
 
-  if (state === "done") return <div className="banner" style={{ marginTop: 16 }}><b>Thank you!</b> Our recruiting team will call you shortly from a US number. Please pick up.</div>;
+  if (state === "done") return <div className="banner" style={{ marginTop: 16 }}><b>Thank you!</b> Our recruiting team will call you shortly. Please pick up.</div>;
 
   const row = { display: "flex", flexDirection: "column" as const, gap: 4, marginTop: 12 };
   return (
