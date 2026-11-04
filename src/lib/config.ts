@@ -27,6 +27,14 @@ export const config = {
   get leadWebhookSecret(): string | undefined {
     return env("LEAD_WEBHOOK_SECRET");
   },
+  /** Shared key for /api/webhooks/ad-leads (Google Ads lead forms send it as google_key; others as ?key=). */
+  get adLeadsKey(): string | undefined {
+    return env("AD_LEADS_KEY");
+  },
+  /** Campaign that ad-platform leads join (default: the first live, non-demo campaign). */
+  get adLeadsCampaignId(): string | undefined {
+    return env("AD_LEADS_CAMPAIGN_ID");
+  },
   // Live provider credentials. Presence is checked, never exposed to the browser.
   retell: {
     get apiKey() { return env("RETELL_API_KEY"); },
