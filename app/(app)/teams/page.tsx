@@ -62,6 +62,7 @@ async function savePitchAction(fd: FormData) {
 
 const PITCH_LABELS: Record<keyof Pitch, string> = {
   hook: "Opening offer (Crystal says it right after the greeting; end with a question)",
+  teamHook: "Opening offer for drivers who applied for team",
   earnings: "What the driver can earn (said after they answer)",
   soloMinExperience: "Minimum experience for solo",
   teamPay: "Team pay",
