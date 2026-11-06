@@ -16,6 +16,7 @@ import { syncHiringFromSheet } from "../hiring";
 import { transcribeUpload } from "../recruiter-upload";
 import { appendAdLeadRow } from "../ad-leads-sheet";
 import { sendMetaStageEvent, syncMetaLeads, type MetaStage } from "../meta";
+import { runLearningReport } from "../learning";
 
 export const handlers: Record<string, JobHandler> = {
   "lead.attempt-call": attemptCallJob,
@@ -105,6 +106,7 @@ export const handlers: Record<string, JobHandler> = {
     const { attemptId } = job.payload as { attemptId: string };
     await transcribeUpload(attemptId);
   },
+  "learning.weekly": async (job) => { await runLearningReport((job.payload as { orgId: string }).orgId); },
   "notify.telegram-ad-lead": async (job) => {
     await sendNewAdLeadToTelegram((job.payload as { leadId: string }).leadId);
   },

@@ -38,6 +38,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           <div className="nav-group">Recruiting</div>
           <NavLink href="/import" icon="import" label="Import leads" />
           <NavLink href="/knowledge" icon="offers" label="Offers & knowledge" />
+          <NavLink href="/learning" icon="check" label="Crystal learning" />
           <NavLink href="/voice" icon="voice" label="Voice agent" />
           <NavLink href="/ads" icon="ads" label="Facebook ads" />
         </>

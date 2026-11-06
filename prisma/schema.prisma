@@ -708,3 +708,35 @@ model SheetDriver {
   @@unique([orgId, phoneE164])
   @@index([orgId, status])
 }
+
+/// Crystal's weekly self-review: what worked on calls, measured against the recruiters' sheet results.
+model LearningReport {
+  id          String   @id @default(cuid())
+  orgId       String
+  periodStart DateTime
+  periodEnd   DateTime
+  stats       Json
+  summary     String?
+  error       String?
+  createdAt   DateTime @default(now())
+  suggestions LearningSuggestion[]
+}
+
+/// A change Crystal proposes from a report. Nothing changes until the owner accepts it.
+model LearningSuggestion {
+  id          String         @id @default(cuid())
+  reportId    String
+  report      LearningReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  orgId       String
+  /// A pitch field (hook, earnings, rules...) the change applies to; null = advice only.
+  field       String?
+  title       String
+  why         String
+  proposed    String?
+  status      String         @default("OPEN") // OPEN | ACCEPTED | REJECTED
+  decidedById String?
+  decidedAt   DateTime?
+  createdAt   DateTime       @default(now())
+
+  @@index([orgId, status])
+}

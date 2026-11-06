@@ -33,7 +33,8 @@ export type JobType =
   | "meta.sync-leads"
   | "meta.send-event"
   | "sheet.ad-lead"
-  | "notify.telegram-ad-lead";
+  | "notify.telegram-ad-lead"
+  | "learning.weekly";
 
 export async function enqueue(
   type: JobType,
