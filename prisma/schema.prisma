@@ -159,6 +159,8 @@ model Organization {
   /// A team's own Facebook dataset (Arslon LLC's ads): its good leads are reported there;
   /// empty = the company's META_DATASET_ID.
   metaDatasetId      String?
+  /// The sales pitch Crystal says (hook, earnings, team pay...); see src/lib/pitch.ts. Empty = the main company's, then the default.
+  pitch              Json?
   createdAt DateTime   @default(now())
   users     User[]
   campaigns Campaign[]

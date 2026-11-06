@@ -1,5 +1,6 @@
 // Call orchestration: gating, locking, provider calls, event ingestion,
 // real-time agent actions, transfers and post-call workflow.
+import { pitchFor, pitchVariables } from "./pitch";
 import { companyName } from "./company";
 import type { CallOutcome, CallStatus, Job, Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -739,6 +740,8 @@ export async function callVariables(
     time_greeting: timeGreeting(lead.timezone, now),
     position_applied: appliedPosition(sources.map((r) => r.raw)),
     follow_up: lead.reengagedAt ? "yes" : "no",
+    // The company's own sales pitch (Teams page), so each carrier sells its own offer.
+    ...pitchVariables(await pitchFor(org)),
   };
 }
 

@@ -8,6 +8,7 @@ import { db } from "../src/lib/db";
 import { AGENT_TOOLS, buildAgentPrompt } from "../src/lib/agent-config";
 import { getActiveOfferVersion } from "../src/lib/knowledge";
 import { getSettings } from "../src/lib/settings";
+import { pitchFor, pitchVariables } from "../src/lib/pitch";
 import { DEFAULT_TRANSFER_TARGET, parseRecruiterPhones, teamTransferTarget, transferTargetName } from "../src/lib/recruiter-tab";
 
 const BASE = "https://api.telnyx.com/v2";
@@ -91,7 +92,7 @@ async function main() {
     enabled_features: ["telephony"],
     ...(process.env.TELNYX_MODEL ? { model: process.env.TELNYX_MODEL } : {}),
     tools,
-    dynamic_variables: { driver_first_name: "there", applied_when: "a while back", time_greeting: "Hi", position_applied: "a truck driving position", follow_up: "no", driver_timezone: "unknown", attempt_id: "", transfer_number: managerPhone, recruiter_phone: managerPhone, transfer_target: DEFAULT_TRANSFER_TARGET, company_name: company, office_open: "yes", office_opens: "8 AM", now_local: "unknown" },
+    dynamic_variables: { driver_first_name: "there", applied_when: "a while back", time_greeting: "Hi", position_applied: "a truck driving position", follow_up: "no", driver_timezone: "unknown", attempt_id: "", transfer_number: managerPhone, recruiter_phone: managerPhone, transfer_target: DEFAULT_TRANSFER_TARGET, company_name: company, office_open: "yes", office_opens: "8 AM", now_local: "unknown", ...pitchVariables(await pitchFor(org ?? { isMain: true })) },
     telephony_settings: {
       time_limit_secs: 15 * 60,
       // A silent line (voicemail recording, phone in a pocket) is checked once, then the call ends.

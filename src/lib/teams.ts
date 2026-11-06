@@ -1,7 +1,8 @@
 // Recruiting teams: other organizations on the same site. A team's logins see only the
 // team's leads and dashboard; Crystal calls its leads with the company's offer, in the team's
 // own company name when one is set, transfers its drivers to the team's own number and posts its cards to its own Telegram group.
-import type { User } from "@prisma/client";
+import { Prisma, type User } from "@prisma/client";
+import { cleanPitch } from "./pitch";
 import { db } from "./db";
 import { hashPassword } from "./auth";
 import { normalizePhone } from "./phone";
@@ -104,4 +105,14 @@ export async function updateTeam(owner: Pick<User, "id" | "orgId">, orgId: strin
   }
   await recordEvent({ actorType: "USER", actorId: owner.id, orgId: owner.orgId, type: "TEAM_UPDATED", message: `Team ${f.data.name} updated` });
   return { ok: true, transferChanged: team.transferPhoneE164 !== f.data.transferPhoneE164 };
+}
+
+/** Saves the sales pitch Crystal says for the main company or a team; empty fields fall back. */
+export async function savePitch(owner: Pick<User, "id" | "orgId">, orgId: string, raw: Record<string, string>) {
+  const org = await db.organization.findUnique({ where: { id: orgId } });
+  if (!org) return { error: "Team not found" };
+  const p = cleanPitch(raw);
+  await db.organization.update({ where: { id: orgId }, data: { pitch: Object.keys(p).length ? p : Prisma.DbNull } });
+  await recordEvent({ actorType: "USER", actorId: owner.id, orgId, type: "PITCH", message: `Call pitch ${Object.keys(p).length ? `saved (${Object.keys(p).join(", ")})` : "reset to default"}` });
+  return { ok: true };
 }

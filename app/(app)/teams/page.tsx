@@ -4,7 +4,8 @@ import { requireOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { Card, PageHead, fmt } from "@/components/ui";
 import { flash } from "@/lib/flash";
-import { createTeam, updateMainOfficeHours, updateTeam } from "@/lib/teams";
+import { createTeam, savePitch, updateMainOfficeHours, updateTeam } from "@/lib/teams";
+import { DEFAULT_PITCH, PITCH_KEYS, cleanPitch, type Pitch } from "@/lib/pitch";
 import { officeOpen } from "@/lib/office-hours";
 import { teamConnId } from "@/lib/team-sheets";
 
@@ -49,13 +50,55 @@ async function saveMainHours(fd: FormData) {
   revalidatePath("/teams");
 }
 
+async function savePitchAction(fd: FormData) {
+  "use server";
+  const u = await requireOwner();
+  const raw = Object.fromEntries(PITCH_KEYS.map((k) => [k, g(fd, k)]));
+  const r = await savePitch(u, g(fd, "id"), raw);
+  if ("error" in r) redirect(`/teams?error=${encodeURIComponent(r.error!)}`);
+  await flash("Call pitch saved. Crystal uses it from the next call");
+  revalidatePath("/teams");
+}
+
+const PITCH_LABELS: Record<keyof Pitch, string> = {
+  hook: "Opening offer (Crystal says it right after the greeting; end with a question)",
+  earnings: "What the driver can earn (said after they answer)",
+  soloMinExperience: "Minimum experience for solo",
+  teamPay: "Team pay",
+  equipment: "Trailer / equipment",
+  rules: "Extra rules for Crystal, one per line",
+};
+
+function PitchForm({ id, pitch, fallback }: { id: string; pitch: unknown; fallback: Pitch }) {
+  const own = cleanPitch(pitch);
+  return (
+    <details style={{ marginTop: 12 }}>
+      <summary className="small"><b>Call pitch</b> {Object.keys(own).length ? "(own)" : "(not set: uses the default below)"}</summary>
+      <form action={savePitchAction} style={{ marginTop: 8 }}>
+        <input type="hidden" name="id" value={id} />
+        {PITCH_KEYS.map((k) => (
+          <div key={k} style={{ marginBottom: 8 }}>
+            <label>{PITCH_LABELS[k]}</label>
+            {k === "soloMinExperience" || k === "teamPay" || k === "equipment"
+              ? <input name={k} defaultValue={own[k] ?? ""} placeholder={fallback[k]} autoComplete="off" />
+              : <textarea name={k} defaultValue={own[k] ?? ""} placeholder={fallback[k]} rows={k === "rules" ? 4 : 3} />}
+          </div>
+        ))}
+        <p className="small muted">Empty field = the grey text. Pay and other offer facts Crystal answers from are on the Knowledge page.</p>
+        <button className="secondary">Save pitch</button>
+      </form>
+    </details>
+  );
+}
+
 const HOURS_HELP = "Tashkent time. Outside these hours Crystal never transfers: she books a time for a recruiter to call the driver, and the recruiter is tagged in Telegram 5 minutes before. Empty = always transfer.";
 const hoursNow = (h: string | null) => (h ? (officeOpen(h) ? " (open now)" : " (closed now)") : "");
 
 export default async function Teams({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const owner = await requireOwner();
   const sp = await searchParams;
-  const main = await db.organization.findUniqueOrThrow({ where: { id: owner.orgId }, select: { name: true, officeHours: true } });
+  const main = await db.organization.findUniqueOrThrow({ where: { id: owner.orgId }, select: { id: true, name: true, officeHours: true, pitch: true } });
+  const mainPitch = { ...DEFAULT_PITCH, ...cleanPitch(main.pitch) };
   const teams = await db.organization.findMany({ where: { isMain: false }, orderBy: { createdAt: "asc" }, include: { _count: { select: { leads: true } }, campaigns: { orderBy: [{ isDemo: "asc" }, { createdAt: "asc" }], take: 1, select: { recallMinDays: true, recallMaxDays: true, recallPerDay: true } }, users: { orderBy: { createdAt: "asc" }, select: { name: true, email: true, role: true } } } });
   const conns = new Map((await db.sourceConnection.findMany({ where: { id: { in: teams.map((t) => teamConnId(t.id)) } } })).map((c) => [c.orgId, c]));
   return (
@@ -68,6 +111,7 @@ export default async function Teams({ searchParams }: { searchParams: Promise<{ 
           <button className="secondary">Save</button>
         </form>
         <p className="small muted">{HOURS_HELP}</p>
+        <PitchForm id={main.id} pitch={main.pitch} fallback={DEFAULT_PITCH} />
       </Card>
       {teams.map((t) => {
         const c = conns.get(t.id);
@@ -112,6 +156,7 @@ export default async function Teams({ searchParams }: { searchParams: Promise<{ 
               </div>
               <div style={{ marginTop: 12 }}><button className="secondary">Save</button></div>
             </form>
+            <PitchForm id={t.id} pitch={t.pitch} fallback={mainPitch} />
           </Card>
         );
       })}
