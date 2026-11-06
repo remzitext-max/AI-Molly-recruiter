@@ -5,7 +5,6 @@ import { resolveTimezoneWithPhone } from "./timezone";
 import { recordEvent } from "./activity";
 import { ensureAssigned } from "./assignment";
 import { enqueue } from "./jobs/queue";
-import { queueMetaStageEvent } from "./meta";
 import type { IncomingLead } from "../adapters/types";
 
 export const PIPELINE_RANK: Record<PipelineStatus, number> = {
@@ -23,7 +22,7 @@ export async function advancePipeline(leadId: string, to: PipelineStatus, tx: Tx
   await tx.lead.update({ where: { id: leadId }, data: { pipelineStatus: to } });
   await recordEvent({ leadId, actorType: "SYSTEM", type: "PIPELINE", message: `Pipeline: ${lead.pipelineStatus} → ${to}` }, tx);
   await queueSourceSync(leadId, to, tx);
-  await queueMetaStageEvent(leadId, to, tx);
+  // Facebook gets results only from the recruiters' sheet statuses (and a Hired marked on the site), never from Crystal's own call outcome (Remzi 2026-11-06).
   return true;
 }
 

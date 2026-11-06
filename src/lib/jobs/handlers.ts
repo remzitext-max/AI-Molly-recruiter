@@ -72,6 +72,8 @@ export const handlers: Record<string, JobHandler> = {
   "meta.sync-leads": async () => { await syncMetaLeads(); },
   "meta.send-event": async (job) => {
     const { leadId, stage } = job.payload as { leadId: string; stage: MetaStage };
+    // Jobs queued before 2026-11-06 for Crystal's own stages are dropped: only Hired from the site still goes.
+    if (stage !== "HIRED") return;
     return sendMetaStageEvent(leadId, stage);
   },
   "call.fetch-recording": async (job) => {
