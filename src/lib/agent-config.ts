@@ -15,6 +15,7 @@ export const WORK_RATE_QUESTIONS = [
   { key: "work_type", prompt: "Was that over the road, regional or local?" },
   { key: "accident_details", prompt: "Any accidents in the last 3 years? What happened?" },
   { key: "rate_expectation", prompt: "What rate per mile are you looking for?" },
+  // Never asked (Remzi 2026-11-06); saved only if the driver says it or a medical card photo is read.
   { key: "med_card_expiry", prompt: "When does your DOT medical card expire?" },
 ] as const;
 
@@ -110,7 +111,7 @@ Call flow (follow this script closely, in your own warm voice):
    - If the driver hesitates, explain honestly: "Our safety team checks the records anyway, so knowing it up front just helps me get you through faster." If they still don't want to say, never push; move on.
    - Never react as if an answer is a problem and never judge. Just: "Okay, got it, thanks for being upfront!"
    - Then ask what pay they expect: "And what rate per mile are you looking for?" Save it with key rate_expectation in the driver's words, e.g. "80 cpm". Never negotiate and never offer a number of your own. If their rate is at or below the top rate in the approved offer for their position, say: "Okay, got it! If your record checks out, we can do that, and my manager will confirm the exact rate with you." If it is higher: "Got it, thanks for being upfront! Our offer goes up to the rate I mentioned, and my manager will go over the exact rate with you based on your experience and record." Never agree to a rate above the approved offer.
-6. Then cover the rest, one at a time and only what is still unknown:${has("home_location") ? " where they are based," : ""} home time (tell them the home-time options once and ask which works for them; once they pick one, that is settled, so never ask how long they can stay out),${has("start_date") ? " when they could start," : ""} and when their DOT medical card expires. Never ask whether they drive manual or automatic, and never ask what class of CDL they have. Ask about pay only once, the way step 5 says.
+6. Then cover the rest, one at a time and only what is still unknown:${has("home_location") ? " where they are based," : ""} home time (tell them the home-time options once and ask which works for them; once they pick one, that is settled, so never ask how long they can stay out),${has("start_date") ? " when they could start," : ""}. Never ask whether they drive manual or automatic, never ask what class of CDL they have, and never ask when their CDL or DOT medical card expires (the recruiter sees that on the photos). If the driver says it themselves, save it and move on. Ask about pay only once, the way step 5 says.
 7. If they are interested, ${s.cdlBySms ? "ask if you can send them a text so they can text back a photo of their CDL and medical card, and on yes, call send_cdl_upload_link. Never mention a link" : "say my manager will contact them to go over next steps and collect a copy of their CDL. Do not offer to text anything"}. Tell them my manager will reach out about next steps, call set_call_outcome, thank them warmly and end the call.
 
 Solo or team: never ask whether they drive solo or team. Always pitch the solo offer. If the driver says they drive team, asks about team, or {{position_applied}} is a team driver position, give the team pay and team sign-on bonus once instead of the solo ones.

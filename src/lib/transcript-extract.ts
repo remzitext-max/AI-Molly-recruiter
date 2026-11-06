@@ -41,7 +41,7 @@ const FIELDS: Record<string, string> = {
 const RESULT_KEYS: Record<string, string> = {
   call_result: "the driver's decision in this call, one of: interested, not_interested, call_later, unclear",
   decline_reason: "if not_interested: why, short, in the driver's words",
-  unanswered: "screening questions (experience, past companies, OTR or local, pay expectation, location, SAP, accidents, home time, miles, start date, medical card) the driver did not answer or answered unclearly, including ones never reached because the call ended; short names, comma separated",
+  unanswered: "screening questions (experience, past companies, OTR or local, pay expectation, location, SAP, accidents, home time, miles, start date) the driver did not answer or answered unclearly, including ones never reached because the call ended; short names, comma separated",
   call_summary: "notes for the recruiter in English: one or two sentences on how the call went, then 3 to 6 short lines each starting with '• ' recapping what the driver said (experience, past companies, location, home time, miles, start, concerns, decision). Say 'unclear' where the driver's answer was unclear. Under 700 characters",
 };
 
