@@ -20,15 +20,17 @@ async function runNow(fd: FormData) {
   redirect(back(orgId));
 }
 
-async function decide(fd: FormData) {
-  "use server";
+// Two separate actions (not one button value): some browsers and automation submit the form without the clicked button's value.
+async function decide(fd: FormData, accept: boolean) {
   const u = await requireOwner();
-  const r = await decideSuggestion(u, g(fd, "id"), g(fd, "decision") === "accept", fd.has("proposed") ? g(fd, "proposed") : undefined);
+  const r = await decideSuggestion(u, g(fd, "id"), accept, fd.has("proposed") ? g(fd, "proposed") : undefined);
   if ("error" in r) await flash(r.error!);
-  else await flash(g(fd, "decision") === "accept" ? "Accepted. Crystal uses it from the next call" : "Rejected");
+  else await flash(accept ? "Accepted. Crystal uses it from the next call" : "Rejected");
   revalidatePath("/learning");
   redirect(back(g(fd, "orgId")));
 }
+async function acceptSuggestion(fd: FormData) { "use server"; await decide(fd, true); }
+async function rejectSuggestion(fd: FormData) { "use server"; await decide(fd, false); }
 
 async function answer(fd: FormData) {
   "use server";
@@ -82,18 +84,22 @@ export default async function Learning({ searchParams }: { searchParams: Promise
       <Card title={`Suggestions to decide (${open.length})`}>
         {open.length === 0 && <p className="muted small">Nothing waiting.</p>}
         {open.map((s) => (
-          <form key={s.id} action={decide} style={{ borderTop: "1px solid var(--border, #e5e7eb)", paddingTop: 12, marginTop: 12 }}>
-            <input type="hidden" name="id" value={s.id} />
-            <input type="hidden" name="orgId" value={orgId} />
+          <div key={s.id} style={{ borderTop: "1px solid var(--border, #e5e7eb)", paddingTop: 12, marginTop: 12 }}>
             <p><b>{s.title}</b>{s.field && <span className="small muted"> · changes the pitch field &ldquo;{s.field}&rdquo;</span>}</p>
             <p className="small">{s.why}</p>
-            {s.field && s.proposed && <textarea name="proposed" defaultValue={s.proposed} rows={3} />}
             {!s.field && s.proposed && <p className="small muted">{s.proposed}</p>}
-            <div className="inline" style={{ marginTop: 8 }}>
-              <button name="decision" value="accept">{s.field ? "Accept" : "Got it"}</button>
-              <button name="decision" value="reject" className="secondary">Reject</button>
-            </div>
-          </form>
+            <form action={acceptSuggestion}>
+              <input type="hidden" name="id" value={s.id} />
+              <input type="hidden" name="orgId" value={orgId} />
+              {s.field && s.proposed && <textarea name="proposed" defaultValue={s.proposed} rows={3} />}
+              <button style={{ marginTop: 8 }}>{s.field ? "Accept" : "Got it"}</button>
+            </form>
+            <form action={rejectSuggestion} style={{ marginTop: 6 }}>
+              <input type="hidden" name="id" value={s.id} />
+              <input type="hidden" name="orgId" value={orgId} />
+              <button className="secondary">Reject</button>
+            </form>
+          </div>
         ))}
       </Card>
       <Card title={`Questions Crystal couldn't answer (${questions.length})`}>
