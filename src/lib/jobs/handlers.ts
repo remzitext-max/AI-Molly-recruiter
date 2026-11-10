@@ -1,5 +1,6 @@
 import type { JobHandler } from "./queue";
 import { attemptCallJob, handoffEvaluateJob, reconcileCallJob, simulateCallJob, syncSourceJob, transferTimeoutJob } from "../calls";
+import { inboundCloseJob } from "../inbound";
 import { pollRingCentralInbound, sendCdlLink, sendMissedCallText } from "../messaging";
 import { runRetentionSweep } from "../documents";
 import { pollGoogleSheet } from "../sheets-sync";
@@ -22,6 +23,7 @@ export const handlers: Record<string, JobHandler> = {
   "lead.attempt-call": attemptCallJob,
   "call.simulate": simulateCallJob,
   "call.reconcile": reconcileCallJob,
+  "call.inbound-close": inboundCloseJob,
   "transfer.timeout": transferTimeoutJob,
   "handoff.evaluate": handoffEvaluateJob,
   "lead.sync-source": syncSourceJob,

@@ -10,6 +10,7 @@ export type JobType =
   | "lead.attempt-call"
   | "call.simulate"
   | "call.reconcile"
+  | "call.inbound-close"
   | "sms.send-cdl-link"
   | "handoff.evaluate"
   | "transfer.timeout"

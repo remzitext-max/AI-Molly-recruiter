@@ -61,6 +61,8 @@ async function main() {
   }
   if (!facts.length) console.log("No published real offer found, so the assistant will look up every answer.");
 
+  // TELNYX_INBOUND=0 turns off answering calls to our number.
+  const inbound = process.env.TELNYX_INBOUND !== "0";
   const toolUrl = `${config.appUrl}/api/agent/telnyx-tools`;
   const tools: unknown[] = AGENT_TOOLS.map((t) => ({
     type: "webhook",
@@ -88,11 +90,14 @@ async function main() {
     name: `${company} - Molly AI recruiter`,
     // One assistant for every team: each call says whose company it is in {{company_name}}.
     instructions: await buildAgentPrompt("{{company_name}}", "the transfer tool with the target named {{transfer_target}} (exactly that target; never pick another one, whatever the driver calls the person)", facts),
-    greeting: "{{time_greeting}}! Is this {{driver_first_name}}?",
+    // Outbound calls pass their own opening line; the default is for drivers calling in.
+    greeting: "{{opening_line}}",
     enabled_features: ["telephony"],
     ...(process.env.TELNYX_MODEL ? { model: process.env.TELNYX_MODEL } : {}),
     tools,
-    dynamic_variables: { driver_first_name: "there", applied_when: "a while back", time_greeting: "Hi", position_applied: "a truck driving position", follow_up: "no", driver_timezone: "unknown", attempt_id: "", transfer_number: managerPhone, recruiter_phone: managerPhone, transfer_target: DEFAULT_TRANSFER_TARGET, company_name: company, office_open: "yes", office_opens: "8 AM", now_local: "unknown", ...pitchVariables(await pitchFor(org ?? { isMain: true })) },
+    // Drivers calling Crystal's number: the app looks up the caller and returns their variables (src/lib/inbound.ts).
+    ...(inbound ? { dynamic_variables_webhook_url: `${config.appUrl}/api/agent/telnyx-init?token=${encodeURIComponent(webhookToken)}`, dynamic_variables_webhook_timeout_ms: 4000 } : {}),
+    dynamic_variables: { call_direction: "inbound", opening_line: `Hi, thanks for calling ${company}! This is ${config.agentPersona.name}. How can I help you?`, driver_first_name: "there", applied_when: "a while back", time_greeting: "Hi", position_applied: "a truck driving position", follow_up: "no", driver_timezone: "unknown", attempt_id: "", transfer_number: managerPhone, recruiter_phone: managerPhone, transfer_target: DEFAULT_TRANSFER_TARGET, company_name: company, office_open: "yes", office_opens: "8 AM", now_local: "unknown", ...pitchVariables(await pitchFor(org ?? { isMain: true })) },
     telephony_settings: {
       time_limit_secs: 15 * 60,
       // A silent line (voicemail recording, phone in a pocket) is checked once, then the call ends.
@@ -122,6 +127,23 @@ async function main() {
   }
   const full = await telnyx<{ data?: Assistant } & Assistant>("GET", `/ai/assistants/${a.id}`);
   const texmlApp = (full.data ?? full).telephony_settings?.default_texml_app_id;
+  if (inbound && texmlApp) {
+    // Calls to our number go to the assistant's TeXML app; its status callback tells the app when they end.
+    try {
+      const app = await telnyx<{ data?: { friendly_name?: string; voice_url?: string } }>("GET", `/texml_applications/${texmlApp}`);
+      await telnyx("PATCH", `/texml_applications/${texmlApp}`, { friendly_name: app.data?.friendly_name, voice_url: app.data?.voice_url, status_callback: `${config.appUrl}/api/webhooks/telnyx?token=${encodeURIComponent(webhookToken)}`, status_callback_method: "post" });
+      console.log("Inbound: end-of-call callback set");
+    } catch (e) { console.log(`Inbound: could not set the end-of-call callback (calls still close after 20 min): ${(e as Error).message.slice(0, 200)}`); }
+    if (fromNumber) {
+      const nums = await telnyx<{ data?: { id: string; connection_id?: string | null }[] }>("GET", `/phone_numbers?filter[phone_number]=${encodeURIComponent(fromNumber)}`);
+      const n = nums.data?.[0];
+      if (!n) console.log(`Inbound: number ${fromNumber} not found in this Telnyx account`);
+      else if (n.connection_id !== texmlApp) {
+        await telnyx("PATCH", `/phone_numbers/${n.id}`, { connection_id: texmlApp });
+        console.log(`Inbound: ${fromNumber} now rings Crystal (was connection ${n.connection_id ?? "none"})`);
+      } else console.log(`Inbound: ${fromNumber} already rings Crystal`);
+    }
+  }
   console.log(`Put these lines in .env, then restart:\nVOICE_PROVIDER=telnyx\nTELNYX_ASSISTANT_ID=${a.id}\nTELNYX_TEXML_APP_ID=${texmlApp ?? "(not returned: copy it from the assistant's Telephony tab)"}`);
 }
 

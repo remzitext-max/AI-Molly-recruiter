@@ -417,6 +417,8 @@ export async function applyAgentAction(attemptId: string, input: unknown): Promi
         update: { reportedValue: redactText(action.value), rawUtterance: redactText(action.raw).slice(0, 500), status: action.status, callAttemptId: attemptId },
       });
       if (action.key === "home_location") await maybeUpdateLocation(lead.id, action.value);
+      // A driver who called in gives their name on the call.
+      if (action.key === "first_name" && !lead.firstName && action.value.trim()) await db.lead.update({ where: { id: lead.id }, data: { firstName: action.value.trim().split(/\s+/)[0].slice(0, 60) } });
       if (action.status === "UNCLEAR") await upsertTask(lead.id, "REVIEW_UNCLEAR", `Unclear answer: ${action.key.replace(/_/g, " ")}`, lead.assignedToId, action.raw.slice(0, 300), undefined, `unclear:${lead.id}:${action.key}`);
       if (action.status === "CORRECTED") await recordEvent({ leadId: lead.id, actorType: "DRIVER", type: "CORRECTION", message: `Driver corrected ${action.key.replace(/_/g, " ")}` });
       if (action.key === "offer_interest" && /teammate/i.test(action.value)) await markNeedsTeammate(lead.id);
@@ -729,6 +731,7 @@ export async function callVariables(
   const org = await db.organization.findUniqueOrThrow({ where: { id: lead.orgId } });
   return {
     driver_first_name: lead.firstName ?? "", company_name: await companyName(org),
+    call_direction: "outbound", opening_line: `${timeGreeting(lead.timezone, now)}! Is this ${lead.firstName ?? "there"}?`,
     // Outside the recruiters' hours Crystal books a recruiter callback instead of transferring.
     office_open: officeOpen(org.officeHours, now) ? "yes" : "no",
     office_opens: localClock(nextOpening(org.officeHours, now), lead.timezone),
