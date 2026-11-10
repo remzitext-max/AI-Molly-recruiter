@@ -179,7 +179,9 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
   if (!talked) {
     return [
       ...tags,
-      `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}${secs !== null ? ` (${secs} sec)` : ""}: ${transferred ? "driver asked for a person" : "no answers collected"}`,
+      a.direction === "INBOUND"
+        ? `📲 ${name || "A driver"} called ${v(config.agentPersona.name)} AI himself${secs !== null ? ` (${secs} sec)` : ""}: ${transferred ? "asked for a person" : "no answers collected"}`
+        : `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}${secs !== null ? ` (${secs} sec)` : ""}: ${transferred ? "driver asked for a person" : "no answers collected"}`,
       `☎️ ${v(l.phoneE164)}`,
       ...(endLine ? [endLine] : []),
       ...lastDriverLines(a.transcript),
@@ -191,7 +193,8 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
   const fit = fitScore(answersOf(l.screening), fitRulesFrom((await getSettings()).fitRules));
   return [
     ...tags,
-    `👔Recruiter: ${v(config.agentPersona.name)} AI`,
+    // A driver who called our number himself (Remzi wants it marked on the card).
+    `👔Recruiter: ${v(config.agentPersona.name)} AI${a.direction === "INBOUND" ? " (called himself)" : ""}`,
     `🥸Driver type: ${team ? "Team" : "Solo"}`,
     `🗒Driver name: ${name}`,
     `🌍State: ${v(l.state || slot("home_location"))}`,
