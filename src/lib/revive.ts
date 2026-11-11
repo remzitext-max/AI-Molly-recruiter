@@ -104,14 +104,18 @@ export async function reviveSummary(orgId: string, now = new Date()): Promise<Re
 export async function reviveResults(orgId: string, since?: Date) {
   const leads = await db.lead.findMany({
     where: { orgId, isDemo: false, reviveAt: since ? { gte: since } : { not: null } },
-    select: { reviveFrom: true, pipelineStatus: true, documentStatus: true, hireStage: true, calls: { where: { status: "COMPLETED" }, select: { id: true, outcome: true }, take: 5 } },
+    select: { reviveAt: true, reviveFrom: true, hireStage: true, hiredAt: true,
+      calls: { where: { status: "COMPLETED" }, select: { createdAt: true, outcome: true } },
+      documents: { select: { uploadedAt: true } } },
   });
+  // Only what happened after the driver was picked: their old calls and documents do not count.
+  const after = (l: (typeof leads)[number], d: Date) => !!l.reviveAt && d >= l.reviveAt;
   const row = (ls: typeof leads) => ({
     picked: ls.length,
-    talked: ls.filter((l) => l.calls.some((c) => ["INTERESTED", "NOT_INTERESTED", "CALLBACK", "HUMAN_REQUESTED"].includes(c.outcome ?? ""))).length,
-    interested: ls.filter((l) => ["INTERESTED", "DOCS_REQUESTED", "DOCS_RECEIVED", "HANDOFF_READY", "HANDED_OFF"].includes(l.pipelineStatus) || l.calls.some((c) => c.outcome === "INTERESTED")).length,
-    docs: ls.filter((l) => l.documentStatus === "RECEIVED").length,
-    hired: ls.filter((l) => l.hireStage === "HIRED").length,
+    talked: ls.filter((l) => l.calls.some((c) => after(l, c.createdAt) && ["INTERESTED", "NOT_INTERESTED", "CALLBACK", "HUMAN_REQUESTED"].includes(c.outcome ?? ""))).length,
+    interested: ls.filter((l) => l.calls.some((c) => after(l, c.createdAt) && c.outcome === "INTERESTED")).length,
+    docs: ls.filter((l) => l.documents.some((d) => after(l, d.uploadedAt))).length,
+    hired: ls.filter((l) => l.hireStage === "HIRED" && !!l.hiredAt && after(l, l.hiredAt)).length,
   });
   const bySegment = Object.fromEntries(SEGMENT_ORDER.map((s) => [s, row(leads.filter((l) => segmentOfStatus(l.reviveFrom) === s))])) as Record<Segment, ReturnType<typeof row>>;
   return { all: row(leads), bySegment };
