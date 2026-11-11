@@ -1,5 +1,6 @@
 // Call orchestration: gating, locking, provider calls, event ingestion,
 // real-time agent actions, transfers and post-call workflow.
+import { reviveStillOpen, segmentOfStatus, SEGMENTS } from "./revive";
 import { pitchFor, pitchVariables } from "./pitch";
 import { companyName } from "./company";
 import type { CallOutcome, CallStatus, Job, Prisma } from "@prisma/client";
@@ -66,7 +67,9 @@ export async function attemptCallJob(job: Job) {
   // Retries and follow-ups: a recruiter may have reached the driver in the meantime
   // (status other than "No answer" in the lead sheet). The first call never waits for this.
   const worked = (lead.reengagedAt || lead.attemptCount > 0) && !lead.isDemo ? await recruiterWorkedStatus(lead.phoneE164) : null;
-  if (worked || lead.hireStage !== "NONE") {
+  // An old lead picked on purpose (revive) may be called while the sheet still shows the status it had then.
+  const revived = (worked || lead.hireStage !== "NONE") && lead.reviveFrom ? await reviveStillOpen(lead) : false;
+  if ((worked || lead.hireStage !== "NONE") && !revived) {
     const msg = worked ? `Recruiter already talked to the driver (sheet ${worked.tab} tab: ${worked.status})` : `Recruiter is working with the driver (status: ${HIRE_LABEL[lead.hireStage]})`;
     await db.lead.update({ where: { id: leadId }, data: { queueReason: msg, nextContactAt: null } });
     await recordEvent({ leadId, actorType: "SYSTEM", type: "CALL_BLOCKED", message: `Call not placed: ${msg}` });
@@ -724,7 +727,7 @@ export async function syncSourceJob(job: Job) {
 
 /** Per-call values the voice agent's prompt refers to as {{name}}. */
 export async function callVariables(
-  lead: { id: string; orgId: string; firstName: string | null; timezone: string | null; createdAt?: Date; reengagedAt?: Date | null; permissions: { scope: string; revokedAt: Date | null; grantedAt: Date }[] },
+  lead: { id: string; orgId: string; firstName: string | null; timezone: string | null; createdAt?: Date; reengagedAt?: Date | null; reviveFrom?: string | null; permissions: { scope: string; revokedAt: Date | null; grantedAt: Date }[] },
   attemptId: string, offerVersionId: string, now = new Date(),
 ): Promise<Record<string, string>> {
   const sources = await db.leadSourceRecord.findMany({ where: { leadId: lead.id }, select: { raw: true } });
@@ -743,6 +746,8 @@ export async function callVariables(
     time_greeting: timeGreeting(lead.timezone, now),
     position_applied: appliedPosition(sources.map((r) => r.raw)),
     follow_up: lead.reengagedAt ? "yes" : "no",
+    // An old lead who talked to a recruiter (or said no) back then: Crystal opens with that.
+    talked_before: (() => { const s = segmentOfStatus(lead.reviveFrom); return s && SEGMENTS[s].talkedBefore ? "yes" : "no"; })(),
     // The company's own sales pitch (Teams page), so each carrier sells its own offer.
     ...pitchVariables(await pitchFor(org)),
   };

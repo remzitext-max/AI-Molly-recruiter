@@ -1,0 +1,6 @@
+ALTER TABLE "Campaign" ADD COLUMN "reviveEnabled" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Campaign" ADD COLUMN "revivePerDay" INTEGER NOT NULL DEFAULT 20;
+ALTER TABLE "Lead" ADD COLUMN "reviveAt" TIMESTAMP(3);
+ALTER TABLE "Lead" ADD COLUMN "reviveFrom" TEXT;
+ALTER TABLE "Lead" ADD COLUMN "reviveTab" TEXT;
+CREATE INDEX "Lead_reviveAt_idx" ON "Lead"("reviveAt");

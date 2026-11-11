@@ -12,6 +12,7 @@ import { fillScreeningFromTranscript } from "../transcript-extract";
 import { log } from "../redact";
 import { fetchRecording } from "../recordings";
 import { reengageScan } from "../reengage";
+import { reviveScan } from "../revive";
 import { readDocument } from "../document-read";
 import { syncHiringFromSheet } from "../hiring";
 import { transcribeUpload } from "../recruiter-upload";
@@ -68,6 +69,7 @@ export const handlers: Record<string, JobHandler> = {
     await sendRecruiterCallReminder(leadId, new Date(at));
   },
   "lead.reengage-scan": async () => { await reengageScan(); },
+  "lead.revive-scan": async () => { await reviveScan(); },
   "document.read": async (job) => {
     const { documentId } = job.payload as { documentId: string };
     await readDocument(documentId);

@@ -183,6 +183,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
         ? `📲 ${name || "A driver"} called ${v(config.agentPersona.name)} AI himself${secs !== null ? ` (${secs} sec)` : ""}: ${transferred ? "asked for a person" : "no answers collected"}`
         : `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}${secs !== null ? ` (${secs} sec)` : ""}: ${transferred ? "driver asked for a person" : "no answers collected"}`,
       `☎️ ${v(l.phoneE164)}`,
+      ...reviveLine(l),
       ...(endLine ? [endLine] : []),
       ...lastDriverLines(a.transcript),
       ...recruiterCallLine(l),
@@ -195,6 +196,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
     ...tags,
     // A driver who called our number himself (Remzi wants it marked on the card).
     `👔Recruiter: ${v(config.agentPersona.name)} AI${a.direction === "INBOUND" ? " (called himself)" : ""}`,
+    ...reviveLine(l),
     `🥸Driver type: ${team ? "Team" : "Solo"}`,
     `🗒Driver name: ${name}`,
     `🌍State: ${v(l.state || slot("home_location"))}`,
@@ -358,4 +360,9 @@ export async function sendDocumentToTelegram(documentId: string) {
   const document = new File([new Uint8Array(data)], `${(name || "driver").replace(/[^A-Za-z0-9]+/g, "_")}.${d.storageKey.split(".").pop()}`, { type: d.mimeType });
   await postToGroup("sendDocument", { caption, document }, d.leadId, 60_000);
   return { sent: true };
+}
+
+/** An old lead Crystal called on purpose: what the sheet said about the driver back then. */
+function reviveLine(l: { reviveFrom?: string | null; reviveTab?: string | null }) {
+  return l.reviveFrom ? [`♻️ Old lead: was "${esc(l.reviveFrom)}"${l.reviveTab ? ` in the ${esc(l.reviveTab)} tab` : ""}`] : [];
 }

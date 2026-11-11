@@ -97,7 +97,7 @@ async function main() {
     tools,
     // Drivers calling Crystal's number: the app looks up the caller and returns their variables (src/lib/inbound.ts).
     ...(inbound ? { dynamic_variables_webhook_url: `${config.appUrl}/api/agent/telnyx-init?token=${encodeURIComponent(webhookToken)}`, dynamic_variables_webhook_timeout_ms: 4000 } : {}),
-    dynamic_variables: { call_direction: "inbound", opening_line: `Hi, thanks for calling ${company}! This is ${config.agentPersona.name}. How can I help you?`, driver_first_name: "there", applied_when: "a while back", time_greeting: "Hi", position_applied: "a truck driving position", follow_up: "no", driver_timezone: "unknown", attempt_id: "", transfer_number: managerPhone, recruiter_phone: managerPhone, transfer_target: DEFAULT_TRANSFER_TARGET, company_name: company, office_open: "yes", office_opens: "8 AM", now_local: "unknown", ...pitchVariables(await pitchFor(org ?? { isMain: true })) },
+    dynamic_variables: { call_direction: "inbound", opening_line: `Hi, thanks for calling ${company}! This is ${config.agentPersona.name}. How can I help you?`, driver_first_name: "there", applied_when: "a while back", time_greeting: "Hi", position_applied: "a truck driving position", follow_up: "no", talked_before: "no", driver_timezone: "unknown", attempt_id: "", transfer_number: managerPhone, recruiter_phone: managerPhone, transfer_target: DEFAULT_TRANSFER_TARGET, company_name: company, office_open: "yes", office_opens: "8 AM", now_local: "unknown", ...pitchVariables(await pitchFor(org ?? { isMain: true })) },
     telephony_settings: {
       time_limit_secs: 15 * 60,
       // A silent line (voicemail recording, phone in a pocket) is checked once, then the call ends.

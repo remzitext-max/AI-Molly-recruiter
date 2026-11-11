@@ -254,6 +254,9 @@ model Campaign {
   recallMaxDays       Int            @default(60)
   recallPerDay        Int            @default(25)
   reengageAfterDays   Int            @default(0) // >0: one more round of calls to unreached / not-interested leads this many days after their last call
+  /// Old leads page: Crystal calls up to revivePerDay old sheet leads a day (see src/lib/revive.ts).
+  reviveEnabled       Boolean        @default(false)
+  revivePerDay        Int            @default(20)
   createdAt           DateTime       @default(now())
   leads               Lead[]
 }
@@ -290,6 +293,11 @@ model Lead {
   /// First Telegram message about this lead; later ones go as replies to it ("chatId:messageId").
   telegramThread String?
   reengagedAt        DateTime?
+  /// Picked from the old leads (revive): when, and the sheet status / tab it had then.
+  /// Crystal may call it while the sheet still shows that status.
+  reviveAt           DateTime?
+  reviveFrom         String?
+  reviveTab          String?
   /// Facebook lead ad details, matched by phone from the Meta Lead Ads API (admin only).
   fbLeadId           String?
   fbCampaign         String?
@@ -326,6 +334,7 @@ model Lead {
   @@index([pipelineStatus])
   @@index([assignedToId])
   @@index([hireStage])
+  @@index([reviveAt])
 }
 
 model LeadSourceRecord {

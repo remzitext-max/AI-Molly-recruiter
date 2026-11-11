@@ -30,6 +30,7 @@ export type JobType =
   | "notify.recruiter-call-reminder"
   | "source.google-sheets.hiring"
   | "lead.reengage-scan"
+  | "lead.revive-scan"
   | "document.read"
   | "meta.sync-leads"
   | "meta.send-event"
