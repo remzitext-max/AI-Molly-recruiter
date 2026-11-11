@@ -51,10 +51,13 @@ export function cleanPitch(raw: unknown): Partial<Pitch> {
 }
 
 /** The pitch for an organization: its own fields, then the main company's, then the default. */
-export async function pitchFor(org: { isMain: boolean; pitch?: unknown }): Promise<Pitch> {
+export async function pitchFor(org: { isMain: boolean; pitch?: unknown; companyName?: string | null }): Promise<Pitch> {
   const own = cleanPitch(org.pitch);
   const main = org.isMain ? {} : cleanPitch((await db.organization.findFirst({ where: { isMain: true }, orderBy: { createdAt: "asc" }, select: { pitch: true } }))?.pitch);
-  return { ...DEFAULT_PITCH, ...main, ...own };
+  // The referral bonus is a company's own money: a team calling in its own company name (Arslon)
+  // never gets the main company's; a team hiring for the main company does.
+  const otherCompany = !org.isMain && !!org.companyName?.trim();
+  return { ...DEFAULT_PITCH, ...main, ...own, ...(otherCompany ? { referral: own.referral ?? "" } : {}) };
 }
 
 /** Per-call prompt variables ({{pitch_hook}} and so on). */

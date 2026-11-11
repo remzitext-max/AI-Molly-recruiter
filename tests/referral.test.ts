@@ -41,5 +41,9 @@ describe("referrals", () => {
     const lead = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, isDemo: true, firstName: "Ray", phoneE164: "+13125550102", timezone: "America/Chicago" } });
     const vars = await callVariables({ ...lead, permissions: [] }, "a1", "v1");
     expect(vars.referral_bonus).toBe("$500 referral bonus after 2 weeks of working with our company");
+    const { pitchFor } = await import("@/lib/pitch");
+    expect((await pitchFor({ isMain: false, companyName: "Arslon Logistics" })).referral).toBe("");
+    expect((await pitchFor({ isMain: false, companyName: "Arslon Logistics", pitch: { referral: "$300 after 30 days" } })).referral).toBe("$300 after 30 days");
+    expect((await pitchFor({ isMain: false, companyName: null })).referral).toContain("$500");
   });
 });

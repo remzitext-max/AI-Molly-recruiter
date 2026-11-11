@@ -68,7 +68,7 @@ const PITCH_LABELS: Record<keyof Pitch, string> = {
   teamPay: "Team pay",
   equipment: "Trailer / equipment",
   rules: "Extra rules for Crystal, one per line",
-  referral: "Referral bonus (Crystal asks for driver friends at the end of a call; \"off\" = don't ask.)",
+  referral: "Referral bonus (Crystal asks for driver friends at the end of a call; \"off\" = don't ask. A team with its own company name needs its own text)",
 };
 
 function PitchForm({ id, pitch, fallback }: { id: string; pitch: unknown; fallback: Pitch }) {
@@ -158,7 +158,7 @@ export default async function Teams({ searchParams }: { searchParams: Promise<{ 
               </div>
               <div style={{ marginTop: 12 }}><button className="secondary">Save</button></div>
             </form>
-            <PitchForm id={t.id} pitch={t.pitch} fallback={mainPitch} />
+            <PitchForm id={t.id} pitch={t.pitch} fallback={t.companyName?.trim() ? { ...mainPitch, referral: "" } : mainPitch} />
           </Card>
         );
       })}
