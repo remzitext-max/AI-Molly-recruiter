@@ -4,6 +4,7 @@ import { requireOwner } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { flash } from "@/lib/flash";
 import { Card, PageHead, fmt, name } from "@/components/ui";
+import { RECALL_PREFIX } from "@/lib/sheet-recall";
 import { reviveResults, reviveSummary, SEGMENT_ORDER, SEGMENTS, REVIVE_CALLS, segmentOfStatus } from "@/lib/revive";
 
 // Old leads: drivers stuck in the lead sheets for weeks. Sorted by why they are stuck;
@@ -31,6 +32,7 @@ export default async function Revive() {
   const teams = await Promise.all(orgs.filter((o) => o.campaigns.length).map(async (o) => ({
     org: o, camp: o.campaigns[0], summary: await reviveSummary(o.id, now), results: await reviveResults(o.id),
     today: await db.lead.count({ where: { orgId: o.id, reviveAt: { gte: dayStart } } }),
+    recall: await recallStats(o.id, dayStart),
     recent: await db.lead.findMany({ where: { orgId: o.id, reviveAt: { not: null } }, orderBy: { reviveAt: "desc" }, take: 8, select: { id: true, firstName: true, lastName: true, reviveFrom: true, reviveTab: true, reviveAt: true, pipelineStatus: true, documentStatus: true } }),
   })));
 
@@ -41,7 +43,7 @@ export default async function Revive() {
         sub={`Drivers sitting in the lead sheets for weeks who never became drivers, sorted by why they are stuck. When a team is switched on, Crystal calls a few a day ("we've got a good offer running right now"), up to ${REVIVE_CALLS} calls each, within calling hours, after new applicants. A recruiter changing the driver's status in the sheet stops her.`}
       />
       {!teams.length && <Card><p className="muted">No team has a campaign yet.</p></Card>}
-      {teams.map(({ org, camp, summary, results, today, recent }) => {
+      {teams.map(({ org, camp, summary, results, today, recent, recall }) => {
         const ready = SEGMENT_ORDER.reduce((n, s) => n + summary.segments[s].ready, 0);
         return (
           <Card key={org.id} title={org.name} right={<span className="small muted">{summary.total} drivers in the sheet{camp.reviveEnabled ? ` · on, ${today} of ${camp.revivePerDay} picked today` : " · off"}</span>}>
@@ -66,6 +68,10 @@ export default async function Revive() {
                 })}
               </tbody>
             </table>
+            <p className="small" style={{ marginTop: 12 }}>
+              <b>&quot;No answer&quot; re-calls</b> ({camp.recallMinDays > 0 ? `applied ${camp.recallMinDays}–${camp.recallMaxDays} days ago, up to ${camp.recallPerDay} a day` : "off"}): today {recall.today} · last 7 days {recall.week} ({(recall.week / 7).toFixed(1)} a day) · talked {recall.talked} · interested {recall.interested}.
+              <span className="muted"> Only drivers Crystal never called before are re-called this way; everyone she already called gets the follow-up round instead.</span>
+            </p>
             {summary.skipped.length > 0 && (
               <p className="small muted">Left alone: {summary.skipped.map((x) => `${x.reason} ${x.n}`).join(" · ")}</p>
             )}
@@ -97,4 +103,19 @@ export default async function Revive() {
       })}
     </>
   );
+}
+
+/** The "No answer" re-calls (sheet-recall.ts) of the last 7 days: drivers picked and how they went. */
+async function recallStats(orgId: string, dayStart: Date) {
+  const weekAgo = new Date(dayStart.getTime() - 6 * 86400_000);
+  const recs = await db.leadSourceRecord.findMany({
+    where: { sourceRecordId: { startsWith: RECALL_PREFIX }, createdAt: { gte: weekAgo }, lead: { orgId, isDemo: false } },
+    select: { createdAt: true, lead: { select: { pipelineStatus: true, calls: { where: { status: "COMPLETED" }, select: { outcome: true }, take: 3 } } } },
+  });
+  return {
+    today: recs.filter((r) => r.createdAt >= dayStart).length,
+    week: recs.length,
+    talked: recs.filter((r) => r.lead.calls.some((c) => ["INTERESTED", "NOT_INTERESTED", "CALLBACK", "HUMAN_REQUESTED"].includes(c.outcome ?? ""))).length,
+    interested: recs.filter((r) => ["INTERESTED", "DOCS_REQUESTED", "DOCS_RECEIVED", "HANDOFF_READY", "HANDED_OFF"].includes(r.lead.pipelineStatus)).length,
+  };
 }
