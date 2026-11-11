@@ -2,6 +2,7 @@
 // and forwards each CDL / medical card file a driver uploads.
 // Off unless TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set.
 import { config } from "./config";
+import { referralsOf, referrerOf } from "./referral";
 import { db } from "./db";
 import { providerFetch } from "../adapters/live/http";
 import { getAdapters } from "../adapters/registry";
@@ -184,6 +185,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
         : `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}${secs !== null ? ` (${secs} sec)` : ""}: ${transferred ? "driver asked for a person" : "no answers collected"}`,
       `☎️ ${v(l.phoneE164)}`,
       ...reviveLine(l),
+      ...(await referralLines(l.id)),
       ...(endLine ? [endLine] : []),
       ...lastDriverLines(a.transcript),
       ...recruiterCallLine(l),
@@ -211,6 +213,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
     `✅ Ready date: ${v(slot("start_date"))}`,
     `☎️Phone number : ${v(l.phoneE164)}`,
     `⭐ Fit: ${v(fitText(fit))}`,
+    ...(await referralLines(l.id)),
     ...recruiterCallLine(l),
     ...(endLine ? [endLine] : []),
     ...notesLines(a, true),
@@ -365,4 +368,13 @@ export async function sendDocumentToTelegram(documentId: string) {
 /** An old lead Crystal called on purpose: what the sheet said about the driver back then. */
 function reviveLine(l: { reviveFrom?: string | null; reviveTab?: string | null }) {
   return l.reviveFrom ? [`♻️ Old lead: was "${esc(l.reviveFrom)}"${l.reviveTab ? ` in the ${esc(l.reviveTab)} tab` : ""}`] : [];
+}
+
+/** Driver friends referred on the call, and who referred this driver. Recruiters call the friends. */
+async function referralLines(leadId: string) {
+  const [friends, by] = await Promise.all([referralsOf(leadId), referrerOf(leadId)]);
+  return [
+    ...friends.map((f) => `🤝 Referral: ${esc([f.firstName, f.lastName].filter(Boolean).join(" ") || "no name")} ${esc(f.phoneE164)} (recruiter calls)`),
+    ...(by ? [`🤝 Referred by ${esc(by.name)} ${esc(by.phone)}`] : []),
+  ];
 }

@@ -4,6 +4,7 @@ import { db } from "./db";
 import { applyAgentAction, OFFICE_CLOSED } from "./calls";
 import { tabRecruiterPhone, teamTransfer } from "./recruiter-tab";
 import { answerQuestion, getActiveOfferVersion } from "./knowledge";
+import { addReferral } from "./referral";
 
 export async function findToolAttempt(where: { providerCallId?: string; attemptId?: string }) {
   return db.callAttempt.findFirst({
@@ -48,6 +49,8 @@ export async function runAgentTool(attempt: ToolAttempt, name: string | undefine
       return applyAgentAction(attempt.id, { type: "schedule_callback", at: a.at || null, raw: String(a.raw ?? ""), by: a.by === "recruiter" ? "recruiter" : "crystal" });
     case "send_cdl_upload_link":
       return applyAgentAction(attempt.id, { type: "send_cdl_link" });
+    case "record_referral":
+      return addReferral(attempt.id, a);
     case "set_call_outcome":
       return applyAgentAction(attempt.id, { type: "set_outcome", outcome: a.outcome });
     default:

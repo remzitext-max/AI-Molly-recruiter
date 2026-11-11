@@ -19,9 +19,11 @@ export interface Pitch {
   equipment: string;
   /** Extra company rules, one per line (e.g. the camera rule). */
   rules: string;
+  /** The referral bonus Crystal mentions at the end of a call; empty = she does not ask for referrals. */
+  referral: string;
 }
 
-export const PITCH_KEYS = ["hook", "teamHook", "earnings", "soloMinExperience", "teamPay", "equipment", "rules"] as const;
+export const PITCH_KEYS = ["hook", "teamHook", "earnings", "soloMinExperience", "teamPay", "equipment", "rules", "referral"] as const;
 
 export const DEFAULT_PITCH: Pitch = {
   hook: "And I've got great news! Right now we're offering up to 85 cents per mile for solo drivers, dry van, with a driver-facing camera in the truck. In our company we usually cover around 3,500 miles a week, so may I ask, how many miles can you cover on a weekly basis?",
@@ -34,6 +36,7 @@ export const DEFAULT_PITCH: Pitch = {
     "Whenever you mention 85 cents per mile, say it comes with a driver-facing camera in the truck. Never offer 85 cents without the camera.",
     "If the driver says they don't want the driver-facing camera, never argue or push. Say: \"No problem at all! We also have an option without the camera, at up to 80 cents per mile.\" Save it with record_screening_answer, key concerns, value \"Doesn't want driver-facing camera - offered 80 cpm without camera\". Do not bring up the camera again; carry on with the next question.",
   ].join("\n"),
+  referral: "$500 referral bonus after 2 weeks of working with our company",
 };
 
 /** Keeps only known, non-empty text fields (trimmed, length-capped). */
@@ -51,14 +54,15 @@ export function cleanPitch(raw: unknown): Partial<Pitch> {
 export async function pitchFor(org: { isMain: boolean; pitch?: unknown }): Promise<Pitch> {
   const own = cleanPitch(org.pitch);
   const main = org.isMain ? {} : cleanPitch((await db.organization.findFirst({ where: { isMain: true }, orderBy: { createdAt: "asc" }, select: { pitch: true } }))?.pitch);
-  return { ...DEFAULT_PITCH, ...main, ...own };
+  // The referral bonus is the company's own money: a team never inherits another company's.
+  return { ...DEFAULT_PITCH, ...main, ...own, referral: org.isMain ? own.referral ?? DEFAULT_PITCH.referral : own.referral ?? "" };
 }
 
 /** Per-call prompt variables ({{pitch_hook}} and so on). */
 export function pitchVariables(p: Pitch): Record<string, string> {
   return {
     pitch_hook: p.hook, team_hook: p.teamHook, pitch_earnings: p.earnings, solo_min_experience: p.soloMinExperience,
-    team_pay: p.teamPay, equipment: p.equipment,
+    team_pay: p.teamPay, equipment: p.equipment, referral_bonus: p.referral.trim().toLowerCase() === "off" ? "" : p.referral,
     company_rules: p.rules.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => `- ${l}`).join("\n"),
   };
 }

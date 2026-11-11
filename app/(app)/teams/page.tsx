@@ -68,6 +68,7 @@ const PITCH_LABELS: Record<keyof Pitch, string> = {
   teamPay: "Team pay",
   equipment: "Trailer / equipment",
   rules: "Extra rules for Crystal, one per line",
+  referral: "Referral bonus (Crystal asks for driver friends at the end of a call; \"off\" = don't ask. Teams don't inherit the main company's)",
 };
 
 function PitchForm({ id, pitch, fallback }: { id: string; pitch: unknown; fallback: Pitch }) {
@@ -80,7 +81,7 @@ function PitchForm({ id, pitch, fallback }: { id: string; pitch: unknown; fallba
         {PITCH_KEYS.map((k) => (
           <div key={k} style={{ marginBottom: 8 }}>
             <label>{PITCH_LABELS[k]}</label>
-            {k === "soloMinExperience" || k === "teamPay" || k === "equipment"
+            {k === "soloMinExperience" || k === "teamPay" || k === "equipment" || k === "referral"
               ? <input name={k} defaultValue={own[k] ?? ""} placeholder={fallback[k]} autoComplete="off" />
               : <textarea name={k} defaultValue={own[k] ?? ""} placeholder={fallback[k]} rows={k === "rules" ? 4 : 3} />}
           </div>
