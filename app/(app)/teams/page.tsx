@@ -68,7 +68,7 @@ const PITCH_LABELS: Record<keyof Pitch, string> = {
   teamPay: "Team pay",
   equipment: "Trailer / equipment",
   rules: "Extra rules for Crystal, one per line",
-  referral: "Referral bonus (Crystal asks for driver friends at the end of a call; \"off\" = don't ask. Teams don't inherit the main company's)",
+  referral: "Referral bonus (Crystal asks for driver friends at the end of a call; \"off\" = don't ask.)",
 };
 
 function PitchForm({ id, pitch, fallback }: { id: string; pitch: unknown; fallback: Pitch }) {

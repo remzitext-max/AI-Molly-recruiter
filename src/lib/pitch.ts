@@ -54,8 +54,7 @@ export function cleanPitch(raw: unknown): Partial<Pitch> {
 export async function pitchFor(org: { isMain: boolean; pitch?: unknown }): Promise<Pitch> {
   const own = cleanPitch(org.pitch);
   const main = org.isMain ? {} : cleanPitch((await db.organization.findFirst({ where: { isMain: true }, orderBy: { createdAt: "asc" }, select: { pitch: true } }))?.pitch);
-  // The referral bonus is the company's own money: a team never inherits another company's.
-  return { ...DEFAULT_PITCH, ...main, ...own, referral: org.isMain ? own.referral ?? DEFAULT_PITCH.referral : own.referral ?? "" };
+  return { ...DEFAULT_PITCH, ...main, ...own };
 }
 
 /** Per-call prompt variables ({{pitch_hook}} and so on). */

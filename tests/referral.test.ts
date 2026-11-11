@@ -36,10 +36,10 @@ describe("referrals", () => {
     expect(await buildCallReport(attempt.id)).toContain("🤝 Referral: Mike Stone +13125550199");
   });
 
-  it("asks for referrals with the main company's bonus; teams only with their own", async () => {
+  it("asks for referrals with the company's bonus", async () => {
     const base = await seedBase();
     const lead = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, isDemo: true, firstName: "Ray", phoneE164: "+13125550102", timezone: "America/Chicago" } });
     const vars = await callVariables({ ...lead, permissions: [] }, "a1", "v1");
-    expect(vars.referral_bonus).toBe(base.org.isMain ? "$500 referral bonus after 2 weeks of working with our company" : "");
+    expect(vars.referral_bonus).toBe("$500 referral bonus after 2 weeks of working with our company");
   });
 });
