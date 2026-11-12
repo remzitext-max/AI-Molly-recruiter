@@ -43,3 +43,17 @@ describe("referrals", () => {
     expect(vars.referral_bonus).toBe("$500 referral bonus after 2 weeks of working with our company");
   });
 });
+
+describe("callback dates from the voice model", () => {
+  it("moves a past date forward to the same weekday and time, drops far-future ones", async () => {
+    const { fixCallbackYear } = await import("@/lib/calls");
+    const now = new Date("2026-11-12T18:00:00Z"); // Thursday
+    const fixed = fixCallbackYear(new Date("2024-01-15T16:00:00Z"), now)!; // Monday 10 AM CST
+    expect(fixed.getTime()).toBeGreaterThan(now.getTime());
+    expect(fixed.getTime() - now.getTime()).toBeLessThan(7 * 86400_000);
+    expect(fixed.getUTCDay()).toBe(1);
+    expect(fixed.getUTCHours()).toBe(16);
+    expect(fixCallbackYear(new Date("2026-11-13T15:00:00Z"), now)?.toISOString()).toBe("2026-11-13T15:00:00.000Z");
+    expect(fixCallbackYear(new Date("2027-06-01T15:00:00Z"), now)).toBeNull();
+  });
+});

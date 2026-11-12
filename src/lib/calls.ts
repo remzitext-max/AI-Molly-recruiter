@@ -377,6 +377,21 @@ async function maybeRetry(leadId: string, delayMin: number, max: number, reason:
   await scheduleLeadCall(leadId, { at: new Date(Date.now() + delayMin * 60_000), reason });
 }
 
+/**
+ * The voice model sometimes says the right weekday and time but a wrong year (Jan 15, 2024 for
+ * "Monday morning"). A time in the past moves forward by whole weeks (same weekday and clock
+ * time) until it is in the future; a time over 60 days ahead is not trusted at all.
+ */
+export function fixCallbackYear(at: Date, now = new Date()): Date | null {
+  if (isNaN(at.getTime())) return null;
+  const WEEK = 7 * 86400_000;
+  if (at.getTime() < now.getTime() - 10 * 60_000) {
+    const weeks = Math.ceil((now.getTime() - at.getTime()) / WEEK);
+    return new Date(at.getTime() + weeks * WEEK);
+  }
+  return at.getTime() - now.getTime() > 60 * 86400_000 ? null : at;
+}
+
 // ---------------------------------------------------------------------------
 // 4. Real-time agent actions (provider tool calls / simulator)
 // ---------------------------------------------------------------------------
@@ -452,7 +467,7 @@ export async function applyAgentAction(attemptId: string, input: unknown): Promi
       await createHandoff(lead.id, action.reason, { callAttemptId: attemptId, note: redactText(action.note) });
       return { ok: true };
     case "schedule_callback": {
-      const at = action.at ? new Date(action.at) : null;
+      const at = action.at ? fixCallbackYear(new Date(action.at)) : null;
       if (action.by === "recruiter") return scheduleRecruiterCall(lead, attemptId, at, action.raw);
       await db.lead.update({ where: { id: lead.id }, data: { callbackAt: at } });
       await advancePipeline(lead.id, "CALLBACK_SCHEDULED");
