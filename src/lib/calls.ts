@@ -204,6 +204,10 @@ export async function requeueLimitFailures(now = new Date()) {
     const lead = await db.lead.findUniqueOrThrow({ where: { id: a.leadId } });
     await db.lead.update({ where: { id: lead.id }, data: { attemptCount: Math.max(0, lead.attemptCount - 1) } });
     if (lead.optedOutAt || lead.isDemo || ["OPTED_OUT", "CLOSED", "HANDED_OFF"].includes(lead.pipelineStatus)) continue;
+    // A driver who already had a real conversation with Crystal (card sent) is not called again by this repair.
+    if (["INTERESTED", "DOCS_REQUESTED", "DOCS_RECEIVED", "HANDOFF_READY", "NOT_INTERESTED"].includes(lead.pipelineStatus)) continue;
+    const talked = await db.callAttempt.count({ where: { leadId: lead.id, createdAt: { gte: new Date(now.getTime() - 3 * 86400_000) }, outcome: { in: ["INTERESTED", "NOT_INTERESTED", "HUMAN_REQUESTED", "OPT_OUT", "WRONG_NUMBER", "INCOMPLETE"] } } });
+    if (talked) continue;
     if (await scheduleLeadCall(lead.id, { reason: "Retry: the Telnyx daily limit stopped the call" })) queued++;
   }
   return { fixed: failed.length, queued };

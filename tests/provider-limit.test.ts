@@ -21,6 +21,11 @@ describe("Telnyx daily spend limit", () => {
     expect((await db.lead.findUniqueOrThrow({ where: { id: lead.id } })).attemptCount).toBe(1);
     expect(await db.job.count({ where: { type: "lead.attempt-call", status: "PENDING" } })).toBe(1);
     expect(await db.callAttempt.findFirstOrThrow({ where: { leadId: lead.id } })).toMatchObject({ status: "CANCELED", outcome: null });
+    // A driver who already talked to Crystal is not called again by the repair.
+    const talked = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, isDemo: false, firstName: "Ray", phoneE164: "+13475521334", timezone: "America/New_York", attemptCount: 2, pipelineStatus: "QUEUED" } });
+    await db.callAttempt.create({ data: { leadId: talked.id, provider: "telnyx", idempotencyKey: "job:t1", status: "COMPLETED", outcome: "INCOMPLETE" } });
+    await db.callAttempt.create({ data: { leadId: talked.id, provider: "telnyx", idempotencyKey: "job:t2", status: "FAILED", outcome: "TECHNICAL_FAILURE", errorMessage: D7 } });
+    expect(await requeueLimitFailures()).toEqual({ fixed: 1, queued: 0 });
     // Running it again changes nothing.
     expect(await requeueLimitFailures()).toEqual({ fixed: 0, queued: 0 });
   });
