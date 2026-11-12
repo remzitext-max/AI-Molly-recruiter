@@ -106,6 +106,27 @@ describe("the board", () => {
     expect(toneOf("Need approval", 2.5 * day)).toBe("warn");
   });
 
+  it("follows the dates picked: only drivers who applied in them, with no backlog window", async () => {
+    const { loadBoard, pushColumns } = await import("@/lib/board");
+    const base = await seedBase();
+    const now = new Date("2026-11-12T20:00:00Z"), day = 86400_000;
+    await saveSheetRows(base.org.id, [
+      { phoneE164: "+12145550121", tab: "Molly", status: "Need to talk", appliedAt: new Date(now.getTime() - 0.5 * day) },
+      { phoneE164: "+12145550122", tab: "Molly", status: "Need to bring", appliedAt: new Date(now.getTime() - 2 * day) },
+      { phoneE164: "+12145550123", tab: "Alex", status: "Application", appliedAt: new Date(now.getTime() - 6 * day) },
+      { phoneE164: "+12145550124", tab: "Alex", status: "New", appliedAt: new Date(now.getTime() - 40 * day) },
+    ], new Date(now.getTime() - 10 * day));
+    const admin = await db.user.findFirstOrThrow({ where: { orgId: base.org.id, role: "ADMIN" } });
+    const phones = async (days: number) => (await loadBoard(admin, [base.org.id], undefined, now, { gte: new Date(now.getTime() - days * day), lt: now })).all.map((d) => d.phone).sort();
+    expect(await phones(1)).toEqual(["+12145550121"]);
+    expect(await phones(3)).toEqual(["+12145550121", "+12145550122"]);
+    expect(await phones(7)).toEqual(["+12145550121", "+12145550122", "+12145550123"]);
+    expect(await phones(60)).toHaveLength(4); // a 40-day-old New driver counts when 60 days are picked
+    const week = await loadBoard(admin, [base.org.id], undefined, now, { gte: new Date(now.getTime() - 7 * day), lt: now });
+    expect(week.columns.find((c) => c.status === "Application")!.drivers[0].recruiterId).toBe(base.alex.id);
+    expect(pushColumns(week.columns).map((c) => [c.status, c.drivers.length])).toEqual([["New", 0], ["Call back", 0], ["Need to talk", 1], ["Need to bring", 1], ["Need approval", 0], ["Application", 1]]);
+  });
+
   it("lists the drivers behind the Application / Hired numbers (applied in the period)", async () => {
     const { sheetDrivers } = await import("@/lib/board");
     const base = await seedBase();

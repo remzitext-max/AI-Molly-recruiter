@@ -44,12 +44,19 @@ const DOCS: Record<string, string> = { RECEIVED: "CDL/med card in", REQUESTED: "
 /**
  * The board for the given teams. `recruiterId` keeps one recruiter's tab only (a recruiter
  * always gets their own). Drivers are sorted stuck first, then the longest waiting.
+ * `applied` (the dashboards' period): only drivers who applied in it, by the status they
+ * are in now, with no backlog windows, so the numbers follow the dates picked.
  */
-export async function loadBoard(user: Pick<User, "id" | "role">, orgIds: string[], recruiterId?: string, now = new Date()): Promise<{ columns: BoardColumn[]; recruiters: { id: string; name: string; n: number }[]; all: BoardDriver[] }> {
+export async function loadBoard(user: Pick<User, "id" | "role">, orgIds: string[], recruiterId?: string, now = new Date(), applied?: { gte: Date; lt: Date }): Promise<{ columns: BoardColumn[]; recruiters: { id: string; name: string; n: number }[]; all: BoardDriver[] }> {
   const statuses = BOARD_COLUMNS.map((c) => c.status as string);
-  const rows = await db.sheetRow.findMany({ where: { orgId: { in: orgIds }, status: { in: statuses } } });
+  const [rows, tabRows] = await Promise.all([
+    db.sheetRow.findMany({ where: { orgId: { in: orgIds }, status: { in: statuses }, ...(applied ? { appliedAt: applied } : {}) } }),
+    // Every tab, to tell which login owns which, even when the period leaves a tab empty.
+    applied ? db.sheetRow.findMany({ where: { orgId: { in: orgIds } }, distinct: ["orgId", "tab"], select: { orgId: true, tab: true } }) : null,
+  ]);
   const kept = rows.filter((r) => {
     if (/pool/i.test(r.tab) && r.status !== "New") return false;
+    if (applied) return true;
     const since = r.statusAt ?? r.appliedAt ?? r.seenAt;
     const ageMs = Math.max(0, now.getTime() - since.getTime());
     if (r.status === "New" && now.getTime() - (r.appliedAt ?? since).getTime() > NEW_WINDOW) return false;
@@ -57,7 +64,7 @@ export async function loadBoard(user: Pick<User, "id" | "role">, orgIds: string[
     if (TALK.has(r.status) && now.getTime() - (r.appliedAt ?? since).getTime() > TALK_WINDOW) return false;
     return true;
   });
-  const all = await driversOf(kept, orgIds, now, rows);
+  const all = await driversOf(kept, orgIds, now, tabRows ?? rows);
   const recruiters = [...new Map(all.filter((d) => d.recruiter).map((d) => [d.recruiterId ?? `tab:${d.recruiter}`, d.recruiter!])).entries()]
     .map(([id, name]) => ({ id, name, n: all.filter((d) => (d.recruiterId ?? `tab:${d.recruiter}`) === id).length }))
     .sort((a, b) => b.n - a.n);
@@ -79,7 +86,7 @@ export async function loadBoard(user: Pick<User, "id" | "role">, orgIds: string[
 type SheetRowRec = Awaited<ReturnType<typeof db.sheetRow.findMany>>[number];
 
 /** Sheet rows as board drivers: who owns the tab, the team, the site profile if Crystal has one. */
-async function driversOf(rows: SheetRowRec[], orgIds: string[], now: Date, tabRows: SheetRowRec[] = rows): Promise<BoardDriver[]> {
+async function driversOf(rows: SheetRowRec[], orgIds: string[], now: Date, tabRows: Pick<SheetRowRec, "orgId" | "tab">[] = rows): Promise<BoardDriver[]> {
   const [users, orgs, leads] = await Promise.all([
     db.user.findMany({ where: { orgId: { in: orgIds }, active: true }, select: { id: true, name: true, sheetTab: true, orgId: true } }),
     db.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true } }),
@@ -123,7 +130,12 @@ export async function sheetDrivers(orgIds: string[], statuses: string[], range: 
   return (await driversOf(rows, orgIds, now)).sort((a, b) => a.ageMs - b.ageMs);
 }
 
-/** Only the stuck drivers of the columns that can get stuck, for "Needs a push". */
+/** The columns that can get stuck, with every driver (stuck first): a dashboard period's "Needs a push". */
+export function pushColumns(columns: BoardColumn[]): BoardColumn[] {
+  return columns.filter((c) => c.rule && c.status !== "Need teammate");
+}
+
+/** Only the stuck drivers of the columns that can get stuck. */
 export function stuckColumns(columns: BoardColumn[]): BoardColumn[] {
   return columns.filter((c) => c.rule && c.status !== "Need teammate")
     .map((c) => ({ ...c, drivers: c.drivers.filter((d) => d.tone === "late") }));

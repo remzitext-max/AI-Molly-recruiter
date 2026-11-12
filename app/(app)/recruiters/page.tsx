@@ -21,14 +21,18 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
   const p = period(sp);
   const view = await teamView(user, sp.team);
   const scope = teamsScope(view.orgIds, config.mode === "demo");
-  const [users, tabs, leads, talked, booked, process] = await Promise.all([
+  // Every column follows the dates picked: on process = drivers who applied in them.
+  const [users, tabs, leads, talked, booked, processAll, appliedRows] = await Promise.all([
     db.user.findMany({ where: { orgId: { in: view.orgIds }, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true, role: true, orgId: true } }),
     tabStats(view.orgIds, p.range),
     db.lead.groupBy({ by: ["assignedToId"], where: { ...scope, createdAt: p.range }, _count: true }),
     talkedDrivers(scope, p.range),
-    scheduledByRecruiter(view.orgIds),
+    scheduledByRecruiter(view.orgIds, new Date(), p.range),
     Promise.all(view.orgIds.map((orgId) => loadOnProcess({ id: user.id, role: "ADMIN", orgId }).then((x) => x.map((d) => ({ ...d, orgId }))))).then((x) => x.flat()),
+    db.sheetRow.findMany({ where: { orgId: { in: view.orgIds }, appliedAt: p.range }, select: { orgId: true, phoneE164: true } }),
   ]);
+  const appliedIn = new Set(appliedRows.map((r) => `${r.orgId}|${r.phoneE164}`));
+  const process = processAll.filter((d) => appliedIn.has(`${d.orgId}|${d.phone}`));
   const teamName = new Map(view.orgs.map((o) => [o.id, o.name]));
   const rows = users.map((u) => {
     const t: TabStats[] = tabs.filter((x) => x.recruiterId === u.id);
@@ -85,10 +89,10 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
                 <th className="num">Not interested / not qualified</th>
                 <th className="num" title="Crystal's leads assigned to them in this period">Crystal leads</th>
                 <th className="num">Talked to Crystal</th>
-                <th className="num">On process now</th>
+                <th className="num" title="Drivers who applied in this period and are now Need to bring, Need approval or Application">On process</th>
                 <th className="num">Application</th>
                 <th className="num">Hired</th>
-                <th className="num" title="Calls Crystal booked for them, not yet marked made">Booked calls</th>
+                <th className="num" title="Calls Crystal booked for them in this period; overdue = time passed and not marked made">Booked calls</th>
               </tr>
             </thead>
             <tbody>

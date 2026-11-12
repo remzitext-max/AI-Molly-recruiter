@@ -20,7 +20,7 @@ import { Card, Stat, fmt, initialsOf } from "@/components/ui";
 import { BarRow } from "@/components/dash-parts";
 import { CallNow } from "@/components/call-now";
 import { BoardStrip, DriverStat } from "@/components/board-strip";
-import { loadBoard, sheetDrivers, stuckColumns } from "@/lib/board";
+import { loadBoard, pushColumns, sheetDrivers } from "@/lib/board";
 
 async function callMade(fd: FormData) {
   "use server";
@@ -34,7 +34,8 @@ const fullName = (l: { firstName: string | null; lastName: string | null }) => [
 
 export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | "role" | "orgId" | "name">; p: Period }) {
   const scope = dashboardScope(user, true, config.mode === "demo");
-  const [calls, newLeads, talked, interested, docs, onProcess, tabs, board, hiredAll] = await Promise.all([
+  // Every number but the scheduled calls follows the dates picked (drivers who applied in them).
+  const [calls, newLeads, talked, interested, docs, processAll, tabs, board, hiredAll] = await Promise.all([
     scheduledCalls(user),
     db.lead.findMany({ where: { ...scope, createdAt: p.range }, select: firstSource }).then((x) => x.filter(isNewApplicant).length),
     talkedDrivers(scope, p.range),
@@ -42,12 +43,14 @@ export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | 
     db.document.findMany({ where: { lead: scope, uploadedAt: p.range }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
     loadOnProcess(user),
     tabStats([user.orgId], p.range),
-    loadBoard(user, [user.orgId]),
+    loadBoard(user, [user.orgId], undefined, new Date(), p.range),
     sheetDrivers([user.orgId], ["Hired", "Our driver – working"], p.range),
   ]);
   const hired = hiredAll.filter((d) => d.recruiterId === user.id);
-  const stuck = stuckColumns(board.columns);
-  const stuckTotal = stuck.reduce((n, c) => n + c.drivers.length, 0);
+  const push = pushColumns(board.columns);
+  const stuckTotal = push.reduce((n, c) => n + c.late, 0);
+  const applied = new Set(board.all.map((d) => d.phone));
+  const onProcess = processAll.filter((d) => applied.has(d.phone));
   const mine = tabs.filter((t) => t.recruiterId === user.id);
   const byStatus: Record<string, number> = {};
   for (const t of mine) for (const [s, n] of Object.entries(t.byStatus)) byStatus[s] = (byStatus[s] ?? 0) + n;
@@ -87,8 +90,8 @@ export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | 
         })}
       </div>
 
-      <div className="sec-label">Needs a push right now {stuckTotal > 0 ? <span className="bad-text">· {stuckTotal} of your drivers</span> : <span>· nothing stuck</span>} <Link href="/board" className="sec-link">My board →</Link></div>
-      <div className="section"><BoardStrip columns={stuck} showRecruiter={false} stuck /></div>
+      <div className="sec-label">Needs a push <span className="muted">· your drivers who applied in this period, by status now</span> {stuckTotal > 0 ? <span className="bad-text">· {stuckTotal} stuck</span> : <span>· nothing stuck</span>} <Link href="/board" className="sec-link">My board →</Link></div>
+      <div className="section"><BoardStrip columns={push} showRecruiter={false} /></div>
 
       <div className="sec-label">This period</div>
       <div className="stats six">
@@ -96,7 +99,7 @@ export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | 
         <Stat label="Talked to Crystal" icon="voice" tone="teal" n={talked.length} sub={<Link href={`/talked?${new URLSearchParams({ since: p.since.toISOString(), until: p.until.toISOString(), who: "mine" })}`}>see who</Link>} />
         <Stat label="Interested" icon="star" tone="green" n={interested} sub="said yes to Crystal" />
         <Stat label="CDL / med card in" icon="doc" tone="amber" n={docs} />
-        <Stat label="On process now" icon="check" tone="violet" n={onProcess.length} sub={<Link href="/process">open the list</Link>} />
+        <Stat label="On process" icon="check" tone="violet" n={onProcess.length} sub={<>applied in this period · <Link href="/process">all</Link></>} />
         <DriverStat label="Hired" icon="check" tone="green" drivers={hired} showRecruiter={false} sub="sheet status, applied in this period" />
       </div>
 
@@ -112,7 +115,7 @@ export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | 
                   <td className="small">{d.since ? fmt(d.since) : "—"}</td>
                 </tr>
               ))}
-              {!onProcess.length && <tr><td colSpan={3} className="muted">No drivers with Need to bring, Need approval or Application.</td></tr>}
+              {!onProcess.length && <tr><td colSpan={3} className="muted">No driver who applied in this period has Need to bring, Need approval or Application.</td></tr>}
             </tbody>
           </table>
         </Card>

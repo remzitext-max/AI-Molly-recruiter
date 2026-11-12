@@ -8,15 +8,17 @@ import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 import { UPLOAD_PROVIDER } from "@/lib/recruiter-upload";
 import { RECALL_PREFIX } from "@/lib/sheet-recall";
-import { REFERRAL_PREFIX, firstSource, isNewApplicant } from "@/lib/new-leads";
+import { firstSource, isNewApplicant } from "@/lib/new-leads";
+import { LEAD_SEL, leadRow, sheetRowItems } from "@/lib/dashboard-lists";
+import { ListStat } from "@/components/list-stat";
 import { callsWithAnswers, isTalk, talkedDrivers, teamsScope } from "@/lib/talked";
 import { countOf, orderStatuses, tabStats, talkedBy, type TabStats } from "@/lib/sheet-rows";
 import { ON_PROCESS } from "@/lib/on-process";
 import { statusTone } from "@/lib/recruiter-status";
 import { ZONE, pct, type Period, type TeamView } from "@/lib/dashboard-view";
-import { Card, Stat, initialsOf } from "@/components/ui";
+import { Card, initialsOf } from "@/components/ui";
 import { BoardStrip, DriverStat } from "@/components/board-strip";
-import { loadBoard, sheetDrivers, stuckColumns, type BoardDriver } from "@/lib/board";
+import { loadBoard, pushColumns, sheetDrivers, type BoardDriver } from "@/lib/board";
 import { scheduledCalls } from "@/lib/scheduled-calls";
 import { BarRow, Delta } from "@/components/dash-parts";
 
@@ -39,32 +41,50 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
   const calls = { lead: scope, provider: { not: UPLOAD_PROVIDER } };
   const distinctLeads = (where: Prisma.CallAttemptWhereInput) => db.callAttempt.findMany({ where, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length);
 
-  // New leads = new applicants only: Crystal's "No answer" re-calls, old leads and referrals
-  // also create leads, but they are counted on their own line (new-leads.ts).
-  const sourcesIn = (prefix: string, at: Prisma.DateTimeFilter) => db.leadSourceRecord.count({ where: { sourceRecordId: { startsWith: prefix }, createdAt: at, lead: scope } });
-  const [prevLeads, rangeAll, chartCalls, calledDrivers, talkedList, tabs, onProcess, recalls, revived, referrals] = await Promise.all([
+  // New leads = new applicants only. Crystal's "No answer" re-calls and old leads also create
+  // leads; they have their own cards (new-leads.ts). Referrals are a recruiter's to call.
+  const [prevLeads, rangeAll, chartCalls, calledDrivers, talkedList, tabs, recallRecs, revivedLeads, sheetRows] = await Promise.all([
     db.lead.findMany({ where: { ...scope, createdAt: prev }, select: firstSource }).then((x) => x.filter(isNewApplicant).length),
-    db.lead.findMany({
-      where: { ...scope, createdAt: range },
-      select: { ...firstSource, orgId: true, createdAt: true, pipelineStatus: true, documentStatus: true, hireStage: true, calls: { where: { status: PLACED }, orderBy: { createdAt: "asc" }, select: { id: true, createdAt: true, status: true, outcome: true } } },
-    }),
+    db.lead.findMany({ where: { ...scope, createdAt: range }, select: { ...firstSource, ...LEAD_SEL, createdAt: true, pipelineStatus: true, documentStatus: true, hireStage: true } }),
     db.callAttempt.findMany({ where: { ...calls, status: PLACED, createdAt: range }, select: { id: true, createdAt: true, status: true, outcome: true, startedAt: true, endedAt: true } }),
     distinctLeads({ ...calls, status: PLACED, createdAt: range }),
     talkedDrivers(scope, range),
     tabStats(view.orgIds, range),
-    db.sheetDriver.groupBy({ by: ["orgId"], where: { orgId: { in: view.orgIds } }, _count: true }),
-    sourcesIn(RECALL_PREFIX, range),
-    db.lead.count({ where: { ...scope, reviveAt: range } }),
-    sourcesIn(REFERRAL_PREFIX, range),
+    db.leadSourceRecord.findMany({ where: { sourceRecordId: { startsWith: RECALL_PREFIX }, createdAt: range, lead: scope }, orderBy: { createdAt: "desc" }, select: { createdAt: true, lead: { select: LEAD_SEL } } }),
+    db.lead.findMany({ where: { ...scope, reviveAt: range }, orderBy: { reviveAt: "desc" }, select: { ...LEAD_SEL, reviveAt: true, reviveFrom: true } }),
+    db.sheetRow.findMany({ where: { orgId: { in: view.orgIds }, appliedAt: range }, orderBy: { appliedAt: "desc" }, select: { id: true, orgId: true, phoneE164: true, tab: true, status: true, name: true } }),
   ]);
   const rangeLeads = rangeAll.filter(isNewApplicant);
   const newLeads = rangeLeads.length;
-  const notCounted = [recalls && `${recalls} "No answer" re-calls`, revived && `${revived} old leads`, referrals && `${referrals} referrals`].filter(Boolean).join(", ");
-  const gave = await callsWithAnswers([...chartCalls, ...rangeLeads.flatMap((l) => l.calls)].map((c) => c.id));
+  const gave = await callsWithAnswers([...chartCalls, ...rangeAll.flatMap((l) => l.calls), ...recallRecs.flatMap((r) => r.lead.calls), ...revivedLeads.flatMap((l) => l.calls)].map((c) => c.id));
   const talked = (c: { id: string; status?: string; outcome: string | null }) => isTalk(c, gave);
 
+  // The lists behind the cards.
+  const several = view.orgIds.length > 1;
+  const teamOf = (orgId: string) => several ? view.orgs.find((o) => o.id === orgId)?.name ?? null : null;
+  const newRows = rangeLeads.map((l) => leadRow(l, talked, teamOf(l.orgId)));
+  const recallRows = recallRecs.map((r) => leadRow(r.lead, talked, teamOf(r.lead.orgId), { since: r.createdAt, was: "No answer" }));
+  const oldRows = revivedLeads.map((l) => leadRow(l, talked, teamOf(l.orgId), { since: l.reviveAt ?? undefined, was: l.reviveFrom ?? undefined }));
+  const sheetLeads = await db.lead.findMany({ where: { ...scope, phoneE164: { in: [...new Set(sheetRows.map((r) => r.phoneE164))] } }, select: { id: true, orgId: true, phoneE164: true, firstName: true, lastName: true } });
+  const tabOwner = new Map(tabs.map((t) => [`${t.orgId}|${t.tab.toLowerCase()}`, t.recruiter]));
+  const sheetRowsOut = sheetRowItems(sheetRows, sheetLeads, (orgId, tab) => tabOwner.get(`${orgId}|${tab.toLowerCase()}`) ?? null, teamOf);
+  // "No response" and "Old leads" windows: everyone Crystal picked in the period, and how it went.
+  const picked = (rows: ReturnType<typeof leadRow>[]) => [
+    { key: "all", label: "All picked", items: rows.map((r) => r.item) },
+    { key: "talked", label: "Talked to Crystal", items: rows.filter((r) => r.talked).map((r) => r.item) },
+    { key: "interested", label: "Interested", items: rows.filter((r) => r.interested).map((r) => r.item) },
+    { key: "no", label: "No answer yet", items: rows.filter((r) => !r.talked).map((r) => r.item) },
+  ];
+  const pickedRates = (rows: ReturnType<typeof leadRow>[]) => {
+    const t = rows.filter((r) => r.talked).length, i = rows.filter((r) => r.interested).length;
+    return [
+      { label: "Talked to Crystal", value: `${pct(t, rows.length)}%`, sub: `${t} of ${rows.length} picked`, group: "talked" },
+      { label: "Interested", value: `${pct(i, t)}%`, sub: `${i} of ${t} who talked`, group: "interested" },
+    ];
+  };
+  const pickedSub = (rows: ReturnType<typeof leadRow>[]) => `${rows.filter((r) => r.talked).length} talked · ${rows.filter((r) => r.interested).length} interested`;
+
   const reached = sum(tabs, talkedBy), sheetTotal = sum(tabs, (t) => t.total);
-  const onProcessNow = onProcess.reduce((n, o) => n + o._count, 0);
   const speed = median(rangeLeads.filter((l) => l.calls[0]).map((l) => (l.calls[0].createdAt.getTime() - l.createdAt.getTime()) / 60000));
   const cohortHired = rangeLeads.filter((l) => l.hireStage === "HIRED").length;
 
@@ -78,7 +98,6 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
     { label: "Hired", n: cohortHired },
   ];
 
-  const talkedHref = (group?: string) => `/talked?${new URLSearchParams({ since: p.since.toISOString(), until: p.until.toISOString(), who: "all", ...(view.team !== "all" && view.owner ? { team: view.team } : {}), ...(group ? { group } : {}) })}`;
 
   // The owner's row per team.
   const teamRows = view.owner && view.team === "all" ? view.orgs.map((o) => {
@@ -90,7 +109,6 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
       called: mine.filter((l) => l.calls[0]).length,
       crystal: mine.filter((l) => l.calls.some(talked)).length,
       sheet: sum(t, (x) => x.total), reached: sum(t, talkedBy), application: sum(t, (x) => countOf(x, "Application")), hired: sum(t, (x) => countOf(x, "Hired", "Our driver – working")),
-      onProcess: onProcess.find((x) => x.orgId === o.id)?._count ?? 0,
     };
   }) : [];
 
@@ -98,28 +116,40 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
     .reduce((s, c) => s + (c.startedAt && c.endedAt ? Math.max(1, Math.ceil((c.endedAt.getTime() - c.startedAt.getTime()) / 60000)) : 1), 0);
   const cohortTalked = funnel[2].n;
   const all = view.team === "all" && teamRows.length > 1;
+  // Every number follows the dates picked: the board part is the drivers who applied in them.
   const [board, booked, appDrivers, hiredDrivers] = await Promise.all([
-    loadBoard(user, view.orgIds), all ? Promise.resolve([]) : scheduledCalls(user, new Date(), view.orgIds),
+    loadBoard(user, view.orgIds, undefined, new Date(), range), all ? Promise.resolve([]) : scheduledCalls(user, new Date(), view.orgIds),
     sheetDrivers(view.orgIds, ["Application"], range), sheetDrivers(view.orgIds, ["Hired", "Our driver – working"], range),
   ]);
-  const stuck = stuckColumns(board.columns);
-  const stuckTotal = stuck.reduce((n, c) => n + c.drivers.length, 0);
+  const push = pushColumns(board.columns);
+  const stuckTotal = push.reduce((n, c) => n + c.late, 0);
   const now = Date.now();
 
   return (
     <>
       <div className="sec-label">Results</div>
       <div className="stats six">
-        <Stat label="New leads" icon="leads" tone="blue" n={newLeads} sub={<><Delta now={newLeads} prev={prevLeads} />{notCounted && <div className="small muted" title="Crystal also called these in this period; they are not new applicants">not counted: {notCounted}</div>}</>} />
-        <Stat label="Talked to Crystal" icon="voice" tone="teal" n={`${pct(cohortTalked, newLeads)}%`} sub={<>{cohortTalked} of {newLeads} new leads · <Link href={talkedHref()}>see who</Link></>} />
-        <Stat label="Reached by recruiters" icon="users" tone="violet" n={`${pct(reached, sheetTotal)}%`} sub={`${reached} of ${sheetTotal} sheet leads`} />
-        <Stat label="On process now" icon="check" tone="blue" n={onProcessNow} sub={<Link href="/process">open the list</Link>} />
+        <ListStat label="New leads" icon="leads" tone="blue" n={newLeads} sub={<Delta now={newLeads} prev={prevLeads} />}
+          rates={[
+            { label: "Talked to Crystal", value: `${pct(cohortTalked, newLeads)}%`, sub: `${cohortTalked} of ${newLeads} new leads`, group: "talked" },
+            { label: "Reached by recruiters", value: `${pct(reached, sheetTotal)}%`, sub: `${reached} of ${sheetTotal} sheet leads`, group: "reached" },
+          ]}
+          groups={[
+            { key: "all", label: "All new leads", items: newRows.map((r) => r.item) },
+            { key: "talked", label: "Talked to Crystal", items: newRows.filter((r) => r.talked).map((r) => r.item) },
+            { key: "not", label: "Didn't talk", items: newRows.filter((r) => !r.talked).map((r) => r.item) },
+            { key: "reached", label: "Reached by recruiters", items: sheetRowsOut.filter((r) => r.reached).map((r) => r.item) },
+            { key: "unreached", label: "Not reached", items: sheetRowsOut.filter((r) => !r.reached).map((r) => r.item) },
+          ]} />
+        <ListStat label="No response leads" icon="voice" tone="teal" n={recallRows.length} sub={pickedSub(recallRows)} rates={pickedRates(recallRows)} groups={picked(recallRows)} />
+        <ListStat label="Old leads" icon="users" tone="violet" n={oldRows.length} sub={pickedSub(oldRows)} rates={pickedRates(oldRows)} groups={picked(oldRows)} />
+        <DriverStat label="On process" icon="check" tone="blue" drivers={board.all.filter((d) => PROCESS.has(d.status))} showRecruiter sub="applied in this period" />
         <DriverStat label="Application" icon="jobs" tone="amber" drivers={appDrivers} showRecruiter sub="applied in this period" />
         <DriverStat label="Hired" icon="star" tone="green" drivers={hiredDrivers} showRecruiter sub="applied in this period" />
       </div>
 
-      <div className="sec-label">Needs a push right now <span className="muted">· not tied to the dates above</span> {stuckTotal > 0 ? <span className="bad-text">· {stuckTotal} drivers</span> : <span>· nothing stuck</span>} <Link href={`/board${view.owner && view.team !== "all" ? `?team=${view.team}` : ""}`} className="sec-link">Board →</Link></div>
-      <div className="section"><BoardStrip columns={stuck} showRecruiter stuck /></div>
+      <div className="sec-label">Needs a push <span className="muted">· drivers who applied in this period, by status now</span> {stuckTotal > 0 ? <span className="bad-text">· {stuckTotal} stuck</span> : <span>· nothing stuck</span>} <Link href={`/board${view.owner && view.team !== "all" ? `?team=${view.team}` : ""}`} className="sec-link">Board →</Link></div>
+      <div className="section"><BoardStrip columns={push} showRecruiter /></div>
 
       {all ? (
         <div className="grid two section">

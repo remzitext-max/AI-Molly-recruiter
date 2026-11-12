@@ -487,3 +487,19 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #c7d2fe; border-c
 .money-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .money-row:last-of-type { border-bottom: 0; }
 .lead-bar { height: 3px; border-radius: 2px; background: #c7d2fe; margin-top: 3px; min-width: 4px; }
+
+/* Dashboard card window (list-stat.tsx): rates on top, then the drivers in groups */
+.ls-modal { width: min(720px, 100%); }
+.ls-rates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 12px 18px 0; }
+.ls-rates button.ls-rate { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; border-radius: 12px; text-align: left; font-weight: 400; }
+.ls-rates button.ls-rate.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.ls-rate .l { font-size: 12px; color: var(--muted); }
+.ls-rate .v { font-size: 26px; font-weight: 700; line-height: 1.15; }
+.ls-rate .s { font-size: 12px; color: var(--muted); }
+.ls-rate .link-text { color: var(--accent); }
+.ls-tabs { padding: 12px 18px 0; margin: 0; }
+.ls-tabs button.tab { padding: 5px 11px; font-weight: 500; box-shadow: none; }
+.ls-tabs button.tab:hover { background: #fff; box-shadow: none; }
+.ls-tabs button.tab.on, .ls-tabs button.tab.on:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ls-modal .board-list { margin-top: 8px; border-top: 1px solid var(--border); }
+@media (max-width: 560px) { .ls-rates { grid-template-columns: 1fr; } }

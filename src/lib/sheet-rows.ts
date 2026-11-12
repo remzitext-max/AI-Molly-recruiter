@@ -117,5 +117,6 @@ export async function tabStats(orgIds: string[], range?: { gte: Date; lt: Date }
 }
 
 /** Statuses that mean the recruiter reached the driver (anything but New / No answer / Not in service). */
-export const talkedBy = (t: TabStats) => Object.entries(t.byStatus).filter(([s]) => !UNWORKED.has(s) && s !== "Not in service").reduce((n, [, c]) => n + c, 0);
+export const isReachedStatus = (s: string) => !UNWORKED.has(s) && s !== "Not in service";
+export const talkedBy = (t: TabStats) => Object.entries(t.byStatus).filter(([s]) => isReachedStatus(s)).reduce((n, [, c]) => n + c, 0);
 export const countOf = (t: TabStats, ...statuses: string[]) => statuses.reduce((n, s) => n + (t.byStatus[s] ?? 0), 0);

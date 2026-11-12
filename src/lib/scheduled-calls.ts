@@ -23,17 +23,21 @@ export async function scheduledCalls(user: Pick<User, "id" | "role" | "orgId">, 
 }
 
 /** Open booked calls per recruiter (lead's recruiter), and how many of them are already late. */
-export async function scheduledByRecruiter(orgIds: string[], now = new Date()) {
+/**
+ * Calls Crystal booked per recruiter. With `range`: the ones booked in it (made or not), and
+ * how many of those are still not made after their time; without: every call still open.
+ */
+export async function scheduledByRecruiter(orgIds: string[], now = new Date(), range?: { gte: Date; lt: Date }) {
   const open = await db.task.findMany({
-    where: { status: "OPEN", type: "CALLBACK", dedupeKey: { startsWith: RECRUITER_CALL_KEY }, dueAt: { not: null }, lead: { orgId: { in: orgIds }, optedOutAt: null } },
-    select: { dueAt: true, assignedToId: true, lead: { select: { assignedToId: true } } },
+    where: { ...(range ? { createdAt: range } : { status: "OPEN" }), type: "CALLBACK", dedupeKey: { startsWith: RECRUITER_CALL_KEY }, dueAt: { not: null }, lead: { orgId: { in: orgIds }, optedOutAt: null } },
+    select: { dueAt: true, status: true, assignedToId: true, lead: { select: { assignedToId: true } } },
   });
   const by = new Map<string, { open: number; late: number }>();
   for (const t of open) {
     const k = t.lead.assignedToId ?? t.assignedToId ?? "none";
     const r = by.get(k) ?? { open: 0, late: 0 };
     r.open++;
-    if (t.dueAt! < now) r.late++;
+    if (t.status === "OPEN" && t.dueAt! < now) r.late++;
     by.set(k, r);
   }
   return by;
