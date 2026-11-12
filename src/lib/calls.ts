@@ -124,6 +124,11 @@ export async function attemptCallJob(job: Job) {
     // A new applicant checks back sooner, so it gets the line as soon as it frees up.
     return { rescheduleAt: new Date(Date.now() + (isNewApplicant(lead, now) ? 10_000 : 45_000)), reason: "LINE_BUSY" };
   }
+  // Telnyx stops all calls for the day once the profile's daily spend limit is hit: wait, don't burn attempts.
+  if (!provider.isMock && (await providerLimitHit(now))) {
+    await db.lead.update({ where: { id: leadId }, data: { queueReason: PROVIDER_LIMIT_REASON } });
+    return { rescheduleAt: new Date(Date.now() + 15 * 60_000), reason: "PROVIDER_LIMIT" };
+  }
   if (!provider.isMock && !isNewApplicant(lead, now) && (await newApplicantWaiting(leadId, now))) {
     await db.lead.update({ where: { id: leadId }, data: { queueReason: "Waiting: a new applicant is called first" } });
     return { rescheduleAt: new Date(Date.now() + 45_000), reason: "NEW_APPLICANT_FIRST" };
@@ -159,6 +164,15 @@ export async function attemptCallJob(job: Job) {
       await recordEvent({ leadId, actorType: "SYSTEM", type: "CALL_UNCERTAIN", message: "Provider outcome unknown; will reconcile before any retry" });
       return;
     }
+    if (isProviderLimitError(e)) {
+      // Not the driver's fault and no call was made: the attempt does not count, and the
+      // freed idempotency key lets this same job dial again once the limit is lifted.
+      await db.callAttempt.update({ where: { id: attempt.id }, data: { status: "CANCELED", statusRank: TERMINAL, outcome: null, errorMessage: (e as Error).message, endedAt: new Date(), idempotencyKey: `${attempt.idempotencyKey}:limit:${Date.now()}` } });
+      await db.lead.update({ where: { id: leadId }, data: { attemptCount: { decrement: 1 }, queueReason: PROVIDER_LIMIT_REASON } });
+      await releaseLock(leadId, attempt.id);
+      await recordEvent({ leadId, actorType: "SYSTEM", type: "CALL_BLOCKED", message: `${PROVIDER_LIMIT_REASON}; will try again` });
+      return { rescheduleAt: new Date(Date.now() + 15 * 60_000), reason: "PROVIDER_LIMIT" };
+    }
     const blocked = e instanceof LiveContactBlockedError;
     await db.callAttempt.update({ where: { id: attempt.id }, data: { status: blocked ? "CANCELED" : "FAILED", statusRank: TERMINAL, outcome: blocked ? null : "TECHNICAL_FAILURE", errorMessage: (e as Error).message, endedAt: new Date() } });
     if (blocked) await db.lead.update({ where: { id: leadId }, data: { attemptCount: { decrement: 1 }, queueReason: (e as Error).message } });
@@ -166,6 +180,38 @@ export async function attemptCallJob(job: Job) {
     await recordEvent({ leadId, actorType: "SYSTEM", type: blocked ? "CALL_BLOCKED" : "CALL_FAILED", message: `${blocked ? "Real contact blocked" : "Call failed to start"}: ${(e as Error).message}` });
     if (!blocked) throw e; // retried by the queue with backoff
   }
+}
+
+export const PROVIDER_LIMIT_REASON = "Paused: the Telnyx daily spend limit was reached (raise it on the Outbound Voice Profile)";
+const PROVIDER_LIMIT_RE = /Daily OB profile limit|"error_code":"D7"|daily spend limit/i;
+
+export function isProviderLimitError(e: unknown) {
+  return PROVIDER_LIMIT_RE.test((e as Error)?.message ?? "");
+}
+
+/**
+ * Calls refused for the Telnyx daily limit before this was handled (they counted as attempts
+ * and were never retried): give the attempt back and queue the driver again. Idempotent.
+ */
+export async function requeueLimitFailures(now = new Date()) {
+  const failed = await db.callAttempt.findMany({
+    where: { status: "FAILED", createdAt: { gte: new Date(now.getTime() - 3 * 86400_000) }, errorMessage: { contains: "Daily OB profile limit" } },
+    select: { id: true, leadId: true, idempotencyKey: true },
+  });
+  let queued = 0;
+  for (const a of failed) {
+    await db.callAttempt.update({ where: { id: a.id }, data: { status: "CANCELED", outcome: null, idempotencyKey: `${a.idempotencyKey}:limit` } });
+    const lead = await db.lead.findUniqueOrThrow({ where: { id: a.leadId } });
+    await db.lead.update({ where: { id: lead.id }, data: { attemptCount: Math.max(0, lead.attemptCount - 1) } });
+    if (lead.optedOutAt || lead.isDemo || ["OPTED_OUT", "CLOSED", "HANDED_OFF"].includes(lead.pipelineStatus)) continue;
+    if (await scheduleLeadCall(lead.id, { reason: "Retry: the Telnyx daily limit stopped the call" })) queued++;
+  }
+  return { fixed: failed.length, queued };
+}
+
+/** A call refused for the Telnyx daily limit in the last 15 minutes. */
+async function providerLimitHit(now: Date) {
+  return !!(await db.callAttempt.findFirst({ where: { status: "CANCELED", createdAt: { gte: new Date(now.getTime() - 15 * 60_000) }, errorMessage: { contains: "Daily OB profile limit" } }, select: { id: true } }));
 }
 
 /** Real (non-demo) calls that are dialing or talking now. Attempts older than 20 min are ignored as stuck. */

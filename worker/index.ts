@@ -10,6 +10,7 @@ import { SHEET_FAST_POLL_MS, scheduleSheetPoll } from "../src/lib/sheets-sync";
 import { scheduleInboundSmsPoll } from "../src/lib/messaging";
 import { scheduleReengageScan } from "../src/lib/reengage";
 import { scheduleReviveScan } from "../src/lib/revive";
+import { requeueLimitFailures } from "../src/lib/calls";
 import { scheduleMetaSync } from "../src/lib/meta";
 import { scheduleHiringSync } from "../src/lib/hiring";
 import { scheduleLearningReports } from "../src/lib/learning";
@@ -25,6 +26,8 @@ async function scheduleMaintenance() {
 async function main() {
   log.info(`worker ${workerId} starting in ${config.mode.toUpperCase()} mode`);
   await scheduleMaintenance();
+  // Drivers whose call the Telnyx daily limit refused get their attempt back and are called again.
+  if (config.mode === "live") await requeueLimitFailures().then((r) => r.fixed && log.info("requeued calls refused by the Telnyx limit", r)).catch((e) => log.error("requeue failed", { error: (e as Error).message }));
   let lastMaint = Date.now();
   let lastSheetCheck = 0;
   let lastFastSheetCheck = 0;
