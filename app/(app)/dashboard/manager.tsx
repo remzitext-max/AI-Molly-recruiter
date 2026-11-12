@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 import { UPLOAD_PROVIDER } from "@/lib/recruiter-upload";
 import { RECALL_PREFIX } from "@/lib/sheet-recall";
+import { REFERRAL_PREFIX, firstSource, isNewApplicant } from "@/lib/new-leads";
 import { callsWithAnswers, isTalk, talkedDrivers, teamsScope } from "@/lib/talked";
 import { countOf, orderStatuses, tabStats, talkedBy, type TabStats } from "@/lib/sheet-rows";
 import { ON_PROCESS } from "@/lib/on-process";
@@ -30,8 +31,6 @@ const median = (xs: number[]) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 const mins = (m: number | null) => (m === null ? "—" : m < 1 ? "<1 min" : m < 60 ? `${Math.round(m)} min` : `${(m / 60).toFixed(1)} h`);
-// Old "No answer" leads re-called from the recruiters' tabs are not new applicants.
-const fresh: Prisma.LeadWhereInput = { sourceRecords: { none: { sourceRecordId: { startsWith: RECALL_PREFIX } } } };
 const sum = (tabs: TabStats[], f: (t: TabStats) => number) => tabs.reduce((n, t) => n + f(t), 0);
 
 export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id" | "role" | "orgId">; view: TeamView; p: Period }) {
@@ -40,19 +39,27 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
   const calls = { lead: scope, provider: { not: UPLOAD_PROVIDER } };
   const distinctLeads = (where: Prisma.CallAttemptWhereInput) => db.callAttempt.findMany({ where, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length);
 
-  const [newLeads, prevLeads, rangeLeads, chartCalls, calledDrivers, talkedList, tabs, onProcess] = await Promise.all([
-    db.lead.count({ where: { ...scope, ...fresh, createdAt: range } }),
-    db.lead.count({ where: { ...scope, ...fresh, createdAt: prev } }),
+  // New leads = new applicants only: Crystal's "No answer" re-calls, old leads and referrals
+  // also create leads, but they are counted on their own line (new-leads.ts).
+  const sourcesIn = (prefix: string, at: Prisma.DateTimeFilter) => db.leadSourceRecord.count({ where: { sourceRecordId: { startsWith: prefix }, createdAt: at, lead: scope } });
+  const [prevLeads, rangeAll, chartCalls, calledDrivers, talkedList, tabs, onProcess, recalls, revived, referrals] = await Promise.all([
+    db.lead.findMany({ where: { ...scope, createdAt: prev }, select: firstSource }).then((x) => x.filter(isNewApplicant).length),
     db.lead.findMany({
-      where: { ...scope, ...fresh, createdAt: range },
-      select: { orgId: true, createdAt: true, pipelineStatus: true, documentStatus: true, hireStage: true, calls: { where: { status: PLACED }, orderBy: { createdAt: "asc" }, select: { id: true, createdAt: true, status: true, outcome: true } } },
+      where: { ...scope, createdAt: range },
+      select: { ...firstSource, orgId: true, createdAt: true, pipelineStatus: true, documentStatus: true, hireStage: true, calls: { where: { status: PLACED }, orderBy: { createdAt: "asc" }, select: { id: true, createdAt: true, status: true, outcome: true } } },
     }),
     db.callAttempt.findMany({ where: { ...calls, status: PLACED, createdAt: range }, select: { id: true, createdAt: true, status: true, outcome: true, startedAt: true, endedAt: true } }),
     distinctLeads({ ...calls, status: PLACED, createdAt: range }),
     talkedDrivers(scope, range),
     tabStats(view.orgIds, range),
     db.sheetDriver.groupBy({ by: ["orgId"], where: { orgId: { in: view.orgIds } }, _count: true }),
+    sourcesIn(RECALL_PREFIX, range),
+    db.lead.count({ where: { ...scope, reviveAt: range } }),
+    sourcesIn(REFERRAL_PREFIX, range),
   ]);
+  const rangeLeads = rangeAll.filter(isNewApplicant);
+  const newLeads = rangeLeads.length;
+  const notCounted = [recalls && `${recalls} "No answer" re-calls`, revived && `${revived} old leads`, referrals && `${referrals} referrals`].filter(Boolean).join(", ");
   const gave = await callsWithAnswers([...chartCalls, ...rangeLeads.flatMap((l) => l.calls)].map((c) => c.id));
   const talked = (c: { id: string; status?: string; outcome: string | null }) => isTalk(c, gave);
 
@@ -103,7 +110,7 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
     <>
       <div className="sec-label">Results</div>
       <div className="stats six">
-        <Stat label="New leads" icon="leads" tone="blue" n={newLeads} sub={<Delta now={newLeads} prev={prevLeads} />} />
+        <Stat label="New leads" icon="leads" tone="blue" n={newLeads} sub={<><Delta now={newLeads} prev={prevLeads} />{notCounted && <div className="small muted" title="Crystal also called these in this period; they are not new applicants">not counted: {notCounted}</div>}</>} />
         <Stat label="Talked to Crystal" icon="voice" tone="teal" n={`${pct(cohortTalked, newLeads)}%`} sub={<>{cohortTalked} of {newLeads} new leads · <Link href={talkedHref()}>see who</Link></>} />
         <Stat label="Reached by recruiters" icon="users" tone="violet" n={`${pct(reached, sheetTotal)}%`} sub={`${reached} of ${sheetTotal} sheet leads`} />
         <Stat label="On process now" icon="check" tone="blue" n={onProcessNow} sub={<Link href="/process">open the list</Link>} />
@@ -111,7 +118,7 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
         <DriverStat label="Hired" icon="star" tone="green" drivers={hiredDrivers} showRecruiter sub="applied in this period" />
       </div>
 
-      <div className="sec-label">Needs a push {stuckTotal > 0 ? <span className="bad-text">· {stuckTotal} drivers</span> : <span>· nothing stuck</span>} <Link href={`/board${view.owner && view.team !== "all" ? `?team=${view.team}` : ""}`} className="sec-link">Board →</Link></div>
+      <div className="sec-label">Needs a push right now <span className="muted">· not tied to the dates above</span> {stuckTotal > 0 ? <span className="bad-text">· {stuckTotal} drivers</span> : <span>· nothing stuck</span>} <Link href={`/board${view.owner && view.team !== "all" ? `?team=${view.team}` : ""}`} className="sec-link">Board →</Link></div>
       <div className="section"><BoardStrip columns={stuck} showRecruiter stuck /></div>
 
       {all ? (

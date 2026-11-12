@@ -5,9 +5,10 @@ import { db } from "./db";
 import { normalizePhone } from "./phone";
 import { ingestLead } from "./leads";
 import { recordEvent } from "./activity";
+import { REFERRAL_PREFIX } from "./new-leads";
 
 export const REFERRAL_SOURCE = "REFERRAL";
-export const referralPrefix = (referrerLeadId: string) => `referral:${referrerLeadId}:`;
+export const referralPrefix = (referrerLeadId: string) => `${REFERRAL_PREFIX}${referrerLeadId}:`;
 
 export type ReferralResult = { ok: boolean; say: string; leadId?: string };
 

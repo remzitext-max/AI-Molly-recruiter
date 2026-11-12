@@ -14,7 +14,7 @@ import { markCallMade, scheduledCalls } from "@/lib/scheduled-calls";
 import { loadOnProcess } from "@/lib/on-process";
 import { orderStatuses, tabStats } from "@/lib/sheet-rows";
 import { statusTone } from "@/lib/recruiter-status";
-import { RECALL_PREFIX } from "@/lib/sheet-recall";
+import { firstSource, isNewApplicant } from "@/lib/new-leads";
 import { pct, type Period } from "@/lib/dashboard-view";
 import { Card, Stat, fmt, initialsOf } from "@/components/ui";
 import { BarRow } from "@/components/dash-parts";
@@ -34,10 +34,9 @@ const fullName = (l: { firstName: string | null; lastName: string | null }) => [
 
 export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | "role" | "orgId" | "name">; p: Period }) {
   const scope = dashboardScope(user, true, config.mode === "demo");
-  const fresh = { sourceRecords: { none: { sourceRecordId: { startsWith: RECALL_PREFIX } } } };
   const [calls, newLeads, talked, interested, docs, onProcess, tabs, board, hiredAll] = await Promise.all([
     scheduledCalls(user),
-    db.lead.count({ where: { ...scope, ...fresh, createdAt: p.range } }),
+    db.lead.findMany({ where: { ...scope, createdAt: p.range }, select: firstSource }).then((x) => x.filter(isNewApplicant).length),
     talkedDrivers(scope, p.range),
     db.callAttempt.findMany({ where: { lead: scope, outcome: "INTERESTED", createdAt: p.range }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
     db.document.findMany({ where: { lead: scope, uploadedAt: p.range }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
@@ -88,7 +87,7 @@ export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | 
         })}
       </div>
 
-      <div className="sec-label">Needs a push {stuckTotal > 0 ? <span className="bad-text">· {stuckTotal} of your drivers</span> : <span>· nothing stuck</span>} <Link href="/board" className="sec-link">My board →</Link></div>
+      <div className="sec-label">Needs a push right now {stuckTotal > 0 ? <span className="bad-text">· {stuckTotal} of your drivers</span> : <span>· nothing stuck</span>} <Link href="/board" className="sec-link">My board →</Link></div>
       <div className="section"><BoardStrip columns={stuck} showRecruiter={false} stuck /></div>
 
       <div className="sec-label">This period</div>

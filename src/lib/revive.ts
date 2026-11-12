@@ -14,6 +14,7 @@ import { isSuppressed } from "./contact-policy";
 import { canonicalStatus } from "./recruiter-status";
 import { phonesOfOtherOrgs } from "./sheets-sync";
 import { assignFromSheetTabs } from "./assignment";
+import { REVIVE_PREFIX } from "./new-leads";
 
 const DAY = 86400_000;
 export const REVIVE_CALLS = 2;
@@ -155,7 +156,7 @@ export async function reviveScan(now = new Date()) {
       if (elsewhere.has(row.phoneE164) || (await leadBlock(c.orgId, row.phoneE164, now))) continue;
       const [first, ...rest] = (row.name ?? "").trim().split(/\s+/);
       const r = await ingestLead(
-        { sourceSystem: "REVIVE", sourceRecordId: `revive:${c.orgId}:${row.phoneE164}`, firstName: first || undefined, lastName: rest.join(" ") || undefined, phone: row.phoneE164,
+        { sourceSystem: "REVIVE", sourceRecordId: `${REVIVE_PREFIX}${c.orgId}:${row.phoneE164}`, firstName: first || undefined, lastName: rest.join(" ") || undefined, phone: row.phoneE164,
           permission: [{ scope: "AI_CALL", source: `Facebook lead form (old lead in sheet tab ${row.tab})`, grantedAt: (row.appliedAt ?? now).toISOString() }],
           raw: { tab: row.tab, status: row.status, applied: row.appliedAt?.toISOString() ?? null, revive: v.segment } },
         { orgId: c.orgId, campaignId: c.id, isDemo: false, actorId: null, scheduleOutreach: false },
