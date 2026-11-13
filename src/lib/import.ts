@@ -9,6 +9,7 @@ import { sha256 } from "./crypto";
 import { normalizePhone } from "./phone";
 import { ingestLead } from "./leads";
 import { recordEvent } from "./activity";
+import { APPLIED_HEADER, parseApplied } from "./applied";
 
 export const TARGET_FIELDS = [
   "sourceRecordId", "firstName", "lastName", "fullName", "phone", "email", "state", "zip",
@@ -95,6 +96,9 @@ const GUESS: Record<TargetField, RegExp> = {
 // outside the reviewed mapping, so adding them to a sheet needs no re-setup.
 const POSITION_HEADER = /^(source|position|driver ?type|solo ?\/ ?team)$/i;
 const TEAM_ANSWER_HEADER = /^(team ?answer|.*team ?partner.*)$/i;
+// When the driver applied and how long they have driven (lead board columns). A row that applied
+// days ago is an old lead a recruiter sent back to the Pool, not a new applicant (old-leads.ts).
+const EXPERIENCE_HEADER = /experience/i;
 
 const FB_COLUMNS = {
   fbLeadId: /^((fb|facebook) ?lead ?id|leadgen ?id)$/i,
@@ -131,6 +135,7 @@ export async function buildPreview(sheet: ParsedSheet, mapping: Mapping, sourceS
   // Arslon's team form asks "Are you applying with a team partner?": any answer there (the
   // board's "Team answer" column) means the driver came from the team ad, whatever Source says.
   const teamIdx = sheet.headers.findIndex((h) => TEAM_ANSWER_HEADER.test(h.trim()));
+  const appliedIdx = sheet.headers.findIndex((h) => APPLIED_HEADER.test(h.trim())), expIdx = sheet.headers.findIndex((h) => EXPERIENCE_HEADER.test(h.trim()));
   const position = (row: string[]) => {
     const t = teamIdx >= 0 ? (row[teamIdx] ?? "").trim() : "";
     // The board writes "Both ready" / "Needs partner" / "Wants solo" / "(no answer)".
@@ -175,7 +180,8 @@ export async function buildPreview(sheet: ParsedSheet, mapping: Mapping, sourceS
     const values: Record<string, string> = { firstName: first, lastName: last, phone: col(r, "phone"), email, state, zip,
       callPermissionSource: col(r, "callPermissionSource"), callPermissionDate: col(r, "callPermissionDate"),
       smsPermissionSource: col(r, "smsPermissionSource"), smsPermissionDate: col(r, "smsPermissionDate"),
-      fbLeadId: fbCol(r, "fbLeadId"), fbCampaign: fbCol(r, "fbCampaign"), fbAd: fbCol(r, "fbAd"), fbForm: fbCol(r, "fbForm"), position: position(r) };
+      fbLeadId: fbCol(r, "fbLeadId"), fbCampaign: fbCol(r, "fbCampaign"), fbAd: fbCol(r, "fbAd"), fbForm: fbCol(r, "fbForm"), position: position(r),
+      applied: (appliedIdx >= 0 ? r[appliedIdx] ?? "" : "").trim(), experience: (expIdx >= 0 ? r[expIdx] ?? "" : "").trim() };
     out.push({ rowNumber: i + 2, values, phoneE164: phone, sourceRecordId: sid, errors, warnings, disposition });
   }
   return out;
@@ -221,7 +227,7 @@ export async function commitBatch(batchId: string, user: { id: string | null; or
     if (v.smsPermissionSource && v.smsPermissionDate && !isNaN(new Date(v.smsPermissionDate).getTime())) permission.push({ scope: "SMS", source: v.smsPermissionSource, grantedAt: new Date(v.smsPermissionDate).toISOString() });
     const r = await ingestLead(
       { sourceSystem: b.sourceSystem, sourceRecordId: row.sourceRecordId, firstName: v.firstName, lastName: v.lastName, phone: v.phone, email: v.email, state: v.state, zip: v.zip, permission,
-        fb: { leadId: v.fbLeadId, campaign: v.fbCampaign, ad: v.fbAd, form: v.fbForm }, raw: { row: row.rowNumber, file: b.fileName, ...(v.position ? { position: v.position } : {}) } },
+        fb: { leadId: v.fbLeadId, campaign: v.fbCampaign, ad: v.fbAd, form: v.fbForm }, appliedAt: parseApplied(v.applied), raw: { row: row.rowNumber, file: b.fileName, ...(v.position ? { position: v.position } : {}) } },
       { orgId: user.orgId, campaignId: b.campaignId, isDemo: b.isDemo, importBatchId: b.id, actorId: user.id },
     );
     if (r.result === "invalid") counts.skipped_errors++; else counts[r.result]++;

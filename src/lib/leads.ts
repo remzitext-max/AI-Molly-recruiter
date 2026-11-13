@@ -5,6 +5,8 @@ import { resolveTimezoneWithPhone } from "./timezone";
 import { recordEvent } from "./activity";
 import { ensureAssigned } from "./assignment";
 import { enqueue } from "./jobs/queue";
+import { isOldApplication } from "./applied";
+import { OLD_LEAD_CALLS, RETURNED } from "./old-leads";
 import type { IncomingLead } from "../adapters/types";
 
 export const PIPELINE_RANK: Record<PipelineStatus, number> = {
@@ -33,7 +35,7 @@ async function queueSourceSync(leadId: string, to: PipelineStatus, tx: Tx | type
 }
 
 export type IngestResult =
-  | { result: "created"; leadId: string }
+  | { result: "created"; leadId: string; oldLead?: boolean }
   | { result: "merged"; leadId: string }
   | { result: "duplicate_source"; leadId: string }
   | { result: "invalid"; error: string };
@@ -73,6 +75,8 @@ export async function ingestLead(inc: IncomingLead, opts: IngestOpts): Promise<I
       if (!existing.state && inc.state) fill.state = inc.state.toUpperCase();
       if (!existing.zip && inc.zip) fill.zip = inc.zip;
       if (!existing.fbLeadId && inc.fb?.leadId) Object.assign(fill, fbData(inc.fb));
+      // Only the application that made this lead (shortly before it reached the site), not an older or a later one of the same driver.
+      if (!existing.appliedAt && inc.appliedAt && !isNaN(inc.appliedAt.getTime()) && inc.appliedAt <= existing.createdAt && !isOldApplication(inc.appliedAt, existing.createdAt)) fill.appliedAt = inc.appliedAt;
       if (Object.keys(fill).length) await tx.lead.update({ where: { id: existing.id }, data: fill });
       await addPermissions(tx, existing.id, inc, opts);
       await recordEvent({ leadId: existing.id, actorType: "SYSTEM", type: "DUPLICATE_MERGED", message: `Same phone received again from ${inc.sourceSystem}; merged, no new outreach created` }, tx);
@@ -81,6 +85,14 @@ export async function ingestLead(inc: IncomingLead, opts: IngestOpts): Promise<I
 
     const tz = resolveTimezoneWithPhone(inc.state, inc.zip, phone);
     const suppressed = await tx.suppression.findUnique({ where: { phoneE164: phone } });
+    const now = new Date();
+    const appliedAt = inc.appliedAt && !isNaN(inc.appliedAt.getTime()) ? inc.appliedAt : null;
+    // Applied days ago and only now reaching Crystal (a recruiter sent the row back to the Pool, or
+    // an old list was imported): an old lead, not a new applicant. She calls it like her other
+    // follow-up rounds: "you applied a while back", within the hours, after new applicants.
+    // Re-calls and her own old-lead picks (scheduleOutreach false) set these fields themselves.
+    const oldLead = opts.scheduleOutreach !== false && !suppressed && isOldApplication(appliedAt, now);
+    const maxAttempts = oldLead ? (await tx.campaign.findUniqueOrThrow({ where: { id: opts.campaignId }, select: { maxAttempts: true } })).maxAttempts : 0;
     const lead = await tx.lead.create({
       data: {
         orgId: opts.orgId, campaignId: opts.campaignId, isDemo: opts.isDemo,
@@ -89,19 +101,21 @@ export async function ingestLead(inc: IncomingLead, opts: IngestOpts): Promise<I
         state: inc.state?.trim().toUpperCase() || null, zip: inc.zip?.trim() || null,
         timezone: tz.timezone, timezoneSource: tz.source,
         pipelineStatus: suppressed ? "OPTED_OUT" : "NEW",
-        optedOutAt: suppressed ? new Date() : null,
+        optedOutAt: suppressed ? now : null,
+        appliedAt,
+        ...(oldLead ? { reviveAt: now, reviveFrom: RETURNED, reengagedAt: now, attemptCount: Math.max(0, maxAttempts - OLD_LEAD_CALLS) } : {}),
         ...fbData(inc.fb),
         sourceRecords: { create: { sourceSystem: inc.sourceSystem, sourceRecordId: inc.sourceRecordId, importBatchId: opts.importBatchId, raw: (inc.raw ?? {}) as Prisma.InputJsonValue } },
       },
     });
     await addPermissions(tx, lead.id, inc, opts);
-    await recordEvent({ leadId: lead.id, actorType: opts.actorId ? "USER" : "SYSTEM", actorId: opts.actorId, type: "LEAD_CREATED", message: `Lead received from ${inc.sourceSystem}${opts.isDemo ? " (demo data)" : ""}${suppressed ? "; number is on the suppression list, will not be contacted" : ""}` }, tx);
+    await recordEvent({ leadId: lead.id, actorType: opts.actorId ? "USER" : "SYSTEM", actorId: opts.actorId, type: "LEAD_CREATED", message: `Lead received from ${inc.sourceSystem}${opts.isDemo ? " (demo data)" : ""}${suppressed ? "; number is on the suppression list, will not be contacted" : ""}${oldLead ? `; applied ${appliedAt!.toISOString().slice(0, 10)}, so an old lead (returned to the Pool or an old list): up to ${OLD_LEAD_CALLS} follow-up calls` : ""}` }, tx);
     if (tz.ambiguous) await recordEvent({ leadId: lead.id, actorType: "SYSTEM", type: "TIMEZONE", message: "State spans several timezones; ZIP or manual timezone needed before automatic calls" }, tx);
     await ensureAssigned(lead.id, tx);
-    return { result: "created" as const, leadId: lead.id };
+    return { result: "created" as const, leadId: lead.id, oldLead };
   });
 
-  if (res.result === "created" && opts.scheduleOutreach !== false) await scheduleLeadCall(res.leadId, { reason: "New lead" });
+  if (res.result === "created" && opts.scheduleOutreach !== false) await scheduleLeadCall(res.leadId, { reason: res.oldLead ? "Old lead back in the Pool" : "New lead" });
   return res;
 }
 

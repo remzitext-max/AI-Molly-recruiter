@@ -9,6 +9,7 @@ import { sha256 } from "./crypto";
 import { redactText } from "./redact";
 import { buildPreview, commitBatch, guessMapping, SHEETS_SOURCE, type Mapping, type ParsedSheet } from "./import";
 import { getSheetConnection, phonesOfOtherOrgs, sheetMapping } from "./sheets-sync";
+import { admitPoolRows } from "./old-leads";
 import { getAdapters } from "../adapters/registry";
 
 export const teamConnId = (orgId: string) => `google-sheets@${orgId}`;
@@ -54,6 +55,9 @@ export async function pollTeamSheet(org: Organization) {
     let fresh = preview.filter((r) => !baseline.has(r.sourceRecordId) && (r.disposition === "new" || r.disposition === "merge_existing_phone" || r.disposition === "suppressed"));
     const elsewhere = await phonesOfOtherOrgs(org.id, fresh.map((r) => r.phoneE164!).filter(Boolean));
     fresh = fresh.filter((r) => !elsewhere.has(r.phoneE164!));
+    // Old leads a recruiter sent back to the Pool are taken a few a day, like the old leads Crystal picks herself.
+    const admitted = await admitPoolRows(org.id, campaign, fresh);
+    fresh = admitted.rows;
     let imported: Record<string, number> | null = null;
     if (fresh.length) {
       const rows = fresh.map((r) => snap.rows[r.rowNumber - 2]);
@@ -66,7 +70,7 @@ export async function pollTeamSheet(org: Organization) {
       });
       imported = await commitBatch(batch.id, { id: null, orgId: org.id });
     }
-    const summary = { checkedRows: snap.rows.length, imported, skippedOtherTeam: elsewhere.size };
+    const summary = { checkedRows: snap.rows.length, imported, skippedOtherTeam: elsewhere.size, oldRowsHeld: admitted.held, oldRowsWaiting: admitted.waiting };
     await db.sourceConnection.update({ where: { id }, data: { lastSyncAt: new Date(), lastSummary: summary as Prisma.InputJsonValue, lastError: null } });
     return summary;
   } catch (e) {

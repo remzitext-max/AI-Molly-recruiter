@@ -15,9 +15,11 @@ import { canonicalStatus } from "./recruiter-status";
 import { phonesOfOtherOrgs } from "./sheets-sync";
 import { assignFromSheetTabs } from "./assignment";
 import { REVIVE_PREFIX } from "./new-leads";
+import { LOW_EXPERIENCE, OLD_LEAD_CALLS, RETURNED, pickDayStart, waitingInPools } from "./old-leads";
+import { callsWithAnswers, crystalResult } from "./talked";
 
 const DAY = 86400_000;
-export const REVIVE_CALLS = 2;
+export const REVIVE_CALLS = OLD_LEAD_CALLS;
 /** Older than this is too stale to call (numbers change, the ad was a year ago). */
 export const REVIVE_MAX_DAYS = 365;
 
@@ -35,7 +37,6 @@ const LEFT_ALONE: Record<string, string> = {
   Hired: "Hired / our driver", "Our driver – working": "Hired / our driver",
   SAP: "SAP", "Not qualified": "Not qualified", Declined: "Declined by safety", "Not in service": "Number not in service",
 };
-const LOW_EXPERIENCE = /less than|under 1|^\s*<\s*1|^\s*0\b|no experience|6 ?months?|just got/i;
 
 export type Verdict = { segment: Segment } | { skip: string; later?: boolean };
 
@@ -106,20 +107,24 @@ export async function reviveResults(orgId: string, since?: Date) {
   const leads = await db.lead.findMany({
     where: { orgId, isDemo: false, reviveAt: since ? { gte: since } : { not: null } },
     select: { reviveAt: true, reviveFrom: true, hireStage: true, hiredAt: true,
-      calls: { where: { status: "COMPLETED" }, select: { createdAt: true, outcome: true } },
+      calls: { where: { status: "COMPLETED" }, select: { id: true, createdAt: true, outcome: true } },
       documents: { select: { uploadedAt: true } } },
   });
+  // Talked / interested by the same rule as the dashboards (talked.ts crystalResult).
+  const gave = await callsWithAnswers(leads.flatMap((l) => l.calls.map((c) => c.id)));
+  const got = new Map(leads.map((l) => [l, crystalResult(l.calls.filter((c) => !!l.reviveAt && c.createdAt >= l.reviveAt), gave)]));
   // Only what happened after the driver was picked: their old calls and documents do not count.
   const after = (l: (typeof leads)[number], d: Date) => !!l.reviveAt && d >= l.reviveAt;
   const row = (ls: typeof leads) => ({
     picked: ls.length,
-    talked: ls.filter((l) => l.calls.some((c) => after(l, c.createdAt) && ["INTERESTED", "NOT_INTERESTED", "CALLBACK", "HUMAN_REQUESTED"].includes(c.outcome ?? ""))).length,
-    interested: ls.filter((l) => l.calls.some((c) => after(l, c.createdAt) && c.outcome === "INTERESTED")).length,
+    talked: ls.filter((l) => got.get(l)!.talked).length,
+    interested: ls.filter((l) => got.get(l)!.interested).length,
     docs: ls.filter((l) => l.documents.some((d) => after(l, d.uploadedAt))).length,
     hired: ls.filter((l) => l.hireStage === "HIRED" && !!l.hiredAt && after(l, l.hiredAt)).length,
   });
   const bySegment = Object.fromEntries(SEGMENT_ORDER.map((s) => [s, row(leads.filter((l) => segmentOfStatus(l.reviveFrom) === s))])) as Record<Segment, ReturnType<typeof row>>;
-  return { all: row(leads), bySegment };
+  // Old leads the recruiters sent back to the Pool (old-leads.ts): Crystal did not pick these herself.
+  return { all: row(leads), bySegment, returned: row(leads.filter((l) => l.reviveFrom === RETURNED)) };
 }
 
 export function segmentOfStatus(status: string | null | undefined): Segment | null {
@@ -142,8 +147,8 @@ export async function reviveScan(now = new Date()) {
   for (const c of campaigns) {
     if (seenOrg.has(c.orgId)) continue; // one campaign per team picks
     seenOrg.add(c.orgId);
-    const dayStart = new Date(now); dayStart.setUTCHours(0, 0, 0, 0);
-    let room = c.revivePerDay - (await db.lead.count({ where: { orgId: c.orgId, reviveAt: { gte: dayStart } } }));
+    // Old leads recruiters sent back to the Pool count in the same daily number and go first (old-leads.ts).
+    let room = c.revivePerDay - (await db.lead.count({ where: { orgId: c.orgId, reviveAt: { gte: pickDayStart(now) } } })) - (await waitingInPools(c.orgId, now));
     if (room <= 0) continue;
     const rows = await db.sheetRow.findMany({ where: { orgId: c.orgId } });
     const picks = rows
@@ -156,7 +161,7 @@ export async function reviveScan(now = new Date()) {
       if (elsewhere.has(row.phoneE164) || (await leadBlock(c.orgId, row.phoneE164, now))) continue;
       const [first, ...rest] = (row.name ?? "").trim().split(/\s+/);
       const r = await ingestLead(
-        { sourceSystem: "REVIVE", sourceRecordId: `${REVIVE_PREFIX}${c.orgId}:${row.phoneE164}`, firstName: first || undefined, lastName: rest.join(" ") || undefined, phone: row.phoneE164,
+        { sourceSystem: "REVIVE", sourceRecordId: `${REVIVE_PREFIX}${c.orgId}:${row.phoneE164}`, firstName: first || undefined, lastName: rest.join(" ") || undefined, phone: row.phoneE164, appliedAt: row.appliedAt,
           permission: [{ scope: "AI_CALL", source: `Facebook lead form (old lead in sheet tab ${row.tab})`, grantedAt: (row.appliedAt ?? now).toISOString() }],
           raw: { tab: row.tab, status: row.status, applied: row.appliedAt?.toISOString() ?? null, revive: v.segment } },
         { orgId: c.orgId, campaignId: c.id, isDemo: false, actorId: null, scheduleOutreach: false },

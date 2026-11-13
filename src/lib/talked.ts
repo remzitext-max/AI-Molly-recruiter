@@ -48,6 +48,24 @@ export function isTalk(c: { id: string; status?: string; outcome: string | null 
   return (c.status ?? "COMPLETED") === "COMPLETED" && (DECIDED.includes(c.outcome ?? "") || gaveAnswers.has(c.id));
 }
 
+const SHORT_RESULT: Record<string, string> = { INTERESTED: "interested", NOT_INTERESTED: "not interested", CALLBACK: "asked to call back", HUMAN_REQUESTED: "asked for a recruiter" };
+
+/**
+ * What Crystal got from a driver's calls: talked or not, and the newest decision. Pass only
+ * the calls that count (for an old lead, the ones after it was picked). Every page that
+ * counts "talked" and "interested" uses this, so the numbers agree.
+ */
+export function crystalResult(calls: { id: string; createdAt: Date; status?: string; outcome: string | null }[], gaveAnswers: Set<string>) {
+  const placed = [...calls].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const talks = placed.filter((c) => isTalk(c, gaveAnswers));
+  const decision = [...talks].reverse().find((c) => DECIDED.includes(c.outcome ?? ""))?.outcome ?? null;
+  const said = (o: string) => placed.some((c) => c.outcome === o);
+  const text = talks.length ? SHORT_RESULT[decision ?? ""] ?? "talked, no clear yes or no"
+    : said("OPT_OUT") ? "asked not to call" : said("WRONG_NUMBER") ? "wrong number"
+    : placed.length ? `no answer, ${placed.length} call${placed.length === 1 ? "" : "s"}` : "not called yet";
+  return { talked: talks.length > 0, interested: decision === "INTERESTED", calls: placed.length, text };
+}
+
 const CRYSTAL_RESULT: Record<string, string> = {
   INTERESTED: "Interested (Crystal's call)",
   NOT_INTERESTED: "Not interested (Crystal's call)",

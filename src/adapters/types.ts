@@ -31,6 +31,8 @@ export interface IncomingLead {
   permission?: { scope: "AI_CALL" | "SMS"; source: string; grantedAt: string; evidence?: string }[];
   /** Facebook lead-ad details when the source carries them (e.g. Make.com sheet columns). */
   fb?: { leadId?: string; campaign?: string; ad?: string; form?: string };
+  /** When the driver applied (the sheet's "Applied" column), when the source says. */
+  appliedAt?: Date | null;
   raw?: Record<string, unknown>;
 }
 export interface LeadSourceAdapter {

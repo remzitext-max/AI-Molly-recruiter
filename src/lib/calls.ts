@@ -792,7 +792,7 @@ export async function syncSourceJob(job: Job) {
 
 /** Per-call values the voice agent's prompt refers to as {{name}}. */
 export async function callVariables(
-  lead: { id: string; orgId: string; firstName: string | null; timezone: string | null; createdAt?: Date; reengagedAt?: Date | null; reviveFrom?: string | null; permissions: { scope: string; revokedAt: Date | null; grantedAt: Date }[] },
+  lead: { id: string; orgId: string; firstName: string | null; timezone: string | null; createdAt?: Date; appliedAt?: Date | null; reengagedAt?: Date | null; reviveFrom?: string | null; permissions: { scope: string; revokedAt: Date | null; grantedAt: Date }[] },
   attemptId: string, offerVersionId: string, now = new Date(),
 ): Promise<Record<string, string>> {
   const sources = await db.leadSourceRecord.findMany({ where: { leadId: lead.id }, select: { raw: true } });
@@ -806,8 +806,8 @@ export async function callVariables(
     now_local: localNow(lead.timezone, now),
     offer_version_id: offerVersionId, attempt_id: attemptId,
     driver_timezone: lead.timezone ?? "unknown", ...(await transferVariables(lead.orgId, lead.id)),
-    // Sheet leads arrive within a minute of applying, so the import time stands in when no permission date was recorded.
-    applied_when: appliedWhen(lead.permissions.find((p) => p.scope === "AI_CALL" && !p.revokedAt)?.grantedAt ?? lead.createdAt ?? null, now),
+    // The sheet's Applied time when it gave one. Else: sheet leads arrive within a minute of applying, so the import time stands in when no permission date was recorded.
+    applied_when: appliedWhen(lead.appliedAt ?? lead.permissions.find((p) => p.scope === "AI_CALL" && !p.revokedAt)?.grantedAt ?? lead.createdAt ?? null, now),
     time_greeting: timeGreeting(lead.timezone, now),
     position_applied: appliedPosition(sources.map((r) => r.raw)),
     follow_up: lead.reengagedAt ? "yes" : "no",

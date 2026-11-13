@@ -19,6 +19,7 @@ import { transcribeUpload } from "../recruiter-upload";
 import { appendAdLeadRow } from "../ad-leads-sheet";
 import { sendMetaStageEvent, syncMetaLeads, type MetaStage } from "../meta";
 import { runLearningReport } from "../learning";
+import { backfillApplied } from "../applied-backfill";
 
 export const handlers: Record<string, JobHandler> = {
   "lead.attempt-call": attemptCallJob,
@@ -39,6 +40,7 @@ export const handlers: Record<string, JobHandler> = {
     await db.job.deleteMany({ where: { type: "source.google-sheets.poll", status: "DONE", updatedAt: { lt: new Date(Date.now() - 2 * 86400_000) } } });
   },
   "maintenance.retention": async () => { await runRetentionSweep(); },
+  "maintenance.backfill-applied": async () => { log.info("applied dates filled for earlier leads", await backfillApplied()); },
   "notify.telegram-call-report": async (job) => {
     const { attemptId } = job.payload as { attemptId: string };
     // Give the call recording up to 4 min after the call so it goes with the card.

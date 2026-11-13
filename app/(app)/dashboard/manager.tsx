@@ -8,7 +8,8 @@ import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 import { UPLOAD_PROVIDER } from "@/lib/recruiter-upload";
 import { RECALL_PREFIX } from "@/lib/sheet-recall";
-import { firstSource, isNewApplicant } from "@/lib/new-leads";
+import { appliedIn, firstSource, isNewApplicant } from "@/lib/new-leads";
+import { RETURNED } from "@/lib/old-leads";
 import { LEAD_SEL, leadRow, sheetRowItems } from "@/lib/dashboard-lists";
 import { ListStat } from "@/components/list-stat";
 import { callsWithAnswers, isTalk, talkedDrivers, teamsScope } from "@/lib/talked";
@@ -41,18 +42,20 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
   const calls = { lead: scope, provider: { not: UPLOAD_PROVIDER } };
   const distinctLeads = (where: Prisma.CallAttemptWhereInput) => db.callAttempt.findMany({ where, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length);
 
-  // New leads = new applicants only. Crystal's "No answer" re-calls and old leads also create
-  // leads; they have their own cards (new-leads.ts). Referrals are a recruiter's to call.
-  const [prevLeads, rangeAll, chartCalls, calledDrivers, talkedList, tabs, recallRecs, revivedLeads, sheetRows] = await Promise.all([
-    db.lead.findMany({ where: { ...scope, createdAt: prev }, select: firstSource }).then((x) => x.filter(isNewApplicant).length),
-    db.lead.findMany({ where: { ...scope, createdAt: range }, select: { ...firstSource, ...LEAD_SEL, createdAt: true, pipelineStatus: true, documentStatus: true, hireStage: true } }),
+  // New leads = new applicants only, by the day they applied. Crystal's "No answer" re-calls and
+  // old leads (her own picks and the ones recruiters send back to the Pool) also create leads;
+  // they have their own cards (new-leads.ts). Referrals are a recruiter's to call.
+  const [prevLeads, rangeAll, chartCalls, calledDrivers, talkedList, tabs, recallRecs, revivedLeads, sheetRows, allTabs] = await Promise.all([
+    db.lead.findMany({ where: { AND: [scope, appliedIn(prev)] }, select: firstSource }).then((x) => x.filter(isNewApplicant).length),
+    db.lead.findMany({ where: { AND: [scope, appliedIn(range)] }, orderBy: { createdAt: "desc" }, select: { ...firstSource, ...LEAD_SEL, pipelineStatus: true, documentStatus: true, hireStage: true } }),
     db.callAttempt.findMany({ where: { ...calls, status: PLACED, createdAt: range }, select: { id: true, createdAt: true, status: true, outcome: true, startedAt: true, endedAt: true } }),
     distinctLeads({ ...calls, status: PLACED, createdAt: range }),
     talkedDrivers(scope, range),
     tabStats(view.orgIds, range),
     db.leadSourceRecord.findMany({ where: { sourceRecordId: { startsWith: RECALL_PREFIX }, createdAt: range, lead: scope }, orderBy: { createdAt: "desc" }, select: { createdAt: true, lead: { select: LEAD_SEL } } }),
-    db.lead.findMany({ where: { ...scope, reviveAt: range }, orderBy: { reviveAt: "desc" }, select: { ...LEAD_SEL, reviveAt: true, reviveFrom: true } }),
+    db.lead.findMany({ where: { ...scope, reviveAt: range }, orderBy: { reviveAt: "desc" }, select: { ...LEAD_SEL, reviveAt: true, reviveFrom: true, appliedAt: true } }),
     db.sheetRow.findMany({ where: { orgId: { in: view.orgIds }, appliedAt: range }, orderBy: { appliedAt: "desc" }, select: { id: true, orgId: true, phoneE164: true, tab: true, status: true, name: true } }),
+    tabStats(view.orgIds),
   ]);
   const rangeLeads = rangeAll.filter(isNewApplicant);
   const newLeads = rangeLeads.length;
@@ -62,18 +65,29 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
   // The lists behind the cards.
   const several = view.orgIds.length > 1;
   const teamOf = (orgId: string) => several ? view.orgs.find((o) => o.id === orgId)?.name ?? null : null;
-  const newRows = rangeLeads.map((l) => leadRow(l, talked, teamOf(l.orgId)));
-  const recallRows = recallRecs.map((r) => leadRow(r.lead, talked, teamOf(r.lead.orgId), { since: r.createdAt, was: "No answer" }));
-  const oldRows = revivedLeads.map((l) => leadRow(l, talked, teamOf(l.orgId), { since: l.reviveAt ?? undefined, was: l.reviveFrom ?? undefined }));
-  const sheetLeads = await db.lead.findMany({ where: { ...scope, phoneE164: { in: [...new Set(sheetRows.map((r) => r.phoneE164))] } }, select: { id: true, orgId: true, phoneE164: true, firstName: true, lastName: true } });
-  const tabOwner = new Map(tabs.map((t) => [`${t.orgId}|${t.tab.toLowerCase()}`, t.recruiter]));
-  const sheetRowsOut = sheetRowItems(sheetRows, sheetLeads, (orgId, tab) => tabOwner.get(`${orgId}|${tab.toLowerCase()}`) ?? null, teamOf);
+  // Who works each driver: the recruiter whose sheet tab has them (Pool if nobody yet).
+  const tabOwner = new Map(allTabs.map((t) => [`${t.orgId}|${t.tab.toLowerCase()}`, t.recruiter]));
+  const recruiterOf = (orgId: string, tab: string) => tabOwner.get(`${orgId}|${tab.toLowerCase()}`) ?? (/pool/i.test(tab) ? "Pool" : tab);
+  const listPhones = [...new Set([...rangeLeads, ...recallRecs.map((r) => r.lead), ...revivedLeads].map((l) => l.phoneE164))];
+  const [sheetLeads, listSheet] = await Promise.all([
+    db.lead.findMany({ where: { ...scope, phoneE164: { in: [...new Set(sheetRows.map((r) => r.phoneE164))] } }, select: { id: true, orgId: true, phoneE164: true, firstName: true, lastName: true } }),
+    db.sheetRow.findMany({ where: { orgId: { in: view.orgIds }, phoneE164: { in: listPhones } }, select: { orgId: true, phoneE164: true, tab: true, status: true } }),
+  ]);
+  const sheetOf = new Map(listSheet.map((r) => [`${r.orgId}|${r.phoneE164}`, { recruiter: recruiterOf(r.orgId, r.tab), status: r.status }]));
+  const onSheet = (l: { orgId: string; phoneE164: string }) => sheetOf.get(`${l.orgId}|${l.phoneE164}`);
+  const newRows = rangeLeads.map((l) => leadRow(l, gave, teamOf(l.orgId), { sheet: onSheet(l) }));
+  const recallRows = recallRecs.map((r) => leadRow(r.lead, gave, teamOf(r.lead.orgId), { since: r.createdAt, sheet: onSheet(r.lead) }));
+  // An old lead is one Crystal picked from a recruiter's tab ("was No answer") or one a recruiter sent back to the Pool.
+  const returnedNote = (l: { appliedAt: Date | null }) => `back in the Pool${l.appliedAt ? `, applied ${DateTime.fromJSDate(l.appliedAt).setZone(ZONE).toFormat("LLL d")}` : ""}`;
+  const oldRows = revivedLeads.map((l) => leadRow(l, gave, teamOf(l.orgId), { since: l.reviveAt ?? undefined, sheet: onSheet(l), ...(l.reviveFrom === RETURNED ? { note: returnedNote(l) } : { was: l.reviveFrom ?? undefined }) }));
+  const returnedCount = revivedLeads.filter((l) => l.reviveFrom === RETURNED).length;
+  const sheetRowsOut = sheetRowItems(sheetRows, sheetLeads, recruiterOf, teamOf);
   // "No response" and "Old leads" windows: everyone Crystal picked in the period, and how it went.
   const picked = (rows: ReturnType<typeof leadRow>[]) => [
     { key: "all", label: "All picked", items: rows.map((r) => r.item) },
     { key: "talked", label: "Talked to Crystal", items: rows.filter((r) => r.talked).map((r) => r.item) },
     { key: "interested", label: "Interested", items: rows.filter((r) => r.interested).map((r) => r.item) },
-    { key: "no", label: "No answer yet", items: rows.filter((r) => !r.talked).map((r) => r.item) },
+    { key: "no", label: "Didn't talk", items: rows.filter((r) => !r.talked).map((r) => r.item) },
   ];
   const pickedRates = (rows: ReturnType<typeof leadRow>[]) => {
     const t = rows.filter((r) => r.talked).length, i = rows.filter((r) => r.interested).length;
@@ -142,7 +156,8 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
             { key: "unreached", label: "Not reached", items: sheetRowsOut.filter((r) => !r.reached).map((r) => r.item) },
           ]} />
         <ListStat label="No response leads" icon="voice" tone="teal" n={recallRows.length} sub={pickedSub(recallRows)} rates={pickedRates(recallRows)} groups={picked(recallRows)} />
-        <ListStat label="Old leads" icon="users" tone="violet" n={oldRows.length} sub={pickedSub(oldRows)} rates={pickedRates(oldRows)} groups={picked(oldRows)} />
+        <ListStat label="Old leads" icon="users" tone="violet" n={oldRows.length} sub={pickedSub(oldRows)} rates={pickedRates(oldRows)}
+          groups={[...picked(oldRows), ...(returnedCount ? [{ key: "returned", label: "Back in the Pool", items: oldRows.filter((_, i) => revivedLeads[i].reviveFrom === RETURNED).map((r) => r.item) }] : [])]} />
         <DriverStat label="On process" icon="check" tone="blue" drivers={board.all.filter((d) => PROCESS.has(d.status))} showRecruiter sub="applied in this period" />
         <DriverStat label="Application" icon="jobs" tone="amber" drivers={appDrivers} showRecruiter sub="applied in this period" />
         <DriverStat label="Hired" icon="star" tone="green" drivers={hiredDrivers} showRecruiter sub="applied in this period" />

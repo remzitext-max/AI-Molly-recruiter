@@ -10,6 +10,7 @@ import { sha256 } from "./crypto";
 import { redactText } from "./redact";
 import { buildPreview, commitBatch, guessMapping, SHEETS_SOURCE, type Mapping, type ParsedSheet } from "./import";
 import { enqueue } from "./jobs/queue";
+import { admitPoolRows } from "./old-leads";
 import { getAdapters } from "../adapters/registry";
 import type { SheetSnapshot } from "../adapters/types";
 
@@ -68,7 +69,7 @@ export async function phonesOfOtherOrgs(orgId: string, phones: string[]) {
   return new Set(rows.map((r) => r.phoneE164));
 }
 
-export interface SheetSyncResult { skipped?: string; checkedRows?: number; imported?: Record<string, number> | null; rowsWithErrors?: number; error?: string }
+export interface SheetSyncResult { skipped?: string; checkedRows?: number; imported?: Record<string, number> | null; rowsWithErrors?: number; oldRowsHeld?: number; oldRowsWaiting?: number; error?: string }
 
 /** Import rows not seen before, using the mapping the admin reviewed. Safe to run concurrently or repeatedly. */
 export async function pollGoogleSheet(opts: { manual?: boolean } = {}): Promise<SheetSyncResult> {
@@ -83,7 +84,9 @@ export async function pollGoogleSheet(opts: { manual?: boolean } = {}): Promise<
     const sheet: ParsedSheet = { headers: snap.headers, rows: snap.rows, warnings: snap.warnings };
     const preview = await buildPreview(sheet, mapping, SHEETS_SOURCE, conn.orgId);
     const elsewhere = await phonesOfOtherOrgs(conn.orgId, preview.map((r) => r.phoneE164!).filter(Boolean));
-    const fresh = preview.filter((r) => (r.disposition === "new" || r.disposition === "merge_existing_phone" || r.disposition === "suppressed") && !elsewhere.has(r.phoneE164!));
+    // Old leads a recruiter sent back to the Pool are taken a few a day, like the old leads Crystal picks herself.
+    const admitted = await admitPoolRows(conn.orgId, campaign, preview.filter((r) => (r.disposition === "new" || r.disposition === "merge_existing_phone" || r.disposition === "suppressed") && !elsewhere.has(r.phoneE164!)));
+    const fresh = admitted.rows;
     let imported: Record<string, number> | null = null;
     if (fresh.length) {
       const rows = fresh.map((r) => snap.rows[r.rowNumber - 2]);
@@ -96,7 +99,7 @@ export async function pollGoogleSheet(opts: { manual?: boolean } = {}): Promise<
       });
       imported = await commitBatch(batch.id, { id: null, orgId: conn.orgId });
     }
-    result = { checkedRows: snap.rows.length, imported, rowsWithErrors: preview.filter((r) => r.disposition === "error").length };
+    result = { checkedRows: snap.rows.length, imported, rowsWithErrors: preview.filter((r) => r.disposition === "error").length, oldRowsHeld: admitted.held, oldRowsWaiting: admitted.waiting };
     await db.sourceConnection.update({ where: { id: SHEETS_CONN_ID }, data: { lastSyncAt: new Date(), lastSummary: result as Prisma.InputJsonValue, lastError: null } });
   } catch (e) {
     result = { error: redactText((e as Error).message).slice(0, 500) };
@@ -131,11 +134,12 @@ async function pollExtraTab(main: { orgId: string; campaignId: string | null; ma
       return;
     }
     const elsewhere = await phonesOfOtherOrgs(main.orgId, preview.map((r) => r.phoneE164!).filter(Boolean));
-    const fresh = preview.filter((r) => !baseline.has(r.sourceRecordId) && !elsewhere.has(r.phoneE164!) && (r.disposition === "new" || r.disposition === "merge_existing_phone" || r.disposition === "suppressed"));
+    const campaign = await db.campaign.findUniqueOrThrow({ where: { id: main.campaignId! } });
+    const admitted = await admitPoolRows(main.orgId, campaign, preview.filter((r) => !baseline.has(r.sourceRecordId) && !elsewhere.has(r.phoneE164!) && (r.disposition === "new" || r.disposition === "merge_existing_phone" || r.disposition === "suppressed")));
+    const fresh = admitted.rows;
     let imported: Record<string, number> | null = null;
     if (fresh.length) {
       const rows = fresh.map((r) => snap.rows[r.rowNumber - 2]);
-      const campaign = await db.campaign.findUniqueOrThrow({ where: { id: main.campaignId! } });
       const batch = await db.importBatch.create({
         data: {
           fileName: `Google Sheet sync: ${snap.title}`.slice(0, 200), fileSha256: sha256(JSON.stringify([snap.headers, rows])), sourceSystem: tabSource(gid),
@@ -145,7 +149,7 @@ async function pollExtraTab(main: { orgId: string; campaignId: string | null; ma
       });
       imported = await commitBatch(batch.id, { id: null, orgId: main.orgId });
     }
-    await db.sourceConnection.update({ where: { id }, data: { lastSyncAt: new Date(), lastSummary: { checkedRows: snap.rows.length, imported } as Prisma.InputJsonValue, lastError: null } });
+    await db.sourceConnection.update({ where: { id }, data: { lastSyncAt: new Date(), lastSummary: { checkedRows: snap.rows.length, imported, oldRowsHeld: admitted.held, oldRowsWaiting: admitted.waiting } as Prisma.InputJsonValue, lastError: null } });
   } catch (e) {
     const msg = redactText((e as Error).message).slice(0, 500);
     await db.sourceConnection.updateMany({ where: { id }, data: { lastSyncAt: new Date(), lastError: msg } });

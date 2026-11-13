@@ -14,7 +14,7 @@ import { markCallMade, scheduledCalls } from "@/lib/scheduled-calls";
 import { loadOnProcess } from "@/lib/on-process";
 import { orderStatuses, tabStats } from "@/lib/sheet-rows";
 import { statusTone } from "@/lib/recruiter-status";
-import { firstSource, isNewApplicant } from "@/lib/new-leads";
+import { appliedIn, firstSource, isNewApplicant } from "@/lib/new-leads";
 import { pct, type Period } from "@/lib/dashboard-view";
 import { Card, Stat, fmt, initialsOf } from "@/components/ui";
 import { BarRow } from "@/components/dash-parts";
@@ -37,7 +37,7 @@ export async function RecruiterDashboard({ user, p }: { user: Pick<User, "id" | 
   // Every number but the scheduled calls follows the dates picked (drivers who applied in them).
   const [calls, newLeads, talked, interested, docs, processAll, tabs, board, hiredAll] = await Promise.all([
     scheduledCalls(user),
-    db.lead.findMany({ where: { ...scope, createdAt: p.range }, select: firstSource }).then((x) => x.filter(isNewApplicant).length),
+    db.lead.findMany({ where: { AND: [scope, appliedIn(p.range)] }, select: firstSource }).then((x) => x.filter(isNewApplicant).length),
     talkedDrivers(scope, p.range),
     db.callAttempt.findMany({ where: { lead: scope, outcome: "INTERESTED", createdAt: p.range }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),
     db.document.findMany({ where: { lead: scope, uploadedAt: p.range }, distinct: ["leadId"], select: { leadId: true } }).then((x) => x.length),

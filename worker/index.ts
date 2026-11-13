@@ -26,6 +26,8 @@ async function scheduleMaintenance() {
 async function main() {
   log.info(`worker ${workerId} starting in ${config.mode.toUpperCase()} mode`);
   await scheduleMaintenance();
+  // Once: the applied date of the leads that came before the site kept it (applied-backfill.ts).
+  await enqueue("maintenance.backfill-applied", {}, { idempotencyKey: "backfill-applied:1", maxAttempts: 3 });
   // Drivers whose call the Telnyx daily limit refused get their attempt back and are called again.
   if (config.mode === "live") await requeueLimitFailures().then((r) => r.fixed && log.info("requeued calls refused by the Telnyx limit", r)).catch((e) => log.error("requeue failed", { error: (e as Error).message }));
   let lastMaint = Date.now();

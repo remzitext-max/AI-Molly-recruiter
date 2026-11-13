@@ -313,6 +313,9 @@ model Lead {
   recruiterStatusAt  DateTime?
   /// A driver a recruiter added from their own call (not a Facebook lead).
   ownDriver          Boolean         @default(false)
+  /// When the driver applied: the lead sheet's "Applied" column (US Central). Null when the
+  /// source gave no date; the time the lead reached the site (createdAt) stands in then.
+  appliedAt          DateTime?
   createdById        String?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
@@ -335,6 +338,7 @@ model Lead {
   @@index([assignedToId])
   @@index([hireStage])
   @@index([reviveAt])
+  @@index([appliedAt])
 }
 
 model LeadSourceRecord {

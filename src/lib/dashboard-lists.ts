@@ -3,6 +3,7 @@
 import type { CallStatus, Prisma } from "@prisma/client";
 import type { ListItem } from "@/components/list-stat";
 import { isReachedStatus } from "./sheet-rows";
+import { crystalResult } from "./talked";
 
 export const LEAD_SEL = {
   id: true, orgId: true, firstName: true, lastName: true, phoneE164: true, recruiterStatus: true,
@@ -12,36 +13,24 @@ export const LEAD_SEL = {
 
 type Call = { id: string; createdAt: Date; status: string; outcome: string | null };
 export type ListLead = { id: string; orgId: string; firstName: string | null; lastName: string | null; phoneE164: string; recruiterStatus: string | null; assignedTo: { name: string } | null; calls: Call[] };
-type Talked = (c: Call) => boolean;
 
-const RESULT: Record<string, string> = {
-  INTERESTED: "Interested", NOT_INTERESTED: "Not interested", CALLBACK: "Call back", HUMAN_REQUESTED: "Wants a recruiter",
-  OPT_OUT: "Asked not to call", WRONG_NUMBER: "Wrong number",
-};
 const nameOf = (l: { firstName: string | null; lastName: string | null }) => [l.firstName, l.lastName].filter(Boolean).join(" ") || "(no name)";
 
-/** What Crystal got from these calls: the newest talk's result, or how many went unanswered. */
-export function crystalResult(calls: Call[], talked: Talked): { talked: boolean; interested: boolean; text: string } {
-  const talks = calls.filter(talked);
-  const interested = calls.some((c) => c.outcome === "INTERESTED");
-  if (talks.length) {
-    const last = talks[talks.length - 1];
-    return { talked: true, interested, text: interested ? "Interested" : RESULT[last.outcome ?? ""] ?? "Talked" };
-  }
-  return { talked: false, interested: false, text: calls.length ? `No answer · ${calls.length} call${calls.length === 1 ? "" : "s"}` : "Not called yet" };
-}
-
-/** One lead as a list row; `since` keeps only the calls after the driver was picked. */
-export function leadRow(l: ListLead, talked: Talked, team: string | null, opts: { since?: Date; was?: string } = {}) {
-  const calls = opts.since ? l.calls.filter((c) => c.createdAt >= opts.since!) : l.calls;
-  const r = crystalResult(calls, talked);
+/**
+ * One lead as a list row; `since` keeps only the calls after the driver was picked. The
+ * recruiter and status come from the lead sheet when the driver is in a recruiter's tab
+ * (`sheet`): that is who works the driver, while the site's round-robin owner may be
+ * someone else. The row reads "recruiter · Crystal: what she got", the badge is the sheet status.
+ */
+export function leadRow(l: ListLead, gaveAnswers: Set<string>, team: string | null, opts: { since?: Date; was?: string; note?: string; sheet?: { recruiter: string; status: string } } = {}) {
+  const r = crystalResult(opts.since ? l.calls.filter((c) => c.createdAt >= opts.since!) : l.calls, gaveAnswers);
   const item: ListItem = {
     key: l.id, leadId: l.id, name: nameOf(l), phone: l.phoneE164,
-    sub: [team, l.assignedTo?.name ?? "no recruiter", opts.was ? `was ${opts.was}` : null, r.text].filter(Boolean).join(" · "),
-    badge: l.recruiterStatus ?? undefined,
-    tone: r.talked ? "ok" : calls.length ? "warn" : "late",
+    sub: [team, opts.sheet?.recruiter ?? l.assignedTo?.name ?? "no recruiter yet", opts.was ? `was ${opts.was}` : null, opts.note ?? null, `Crystal: ${r.text}`].filter(Boolean).join(" · "),
+    badge: opts.sheet?.status ?? l.recruiterStatus ?? undefined,
+    tone: r.talked ? "ok" : r.calls ? "warn" : "late",
   };
-  return { ...r, item };
+  return { talked: r.talked, interested: r.interested, item };
 }
 
 /** Sheet rows (drivers who applied in the period) as list rows, reached by a recruiter or not. */

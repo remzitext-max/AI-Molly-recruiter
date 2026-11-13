@@ -28,14 +28,24 @@ describe("new applicants on the dashboards", () => {
 describe("dashboard card lists", () => {
   it("shows what Crystal got, counting only calls after an old lead was picked", async () => {
     const { leadRow, sheetRowItems } = await import("@/lib/dashboard-lists");
+    const { crystalResult } = await import("@/lib/talked");
     const t = (h: number) => new Date(Date.UTC(2026, 10, 12, h));
-    const talked = (c: { outcome: string | null }) => ["INTERESTED", "NOT_INTERESTED", "CALLBACK"].includes(c.outcome ?? "");
-    const lead = { id: "l1", orgId: "o1", firstName: "Ken", lastName: "Wu", phoneE164: "+13125550101", recruiterStatus: "Need to talk", assignedTo: { name: "Molly" },
+    const none = new Set<string>();
+    const lead = { id: "l1", orgId: "o1", firstName: "Ken", lastName: "Wu", phoneE164: "+13125550101", recruiterStatus: "Need to talk", assignedTo: { name: "Mona" },
       calls: [{ id: "c1", createdAt: t(1), status: "COMPLETED", outcome: "INTERESTED" }, { id: "c2", createdAt: t(5), status: "COMPLETED", outcome: "NO_CONTACT" }] };
-    expect(leadRow(lead, talked, null)).toMatchObject({ talked: true, interested: true, item: { sub: "Molly · Interested", badge: "Need to talk", tone: "ok" } });
+    expect(leadRow(lead, none, null)).toMatchObject({ talked: true, interested: true, item: { sub: "Mona · Crystal: interested", badge: "Need to talk", tone: "ok" } });
     // Picked at 3:00: the 1:00 "interested" was before, so it does not count for the old-leads card.
-    expect(leadRow(lead, talked, "TBT", { since: t(3), was: "Need to talk" })).toMatchObject({ talked: false, interested: false, item: { sub: "TBT · Molly · was Need to talk · No answer · 1 call", tone: "warn" } });
-    expect(leadRow({ ...lead, calls: [] }, talked, null).item).toMatchObject({ sub: "Molly · Not called yet", tone: "late" });
+    // The recruiter and the status are the sheet's (whose tab the driver is in), not the site's round-robin owner.
+    expect(leadRow(lead, none, "TBT", { since: t(3), was: "Need to talk", sheet: { recruiter: "Dennis", status: "Call back" } }))
+      .toMatchObject({ talked: false, interested: false, item: { sub: "TBT · Dennis · was Need to talk · Crystal: no answer, 1 call", badge: "Call back", tone: "warn" } });
+    expect(leadRow({ ...lead, assignedTo: null, calls: [] }, none, null).item).toMatchObject({ sub: "no recruiter yet · Crystal: not called yet", tone: "late" });
+
+    // The newest decision counts: yes, then no = not interested. Answers without a decision = talked.
+    const calls = (...o: (string | null)[]) => o.map((outcome, i) => ({ id: `k${i}`, createdAt: t(i), status: "COMPLETED", outcome }));
+    expect(crystalResult(calls("INTERESTED", "NOT_INTERESTED"), none)).toMatchObject({ talked: true, interested: false, text: "not interested" });
+    expect(crystalResult(calls("INTERESTED", "NO_CONTACT"), none)).toMatchObject({ talked: true, interested: true, text: "interested" });
+    expect(crystalResult(calls("INCOMPLETE"), new Set(["k0"]))).toMatchObject({ talked: true, interested: false, text: "talked, no clear yes or no" });
+    expect(crystalResult(calls("NO_CONTACT", "OPT_OUT"), none)).toMatchObject({ talked: false, text: "asked not to call" });
 
     const rows = sheetRowItems(
       [{ id: "r1", orgId: "o1", phoneE164: "+13125550101", tab: "Molly", status: "Need to talk", name: null }, { id: "r2", orgId: "o1", phoneE164: "+13125550102", tab: "Pool", status: "New", name: "Al Fox" }],

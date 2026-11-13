@@ -10,6 +10,8 @@ import { buildPreview, guessMapping, type Mapping } from "./import";
 import { ingestLead, scheduleLeadCall } from "./leads";
 import { normalizePhone } from "./phone";
 import { phonesOfOtherOrgs, sheetMapping, tabSource, SHEETS_CONN_ID } from "./sheets-sync";
+import { pickDayStart } from "./old-leads";
+import { parseApplied } from "./applied";
 import type { SheetSnapshot } from "../adapters/types";
 
 export type SheetTab = { title: string; gid: string; snap: SheetSnapshot };
@@ -46,13 +48,12 @@ export async function recallNoAnswerLeads(tabs: SheetTab[], now = new Date(), ta
   const campaign = await db.campaign.findUnique({ where: { id: t.campaignId } });
   if (!campaign || campaign.paused || campaign.recallMinDays <= 0 || campaign.isDemo) return 0;
 
-  const dayStart = new Date(now); dayStart.setUTCHours(0, 0, 0, 0);
-  const today = await db.leadSourceRecord.count({ where: { sourceRecordId: { startsWith: RECALL_PREFIX }, createdAt: { gte: dayStart }, lead: { orgId: t.orgId } } });
+  const today = await db.leadSourceRecord.count({ where: { sourceRecordId: { startsWith: RECALL_PREFIX }, createdAt: { gte: pickDayStart(now) }, lead: { orgId: t.orgId } } });
   let room = campaign.recallPerDay - today;
   if (room <= 0) return 0;
 
   const from = now.getTime() - campaign.recallMaxDays * 86400_000, to = now.getTime() - campaign.recallMinDays * 86400_000;
-  const picks: { tab: SheetTab; row: string[]; applied: Date }[] = [];
+  const picks: { tab: SheetTab; row: string[]; applied: Date; appliedAt: Date }[] = [];
   // A phone a recruiter has worked in any tab of this sheet ("Call back", "Not interested"...).
   const worked = new Set<string>();
   for (const tab of tabs) {
@@ -65,7 +66,7 @@ export async function recallNoAnswerLeads(tabs: SheetTab[], now = new Date(), ta
       if (appliedI < 0 || !NO_ANSWER.test(status)) continue;
       const applied = new Date(row[appliedI] ?? "");
       if (isNaN(applied.getTime()) || applied.getTime() < from || applied.getTime() > to) continue;
-      picks.push({ tab, row, applied });
+      picks.push({ tab, row, applied, appliedAt: parseApplied(row[appliedI]) ?? applied });
     }
   }
   picks.sort((a, b) => b.applied.getTime() - a.applied.getTime());
@@ -85,7 +86,7 @@ export async function recallNoAnswerLeads(tabs: SheetTab[], now = new Date(), ta
     const v = row.values;
     const r = await ingestLead(
       { sourceSystem: t.source(p.tab.gid), sourceRecordId: `${RECALL_PREFIX}${row.sourceRecordId}`, firstName: v.firstName, lastName: v.lastName, phone: v.phone, email: v.email, state: v.state, zip: v.zip,
-        permission: [{ scope: "AI_CALL", source: `Facebook lead form (applied date from sheet tab ${p.tab.title})`, grantedAt: p.applied.toISOString() }],
+        appliedAt: p.appliedAt, permission: [{ scope: "AI_CALL", source: `Facebook lead form (applied date from sheet tab ${p.tab.title})`, grantedAt: p.applied.toISOString() }],
         raw: { tab: p.tab.title, status: "No answer", applied: p.applied.toISOString(), recall: true, ...(v.position ? { position: v.position } : {}) } },
       { orgId: t.orgId, campaignId: campaign.id, isDemo: false, actorId: null, scheduleOutreach: false },
     );

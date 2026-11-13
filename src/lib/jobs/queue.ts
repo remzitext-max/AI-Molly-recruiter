@@ -36,7 +36,8 @@ export type JobType =
   | "meta.send-event"
   | "sheet.ad-lead"
   | "notify.telegram-ad-lead"
-  | "learning.weekly";
+  | "learning.weekly"
+  | "maintenance.backfill-applied";
 
 export async function enqueue(
   type: JobType,

@@ -1,30 +1,15 @@
 // Every row of a team's lead sheet (phone, tab, status, applied date), kept so the
 // dashboards and the Recruiters page count the recruiters' statuses the way the sheet
 // shows them, Crystal's leads or not.
-import { DateTime } from "luxon";
 import type { Prisma } from "@prisma/client";
 import { db } from "./db";
 import { canonicalStatus, RECRUITER_STATUSES } from "./recruiter-status";
 import { tabForUser } from "./assignment";
+import { APPLIED_HEADER, parseApplied } from "./applied";
+
+export { parseApplied };
 
 export interface SheetRowIn { phoneE164: string; tab: string; status: string; appliedAt: Date | null; name?: string | null; experience?: string | null }
-
-// The sheet's "Applied" times are US Central.
-const SHEET_ZONE = "America/Chicago";
-const FORMATS = ["M/d/yyyy H:mm:ss", "M/d/yyyy H:mm", "M/d/yyyy h:mm:ss a", "M/d/yyyy h:mm a", "M/d/yyyy", "yyyy-MM-dd H:mm:ss", "yyyy-MM-dd H:mm", "yyyy-MM-dd"];
-
-export function parseApplied(v: string | undefined): Date | null {
-  const s = (v ?? "").trim();
-  if (!s) return null;
-  for (const f of FORMATS) {
-    const d = DateTime.fromFormat(s, f, { zone: SHEET_ZONE });
-    if (d.isValid) return d.toJSDate();
-  }
-  const iso = DateTime.fromISO(s, { zone: SHEET_ZONE });
-  if (iso.isValid) return iso.toJSDate();
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d;
-}
 
 /** The sheet's spelling of a status; an empty cell is a new lead nobody has worked yet. */
 export function sheetStatus(raw: string | undefined) {
@@ -38,7 +23,7 @@ const UNWORKED = new Set(["New", "No answer"]);
 /** The rows of one tab that have a phone. */
 export function sheetRowsOf(tab: string, headers: string[], rows: string[][], phoneOf: (raw: string) => string | null): SheetRowIn[] {
   const col = (re: RegExp) => headers.findIndex((h) => re.test(h.trim()));
-  const phoneI = col(/^phone$/i), statusI = col(/^status$/i), appliedI = col(/^applied/i);
+  const phoneI = col(/^phone$/i), statusI = col(/^status$/i), appliedI = col(APPLIED_HEADER);
   if (phoneI < 0 || statusI < 0) return [];
   const nameI = col(/^(full |driver(?:'s)? )?name$/i), firstI = col(/^first ?name$/i), lastI = col(/^last ?name$/i), expI = col(/experience/i);
   const out: SheetRowIn[] = [];

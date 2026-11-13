@@ -5,7 +5,9 @@ import { db } from "@/lib/db";
 import { flash } from "@/lib/flash";
 import { Card, PageHead, fmt, name } from "@/components/ui";
 import { RECALL_PREFIX } from "@/lib/sheet-recall";
+import { callsWithAnswers, crystalResult } from "@/lib/talked";
 import { reviveResults, reviveSummary, SEGMENT_ORDER, SEGMENTS, REVIVE_CALLS, segmentOfStatus } from "@/lib/revive";
+import { RETURNED, pickDayStart } from "@/lib/old-leads";
 
 // Old leads: drivers stuck in the lead sheets for weeks. Sorted by why they are stuck;
 // Crystal calls a few a day with a "good offer running now" opener. Owner only.
@@ -28,7 +30,7 @@ export default async function Revive() {
   await requireOwner();
   const orgs = await db.organization.findMany({ orderBy: [{ isMain: "desc" }, { createdAt: "asc" }], include: { campaigns: { where: { isDemo: false }, orderBy: { createdAt: "asc" }, take: 1 } } });
   const now = new Date();
-  const dayStart = new Date(now); dayStart.setUTCHours(0, 0, 0, 0);
+  const dayStart = pickDayStart(now);
   const teams = await Promise.all(orgs.filter((o) => o.campaigns.length).map(async (o) => ({
     org: o, camp: o.campaigns[0], summary: await reviveSummary(o.id, now), results: await reviveResults(o.id),
     today: await db.lead.count({ where: { orgId: o.id, reviveAt: { gte: dayStart } } }),
@@ -40,7 +42,7 @@ export default async function Revive() {
     <>
       <PageHead
         title="Old leads"
-        sub={`Drivers sitting in the lead sheets for weeks who never became drivers, sorted by why they are stuck. When a team is switched on, Crystal calls a few a day ("we've got a good offer running right now"), up to ${REVIVE_CALLS} calls each, within calling hours, after new applicants. A recruiter changing the driver's status in the sheet stops her.`}
+        sub={`Drivers sitting in the lead sheets for weeks who never became drivers, sorted by why they are stuck. When a team is switched on, Crystal calls a few a day ("we've got a good offer running right now"), up to ${REVIVE_CALLS} calls each, within calling hours, after new applicants. A recruiter changing the driver's status in the sheet stops her. An old lead a recruiter sends back to the Pool is taken the same way and counts in the same daily number.`}
       />
       {!teams.length && <Card><p className="muted">No team has a campaign yet.</p></Card>}
       {teams.map(({ org, camp, summary, results, today, recent, recall }) => {
@@ -66,6 +68,13 @@ export default async function Revive() {
                     </tr>
                   );
                 })}
+                {results.returned.picked > 0 && (
+                  <tr>
+                    <td><b>Back in the Pool</b><div className="small muted">Sent back to the Pool by a recruiter 3+ days after applying (not under 1 year of experience)</div></td>
+                    <td className="num muted">·</td><td className="num muted">·</td>
+                    <td className="num">{results.returned.picked}</td><td className="num">{results.returned.talked}</td><td className="num">{results.returned.interested}</td><td className="num">{results.returned.docs}</td><td className="num">{results.returned.hired}</td>
+                  </tr>
+                )}
               </tbody>
             </table>
             <p className="small" style={{ marginTop: 12 }}>
@@ -90,7 +99,7 @@ export default async function Revive() {
                   {recent.map((l) => (
                     <tr key={l.id} data-href={`/leads/${l.id}`}>
                       <td><Link href={`/leads/${l.id}`}>{name(l)}</Link></td>
-                      <td className="small">{l.reviveFrom}{l.reviveTab ? ` (${l.reviveTab})` : ""} · {SEGMENTS[segmentOfStatus(l.reviveFrom) ?? "never"].label}</td>
+                      <td className="small">{l.reviveFrom === RETURNED ? "Sent back to the Pool by a recruiter" : `${l.reviveFrom}${l.reviveTab ? ` (${l.reviveTab})` : ""} · ${SEGMENTS[segmentOfStatus(l.reviveFrom) ?? "never"].label}`}</td>
                       <td className="small">{fmt(l.reviveAt)}</td>
                       <td className="small">{l.pipelineStatus.toLowerCase().replace(/_/g, " ")}{l.documentStatus === "RECEIVED" ? " · CDL in" : ""}</td>
                     </tr>
@@ -110,12 +119,15 @@ async function recallStats(orgId: string, dayStart: Date) {
   const weekAgo = new Date(dayStart.getTime() - 6 * 86400_000);
   const recs = await db.leadSourceRecord.findMany({
     where: { sourceRecordId: { startsWith: RECALL_PREFIX }, createdAt: { gte: weekAgo }, lead: { orgId, isDemo: false } },
-    select: { createdAt: true, lead: { select: { pipelineStatus: true, calls: { where: { status: "COMPLETED" }, select: { outcome: true }, take: 3 } } } },
+    select: { createdAt: true, lead: { select: { calls: { where: { status: "COMPLETED" }, select: { id: true, createdAt: true, outcome: true } } } } },
   });
+  // Talked / interested by the same rule as the dashboard's "No response leads" card.
+  const gave = await callsWithAnswers(recs.flatMap((r) => r.lead.calls.map((c) => c.id)));
+  const got = recs.map((r) => crystalResult(r.lead.calls.filter((c) => c.createdAt >= r.createdAt), gave));
   return {
     today: recs.filter((r) => r.createdAt >= dayStart).length,
     week: recs.length,
-    talked: recs.filter((r) => r.lead.calls.some((c) => ["INTERESTED", "NOT_INTERESTED", "CALLBACK", "HUMAN_REQUESTED"].includes(c.outcome ?? ""))).length,
-    interested: recs.filter((r) => ["INTERESTED", "DOCS_REQUESTED", "DOCS_RECEIVED", "HANDOFF_READY", "HANDED_OFF"].includes(r.lead.pipelineStatus)).length,
+    talked: got.filter((g) => g.talked).length,
+    interested: got.filter((g) => g.interested).length,
   };
 }

@@ -26,6 +26,9 @@ export async function isSuppressed(phoneE164: string) {
 function isHotApplicant({ lead, channel, now, verbalSmsConsent }: GateInput) {
   const mins = lead.campaign.hotCallMinutes;
   if (!mins || lead.reengagedAt) return false;
+  // A row that reached the site hours after the driver applied (the sheet's Applied time) is not someone who
+  // just applied. 3 hours, so a sheet kept in another US time zone can never switch the hot call off.
+  if (lead.appliedAt && lead.createdAt.getTime() - lead.appliedAt.getTime() > 3 * 3600_000) return false;
   const age = now.getTime() - lead.createdAt.getTime();
   if (channel === "CALL") return lead.attemptCount === 0 ? age <= mins * 60_000 : lead.attemptCount === 1 && age <= (mins + 10) * 60_000;
   return !!verbalSmsConsent && age <= (mins + 60) * 60_000;
