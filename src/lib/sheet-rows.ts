@@ -76,12 +76,14 @@ export interface TabStats { orgId: string; tab: string; recruiter: string | null
 
 /**
  * Rows per tab and status for leads that applied in the range, with the recruiter whose
- * tab it is (by name, or the tab set on Users). The Pool comes last.
+ * tab it is (by name, or the tab set on Users). The Pool comes last. Counted from the sheet's
+ * applications (one per LeadID, the Pool included), so the tabs add up to the dashboards'
+ * "New leads" for the same dates.
  */
 export async function tabStats(orgIds: string[], range?: { gte: Date; lt: Date }): Promise<TabStats[]> {
-  const where: Prisma.SheetRowWhereInput = { orgId: { in: orgIds }, ...(range ? { appliedAt: range } : {}) };
+  const where: Prisma.SheetApplicationWhereInput = { orgId: { in: orgIds }, ...(range ? { appliedAt: range } : {}) };
   const [groups, users] = await Promise.all([
-    db.sheetRow.groupBy({ by: ["orgId", "tab", "status"], where, _count: true }),
+    db.sheetApplication.groupBy({ by: ["orgId", "tab", "status"], where, _count: true }),
     db.user.findMany({ where: { orgId: { in: orgIds }, active: true }, select: { id: true, name: true, sheetTab: true, orgId: true } }),
   ]);
   const out = new Map<string, TabStats>();

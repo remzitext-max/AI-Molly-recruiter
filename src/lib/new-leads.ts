@@ -17,7 +17,7 @@ export type LeadOrigin = "applicant" | "recall" | "revive" | "referral" | "retur
 type WithSources = { sourceRecords: { sourceRecordId: string }[]; appliedAt: Date | null; createdAt: Date };
 
 /** Select this on a lead to know what created it. */
-export const firstSource = { appliedAt: true, createdAt: true, sourceRecords: { orderBy: { createdAt: "asc" as const }, take: 1, select: { sourceRecordId: true } } };
+export const firstSource = { appliedAt: true, createdAt: true, sourceRecords: { orderBy: { createdAt: "asc" as const }, take: 1, select: { sourceRecordId: true, sourceSystem: true } } };
 
 export function leadOrigin(lead: WithSources): LeadOrigin {
   const id = lead.sourceRecords[0]?.sourceRecordId ?? "";

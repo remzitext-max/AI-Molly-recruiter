@@ -20,6 +20,7 @@ import { copySheetStatus } from "./recruiter-status";
 import { assignFromSheetTabs } from "./assignment";
 import { processRowsOf, saveProcessRows } from "./on-process";
 import { saveSheetRows, sheetRowsOf } from "./sheet-rows";
+import { applicationsOf, saveSheetApplications } from "./sheet-applications";
 import type { SheetSnapshot } from "../adapters/types";
 
 export const HIRE_STAGES: HireStage[] = ["NONE", "PROCESSING", "APPLICATION", "ORIENTATION", "HIRED", "SAFETY_DECLINED", "NOT_HIRED"];
@@ -81,7 +82,8 @@ export async function syncHiringFromSheet(now = new Date()) {
   let tabs = 0, updated = 0, sent = 0;
   const latest = new Map<string, { tab: string; status: string }>();
   const read: SheetTab[] = [];
-  for (const { title, gid, snap } of await readAllTabs()) {
+  const all = await readAllTabs();
+  for (const { title, gid, snap } of all) {
     if (!snap) continue;
     const phoneI = snap.headers.findIndex((h) => /^phone$/i.test(h));
     const statusI = snap.headers.findIndex((h) => /^status$/i.test(h));
@@ -114,6 +116,8 @@ export async function syncHiringFromSheet(now = new Date()) {
     await saveProcessRows(main.id, read.flatMap(({ title, snap }) => processRowsOf(title, snap!.headers, snap!.rows, normalizePhone)), now);
     await saveSheetRows(main.id, read.flatMap(({ title, snap }) => sheetRowsOf(title, snap!.headers, snap!.rows, normalizePhone)), now);
   }
+  // Every application the sheet has, the Pool included: the dashboards' "New leads" (sheet-applications.ts).
+  if (main && all.some((t) => t.snap)) await saveSheetApplications(main.id, applicationsIn(all), all.every((t) => t.snap), now);
   const t = await readTeamSheets(latest, now);
   tabs += t.tabs; updated += t.updated;
   const known = new Map((await db.sheetLeadStatus.findMany()).map((r) => [r.phoneE164, r]));
@@ -150,6 +154,7 @@ async function readTeamSheets(latest: Map<string, { tab: string; status: string 
     if (list.length) {
       await saveProcessRows(org.id, list.flatMap(({ title, snap }) => (snap ? processRowsOf(title, snap.headers, snap.rows, normalizePhone) : [])));
       await saveSheetRows(org.id, list.flatMap(({ title, snap }) => (snap ? sheetRowsOf(title, snap.headers, snap.rows, normalizePhone) : [])), now);
+      if (list.some((t) => t.snap)) await saveSheetApplications(org.id, applicationsIn(list), list.every((t) => t.snap), now);
     }
     for (const { title, snap } of list) {
       const phoneI = snap?.headers.findIndex((h) => /^phone$/i.test(h)) ?? -1;
@@ -238,6 +243,9 @@ async function readAllTabs(spreadsheetId?: string): Promise<{ title: string; gid
     : await Promise.all(tabs.map((t) => src.readSheet(t.title, spreadsheetId).catch(() => null)));
   return tabs.map((t, i) => ({ ...t, snap: snaps[i] }));
 }
+
+const applicationsIn = (tabs: { title: string; snap: SheetSnapshot | null }[]) =>
+  tabs.flatMap(({ title, snap }) => (snap ? applicationsOf(title, snap.headers, snap.rows, normalizePhone) : []));
 
 // Statuses that still mean "nobody has talked to this driver".
 const OPEN_STATUS = /^(|no answer|no response|new)$/i;

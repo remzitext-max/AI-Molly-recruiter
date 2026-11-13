@@ -1,7 +1,7 @@
 // Which calls were a real conversation with the driver, and the drivers Crystal really
 // talked to in a period with where each one is now. Used by the dashboard and the
 // "Drivers talked to" list so both always count the same drivers.
-import type { Prisma, User } from "@prisma/client";
+import type { CallStatus, Prisma, User } from "@prisma/client";
 import { db } from "./db";
 import { leadScope } from "./rbac";
 import { UPLOAD_PROVIDER } from "./recruiter-upload";
@@ -26,9 +26,22 @@ export function teamsScope(orgIds: string[], isDemo: boolean): Prisma.LeadWhereI
   return { orgId: { in: orgIds }, ...countedLeads(isDemo) };
 }
 
+/** The same owner tests, told from a sheet row's full name and phone (and Facebook's own "<test lead: ...>" rows). */
+export function isTestDriver(name: string | null | undefined, phoneE164: string | null | undefined) {
+  const n = (name ?? "").trim();
+  return (!!phoneE164 && OWNER_PHONES.includes(phoneE164)) || /^<test lead/i.test(n) || /\(owner test\)$/i.test(n) || /(^|\s)test$/i.test(n);
+}
+
 function countedLeads(isDemo: boolean): Prisma.LeadWhereInput {
   return { isDemo, ownDriver: false, phoneE164: { notIn: OWNER_PHONES }, OR: [{ lastName: null }, { lastName: { notIn: TEST_LAST_NAMES } }] };
 }
+
+/** What the driver lists and crystalResult need of a lead: who it is and the calls Crystal placed, oldest first. */
+export const LEAD_SEL = {
+  id: true, orgId: true, firstName: true, lastName: true, phoneE164: true, recruiterStatus: true,
+  assignedTo: { select: { name: true } },
+  calls: { where: { status: { notIn: ["CANCELED", "SCHEDULED"] as CallStatus[] } }, orderBy: { createdAt: "asc" as const }, select: { id: true, createdAt: true, status: true, outcome: true } },
+} satisfies Prisma.LeadSelect;
 
 /** Outcomes that are a decision the driver made in the call. */
 export const DECIDED = ["INTERESTED", "NOT_INTERESTED", "CALLBACK", "HUMAN_REQUESTED"];

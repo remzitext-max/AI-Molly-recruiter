@@ -161,6 +161,9 @@ model Organization {
   metaDatasetId      String?
   /// The sales pitch Crystal says (hook, earnings, team pay...); see src/lib/pitch.ts. Empty = the main company's, then the default.
   pitch              Json?
+  /// When every tab of the team's lead sheet was last read (the reading began then). From then on
+  /// the team's "New leads" are its sheet's rows (sheet-applications.ts).
+  sheetReadAt        DateTime?
   createdAt DateTime   @default(now())
   users     User[]
   campaigns Campaign[]
@@ -703,6 +706,28 @@ model SheetRow {
   @@unique([orgId, phoneE164])
   @@index([orgId, appliedAt])
   @@index([orgId, status])
+}
+
+/// One application in a team's lead sheet: a row with an Applied time, in the Pool or in a
+/// recruiter's tab, read from every tab every 15 minutes. The dashboards count "New leads"
+/// from these, so a day's number is the rows the sheet has for that day (US Central), whether
+/// Crystal got the lead or it went straight to a recruiter (sheet-applications.ts).
+model SheetApplication {
+  id        String   @id @default(cuid())
+  orgId     String
+  /// The sheet's LeadID; without one, the phone (or the name) and the Applied time.
+  key       String
+  phoneE164 String?
+  name      String?
+  appliedAt DateTime
+  tab       String
+  /// The recruiter's status; "New" while the row waits in the Pool.
+  status    String
+  seenAt    DateTime @default(now())
+
+  @@unique([orgId, key])
+  @@index([orgId, appliedAt])
+  @@index([orgId, phoneE164])
 }
 
 /// A driver a recruiter is bringing in (sheet status Need to bring / Need approval / Application),

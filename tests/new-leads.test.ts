@@ -27,7 +27,7 @@ describe("new applicants on the dashboards", () => {
 
 describe("dashboard card lists", () => {
   it("shows what Crystal got, counting only calls after an old lead was picked", async () => {
-    const { leadRow, sheetRowItems } = await import("@/lib/dashboard-lists");
+    const { leadRow } = await import("@/lib/dashboard-lists");
     const { crystalResult } = await import("@/lib/talked");
     const t = (h: number) => new Date(Date.UTC(2026, 10, 12, h));
     const none = new Set<string>();
@@ -46,12 +46,5 @@ describe("dashboard card lists", () => {
     expect(crystalResult(calls("INTERESTED", "NO_CONTACT"), none)).toMatchObject({ talked: true, interested: true, text: "interested" });
     expect(crystalResult(calls("INCOMPLETE"), new Set(["k0"]))).toMatchObject({ talked: true, interested: false, text: "talked, no clear yes or no" });
     expect(crystalResult(calls("NO_CONTACT", "OPT_OUT"), none)).toMatchObject({ talked: false, text: "asked not to call" });
-
-    const rows = sheetRowItems(
-      [{ id: "r1", orgId: "o1", phoneE164: "+13125550101", tab: "Molly", status: "Need to talk", name: null }, { id: "r2", orgId: "o1", phoneE164: "+13125550102", tab: "Pool", status: "New", name: "Al Fox" }],
-      [{ id: "l1", orgId: "o1", phoneE164: "+13125550101", firstName: "Ken", lastName: "Wu" }],
-      (_o, tab) => (tab === "Molly" ? "Molly" : null), () => null,
-    );
-    expect(rows.map((r) => [r.reached, r.item.name, r.item.leadId, r.item.sub])).toEqual([[true, "Ken Wu", "l1", "Molly"], [false, "Al Fox", null, "Pool"]]);
   });
 });

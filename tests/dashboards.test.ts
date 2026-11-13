@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { addLead, resetDb, seedBase } from "./helpers";
 import { onePerPhone, orderStatuses, parseApplied, saveSheetRows, sheetRowsOf, sheetStatus, tabStats, talkedBy } from "@/lib/sheet-rows";
+import { saveSheetApplications } from "@/lib/sheet-applications";
 import { markCallMade, scheduledByRecruiter, scheduledCalls } from "@/lib/scheduled-calls";
 import { ringCentralHref } from "@/components/call-now";
 
@@ -44,6 +45,13 @@ describe("lead sheet rows for the dashboards", () => {
       { phoneE164: "+12145550103", tab: "Molly", status: "Hired", appliedAt: old },
       { phoneE164: "+12145550104", tab: "Pool", status: "New", appliedAt: at },
     ]);
+    // The period numbers come from the sheet's applications (one per LeadID), saved by the same reading.
+    await saveSheetApplications(base.org.id, [
+      { key: "S-1", phoneE164: "+12145550101", name: null, tab: "Molly", status: "Application", appliedAt: at },
+      { key: "S-2", phoneE164: "+12145550102", name: null, tab: "Molly", status: "No answer", appliedAt: at },
+      { key: "S-3", phoneE164: "+12145550103", name: null, tab: "Molly", status: "Hired", appliedAt: old },
+      { key: "S-4", phoneE164: "+12145550104", name: null, tab: "Pool", status: "New", appliedAt: at },
+    ], true);
     const stats = await tabStats([base.org.id], { gte: new Date("2026-10-29T00:00:00Z"), lt: new Date("2026-11-01T00:00:00Z") });
     expect(stats.map((t) => [t.recruiter ?? t.tab, t.total])).toEqual([["Molly", 2], ["Pool", 1]]);
     expect(stats[0]).toMatchObject({ recruiterId: base.molly.id, byStatus: { Application: 1, "No answer": 1 } });
