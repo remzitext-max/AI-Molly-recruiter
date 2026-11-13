@@ -434,6 +434,8 @@ model CallAttempt {
   personaKey      String?
   lastEventAt     DateTime?
   errorMessage    String?
+  /// When Crystal handed the call to a recruiter: it may run on past her own 15 minutes.
+  transferRequestedAt DateTime?
   createdAt       DateTime     @default(now())
 
   @@index([leadId, status])

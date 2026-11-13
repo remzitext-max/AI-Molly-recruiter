@@ -25,8 +25,9 @@ import { BarRow, Delta } from "@/components/dash-parts";
 
 const PLACED = { notIn: ["CANCELED", "SCHEDULED"] as ("CANCELED" | "SCHEDULED")[] };
 const INTERESTED_UP = ["INTERESTED", "DOCS_REQUESTED", "DOCS_RECEIVED", "HANDOFF_READY", "HANDED_OFF"];
-// Rough AI call cost per started minute (Telnyx line + agent), shown to the owner as an estimate.
-const COST_PER_MIN = 0.06;
+// AI call cost per billed minute, shown to the owner as an estimate. Measured on the Telnyx bill,
+// Nov 1-13 2026: $119.32 for 1,702 billed minutes = $0.0701 (agent $0.05, LLM $0.01, line and recording $0.01).
+const COST_PER_MIN = 0.07;
 const median = (xs: number[]) => {
   if (!xs.length) return null;
   const s = [...xs].sort((a, b) => a - b);

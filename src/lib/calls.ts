@@ -218,9 +218,19 @@ async function providerLimitHit(now: Date) {
   return !!(await db.callAttempt.findFirst({ where: { status: "CANCELED", createdAt: { gte: new Date(now.getTime() - 15 * 60_000) }, errorMessage: { contains: "Daily OB profile limit" } }, select: { id: true } }));
 }
 
-/** Real (non-demo) calls that are dialing or talking now. Attempts older than 20 min are ignored as stuck. */
+/**
+ * Real (non-demo) calls that are dialing or talking now. Attempts older than 20 min are ignored as
+ * stuck, except a call handed to a recruiter: it runs on after Crystal's own 15 minutes and holds
+ * its Telnyx lines (the driver's and the recruiter's) until it ends or reaches the whole-call cap.
+ */
 export async function realCallsInProgress(now = new Date()) {
-  return db.callAttempt.count({ where: { isDemo: false, status: { in: ["SCHEDULED", "DIALING", "RINGING", "IN_PROGRESS"] }, createdAt: { gte: new Date(now.getTime() - 20 * 60_000) } } });
+  const since = (seconds: number) => new Date(now.getTime() - seconds * 1000);
+  return db.callAttempt.count({
+    where: {
+      isDemo: false, status: { in: ["SCHEDULED", "DIALING", "RINGING", "IN_PROGRESS"] },
+      OR: [{ createdAt: { gte: since(20 * 60) } }, { transferRequestedAt: { not: null }, createdAt: { gte: since(config.callTimeLimitSeconds + 5 * 60) } }],
+    },
+  });
 }
 
 async function releaseLock(leadId: string, attemptId: string) {
@@ -594,6 +604,8 @@ export async function requestTransfer(attemptId: string, reason: "HUMAN_REQUESTE
     await transferFailedTask(lead.id, attemptId, recruiter.id, (e as Error).message);
     return { ok: false, transfer: "failed", detail: (e as Error).message };
   }
+  // From here the call may outlast Crystal's own time limit: the line guard keeps counting it (realCallsInProgress).
+  await db.callAttempt.update({ where: { id: attemptId }, data: { transferRequestedAt: new Date() } });
   await enqueue("transfer.timeout", { handoffId: handoff.id }, { runAt: new Date(Date.now() + 90_000), idempotencyKey: `transfer-timeout:${handoff.id}` });
   return { ok: true, transfer: "pending" };
 }

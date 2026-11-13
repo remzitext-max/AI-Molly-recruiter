@@ -56,8 +56,18 @@ export const config = {
     // Remzi: never name Molly to drivers, so an old AGENT_ROLE in .env that does is ignored.
     get role() { const r = env("AGENT_ROLE"); return r && !/molly/i.test(r) ? r : "the recruiters' assistant"; },
   },
-  /** Real calls allowed at the same time; the Telnyx account has 1 outbound channel. */
+  /**
+   * Real calls Crystal places at the same time (MAX_CONCURRENT_CALLS). Each holds a Telnyx line and a
+   * transfer to a recruiter holds one more, so the Telnyx application's outbound channel limit must be higher.
+   */
   get maxConcurrentCalls() { return Math.max(1, Number(env("MAX_CONCURRENT_CALLS") ?? 1) || 1); },
+  /**
+   * Cap on a whole outbound call, in seconds. Telnyx counts it to the end of the call, the driver's talk
+   * with a recruiter after a transfer included: at 15 minutes it cut two such talks (2026-11-12, 11-13).
+   * Crystal's own talk stays capped at 15 minutes by the assistant's time_limit_secs
+   * (scripts/telnyx-setup.ts), which counts only while the assistant is on the call.
+   */
+  callTimeLimitSeconds: 2 * 60 * 60,
   telnyx: {
     get apiKey() { return env("TELNYX_API_KEY"); },
     get assistantId() { return env("TELNYX_ASSISTANT_ID"); },

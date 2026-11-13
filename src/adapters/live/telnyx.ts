@@ -45,7 +45,7 @@ export class TelnyxVoiceAgent implements VoiceAgentProvider {
         StatusCallbackEvent: "initiated ringing answered completed no-answer busy canceled failed",
         StatusCallbackMethod: "POST",
         ConversationCallback: callback,
-        TimeLimit: 15 * 60,
+        TimeLimit: config.callTimeLimitSeconds,
         // Stop ringing before voicemail answers: a voicemail pickup is billed and wastes a retry.
         Timeout: config.telnyx.ringSeconds,
       }),

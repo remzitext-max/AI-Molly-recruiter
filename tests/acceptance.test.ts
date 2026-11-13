@@ -4,6 +4,7 @@ import { stopAiCalls } from "../src/lib/leads";
 import { pollRingCentralInbound } from "../src/lib/messaging";
 import { fillScreeningFromTranscript } from "../src/lib/transcript-extract";
 import { realCallsInProgress } from "../src/lib/calls";
+import { config } from "../src/lib/config";
 import { fetchTelnyxTranscript } from "../src/lib/telnyx-transcript";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
@@ -355,6 +356,8 @@ describe("10. failed transfers", () => {
     const id = await lead(base, "wants_human");
     await drain();
     expect(await db.task.count({ where: { leadId: id, type: "TRANSFER_FAILED" } })).toBe(1);
+    // Nobody was dialed, so the call is not marked as handed to a recruiter.
+    expect(await db.callAttempt.count({ where: { leadId: id, transferRequestedAt: { not: null } } })).toBe(0);
   });
 
   it("successful transfer only after provider confirmation", async () => {
@@ -364,6 +367,8 @@ describe("10. failed transfers", () => {
     const h = await db.handoff.findFirstOrThrow({ where: { leadId: id, reason: "HUMAN_REQUESTED" } });
     expect(h.transferStatus).toBe("CONFIRMED");
     expect(await db.activityEvent.count({ where: { leadId: id, type: "TRANSFER_CONFIRMED" } })).toBe(1);
+    // The call is marked as handed to a recruiter: the line guard keeps counting it while they talk.
+    expect(await db.callAttempt.count({ where: { id: h.callAttemptId!, transferRequestedAt: { not: null } } })).toBe(1);
   });
 });
 
@@ -836,6 +841,21 @@ describe("Phone line limit", () => {
     await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "line-2", status: "COMPLETED" } });
     await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "line-3", status: "DIALING", createdAt: new Date(now.getTime() - 30 * 60_000) } });
     await db.callAttempt.create({ data: { leadId: l.id, provider: "mock", isDemo: true, idempotencyKey: "line-4", status: "IN_PROGRESS" } });
+    expect(await realCallsInProgress(now)).toBe(1);
+  });
+
+  it("keeps counting a call handed to a recruiter after 20 minutes, until the whole-call cap", async () => {
+    const base = await seedBase();
+    const l = await db.lead.create({ data: { orgId: base.org.id, campaignId: base.campaign.id, firstName: "Line", lastName: "Transfer", phoneE164: "+13125550191" } });
+    const now = new Date();
+    const ago = (min: number) => new Date(now.getTime() - min * 60_000);
+    // The driver has been talking with the recruiter for a while: the call still holds its lines.
+    await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "tr-1", status: "IN_PROGRESS", createdAt: ago(45), transferRequestedAt: ago(40) } });
+    expect(await realCallsInProgress(now)).toBe(1);
+    // It ended: no longer counted.
+    await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "tr-2", status: "COMPLETED", createdAt: ago(45), transferRequestedAt: ago(40) } });
+    // Past the whole-call cap Telnyx has cut it, so a status that never arrived does not block the lines.
+    await db.callAttempt.create({ data: { leadId: l.id, provider: "telnyx", idempotencyKey: "tr-3", status: "IN_PROGRESS", createdAt: ago(config.callTimeLimitSeconds / 60 + 10), transferRequestedAt: ago(config.callTimeLimitSeconds / 60) } });
     expect(await realCallsInProgress(now)).toBe(1);
   });
 });
