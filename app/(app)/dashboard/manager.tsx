@@ -1,6 +1,7 @@
-// The manager's dashboard: the team's results for the period, the drivers who need a push
-// (stuck in a status, from the Board), the recruiters, the funnel and booked calls. The
-// owner sees every team (a Teams table and the top recruiters) and the money block.
+// The manager's dashboard: the funnel of the period's new leads, the team's results, the
+// drivers who need a push (stuck in a status, from the Board), the recruiters, the hours
+// drivers pick up and booked calls. The owner sees every team (a Teams table and the top
+// recruiters) and the money block.
 import Link from "next/link";
 import { DateTime } from "luxon";
 import type { User } from "@prisma/client";
@@ -10,7 +11,7 @@ import { UPLOAD_PROVIDER } from "@/lib/recruiter-upload";
 import { RECALL_PREFIX } from "@/lib/sheet-recall";
 import { RETURNED } from "@/lib/old-leads";
 import { LEAD_SEL, leadRow, newLeadRow } from "@/lib/dashboard-lists";
-import { countNewLeads, newLeadsIn, type NewLead, type NotCrystal } from "@/lib/sheet-applications";
+import { countNewLeads, newLeadsIn, type NotCrystal } from "@/lib/sheet-applications";
 import { ListStat } from "@/components/list-stat";
 import { callsWithAnswers, talkedDrivers, teamsScope } from "@/lib/talked";
 import { countOf, orderStatuses, tabStats, talkedBy, type TabStats } from "@/lib/sheet-rows";
@@ -21,7 +22,11 @@ import { Card, initialsOf } from "@/components/ui";
 import { BoardStrip, DriverStat } from "@/components/board-strip";
 import { loadBoard, pushColumns, sheetDrivers, type BoardDriver } from "@/lib/board";
 import { scheduledCalls } from "@/lib/scheduled-calls";
-import { BarRow, Delta } from "@/components/dash-parts";
+import { Delta } from "@/components/dash-parts";
+import { funnelSteps } from "@/lib/funnel";
+import { FunnelRow } from "@/components/funnel-row";
+import { pickupHours } from "@/lib/pickup-hours";
+import { PickupHoursCard } from "@/components/pickup-hours";
 
 const PLACED = { notIn: ["CANCELED", "SCHEDULED"] as ("CANCELED" | "SCHEDULED")[] };
 const INTERESTED_UP = ["INTERESTED", "DOCS_REQUESTED", "DOCS_RECEIVED", "HANDOFF_READY", "HANDED_OFF"];
@@ -49,7 +54,7 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
   const [prevLeads, cohort, chartCalls, talkedList, tabs, recallRecs, revivedLeads, allTabs] = await Promise.all([
     countNewLeads(view.orgIds, scope, prev),
     newLeadsIn(view.orgIds, scope, range),
-    db.callAttempt.findMany({ where: { ...calls, status: PLACED, createdAt: range }, select: { id: true, createdAt: true, status: true, outcome: true, startedAt: true, endedAt: true } }),
+    db.callAttempt.findMany({ where: { ...calls, status: PLACED, createdAt: range }, select: { id: true, createdAt: true, status: true, outcome: true, direction: true, startedAt: true, endedAt: true } }),
     talkedDrivers(scope, range),
     tabStats(view.orgIds, range),
     db.leadSourceRecord.findMany({ where: { sourceRecordId: { startsWith: RECALL_PREFIX }, createdAt: range, lead: scope }, orderBy: { createdAt: "desc" }, select: { createdAt: true, lead: { select: LEAD_SEL } } }),
@@ -100,16 +105,6 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
   const cohortTalked = crystalRows.filter((r) => r.talked).length;
   const speed = median(crystalRows.filter((r) => r.n.lead!.calls[0]).map((r) => (r.n.lead!.calls[0].createdAt.getTime() - r.n.lead!.createdAt.getTime()) / 60000));
 
-  const funnel = [
-    { label: "New leads", n: newLeads },
-    { label: "Called by Crystal", n: crystalRows.filter((r) => r.called).length },
-    { label: "Talked to Crystal", n: cohortTalked },
-    { label: "Interested", n: crystalRows.filter((r) => INTERESTED_UP.includes(r.n.lead!.pipelineStatus)).length },
-    { label: "CDL received", n: crystalRows.filter((r) => r.n.lead!.documentStatus === "RECEIVED").length },
-    { label: "Application", n: cohort.filter(atApplication).length },
-    { label: "Hired", n: cohort.filter(isHired).length },
-  ];
-
   // The owner's row per team.
   const teamRows = view.owner && view.team === "all" ? view.orgs.map((o) => {
     const t = tabs.filter((x) => tabsOf(x, o.id));
@@ -134,9 +129,28 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
   const push = pushColumns(board.columns);
   const stuckTotal = push.reduce((n, c) => n + c.late, 0);
   const now = Date.now();
+  // The funnel row. Crystal's steps count the new leads she got; Application and Hired are the
+  // numbers of the two cards under the row (the sheet's status now), so the page has one of each.
+  const funnel = funnelSteps({
+    newLeads,
+    called: crystalRows.filter((r) => r.called).length,
+    talked: cohortTalked,
+    interested: crystalRows.filter((r) => INTERESTED_UP.includes(r.n.lead!.pipelineStatus)).length,
+    cdl: crystalRows.filter((r) => r.n.lead!.documentStatus === "RECEIVED").length,
+    application: appDrivers.length, hired: hiredDrivers.length,
+  });
 
   return (
     <>
+      <div className="sec-label">New leads · how far they got</div>
+      <div className="section">
+        <FunnelRow steps={funnel} />
+        <p className="fr-note">
+          New leads of this period (the lead sheet&apos;s rows by the day they applied, US Central) and how far each got. Application and Hired are the sheet&apos;s status now for every new lead
+          {otherRows.length ? `, also the ${otherRows.length} that did not go through Crystal` : ""}. Speed to first call: {mins(speed)} (median).
+        </p>
+      </div>
+
       <div className="sec-label">Results</div>
       <div className="stats six">
         <ListStat label="New leads" icon="leads" tone="blue" n={newLeads} sub={<Delta now={newLeads} prev={prevLeads} />}
@@ -195,30 +209,32 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
         </div>
       )}
 
-      <div className="grid two section">
-        <Card title="Funnel">
-          {funnel.map((f, i) => <BarRow key={f.label} label={f.label} n={f.n} max={funnel[0].n} total={i ? funnel[0].n : undefined} cols="130px 1fr 80px" />)}
-          <p className="small muted" style={{ margin: "10px 0 0" }}>New leads of this period (the lead sheet's rows by the day they applied, US Central) and how far each got. Speed to first call: {mins(speed)} (median).</p>
-        </Card>
+      <div className="section"><PickupHoursCard data={pickupHours(chartCalls, gave)} /></div>
+
+      <div className="section">
         {view.owner ? (
           <Card title="Money" right={<Link className="small" href="/ads">Facebook ads →</Link>}>
-            <div className="money-row"><span>Crystal calls (estimate)</span><strong>${(placedMins * COST_PER_MIN).toFixed(2)}</strong></div>
-            <div className="money-row"><span>Billed minutes</span><span>{placedMins}</span></div>
-            <div className="money-row"><span>Per driver talked to</span><span>{talkedList.length ? `$${((placedMins * COST_PER_MIN) / talkedList.length).toFixed(2)}` : "—"}</span></div>
-            <div className="money-row"><span>Drivers talked to (incl. re-calls)</span><span>{talkedList.length}</span></div>
+            <div className="money-grid">
+              <div className="money-row"><span>Crystal calls (estimate)</span><strong>${(placedMins * COST_PER_MIN).toFixed(2)}</strong></div>
+              <div className="money-row"><span>Billed minutes</span><span>{placedMins}</span></div>
+              <div className="money-row"><span>Per driver talked to</span><span>{talkedList.length ? `$${((placedMins * COST_PER_MIN) / talkedList.length).toFixed(2)}` : "—"}</span></div>
+              <div className="money-row"><span>Drivers talked to (incl. re-calls)</span><span>{talkedList.length}</span></div>
+            </div>
             <p className="small muted" style={{ margin: "10px 0 0" }}>~${COST_PER_MIN.toFixed(2)}/min, voicemail included; Telnyx billing has the exact spend. Facebook spend and cost per lead are on the Facebook ads page.</p>
           </Card>
         ) : (
           <Card title={`Booked calls (${booked.length})`}>
-            {booked.slice(0, 8).map((t) => {
-              const late = t.dueAt!.getTime() < now;
-              return (
-                <div className="money-row" key={t.id} data-profile={t.lead.id} style={{ cursor: "pointer" }}>
-                  <span><strong>{[t.lead.firstName, t.lead.lastName].filter(Boolean).join(" ") || "(no name)"}</strong> <span className="muted small">· {t.lead.assignedTo?.name ?? "no recruiter"}</span></span>
-                  <span className={late ? "bad-text" : "muted"}>{late ? "overdue" : DateTime.fromJSDate(t.dueAt!).setZone(ZONE).toFormat("ccc h:mm a")}</span>
-                </div>
-              );
-            })}
+            <div className="money-grid">
+              {booked.slice(0, 8).map((t) => {
+                const late = t.dueAt!.getTime() < now;
+                return (
+                  <div className="money-row" key={t.id} data-profile={t.lead.id} style={{ cursor: "pointer" }}>
+                    <span><strong>{[t.lead.firstName, t.lead.lastName].filter(Boolean).join(" ") || "(no name)"}</strong> <span className="muted small">· {t.lead.assignedTo?.name ?? "no recruiter"}</span></span>
+                    <span className={late ? "bad-text" : "muted"}>{late ? "overdue" : DateTime.fromJSDate(t.dueAt!).setZone(ZONE).toFormat("ccc h:mm a")}</span>
+                  </div>
+                );
+              })}
+            </div>
             {!booked.length && <p className="muted">No calls booked by Crystal for your recruiters in the next 24 hours.</p>}
           </Card>
         )}
@@ -228,9 +244,6 @@ export async function ManagerDashboard({ user, view, p }: { user: Pick<User, "id
 }
 
 const tabsOf = (t: TabStats, orgId: string) => t.orgId === orgId;
-// A new lead that got as far as an application / a hire: the sheet status, or the stage the site holds.
-const isHired = (n: NewLead) => n.lead?.hireStage === "HIRED" || ["Hired", "Our driver – working"].includes(n.status ?? "");
-const atApplication = (n: NewLead) => isHired(n) || n.status === "Application" || ["APPLICATION", "ORIENTATION"].includes(n.lead?.hireStage ?? "");
 const PROCESS = new Set<string>(ON_PROCESS);
 
 /** Each recruiter's tab: leads that applied in the period, reached, and their drivers on the board now. */
