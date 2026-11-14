@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { addLead, resetDb, seedBase } from "./helpers";
-import { onePerPhone, orderStatuses, parseApplied, saveSheetRows, sheetRowsOf, sheetStatus, tabStats, talkedBy } from "@/lib/sheet-rows";
+import { countOf, onePerPhone, orderStatuses, parseApplied, saveSheetRows, sheetRowsOf, sheetStatus, tabStats, talkedBy } from "@/lib/sheet-rows";
 import { saveSheetApplications } from "@/lib/sheet-applications";
 import { markCallMade, scheduledByRecruiter, scheduledCalls } from "@/lib/scheduled-calls";
 import { ringCentralHref } from "@/components/call-now";
@@ -34,6 +34,41 @@ describe("lead sheet rows for the dashboards", () => {
     ]);
     expect(one).toEqual([{ phoneE164: "+1", tab: "Molly", status: "Application", appliedAt: at, name: null, experience: null }]);
     expect(orderStatuses(["Hired", "Odd", "New", "Call back"])).toEqual(["New", "Call back", "Hired", "Odd"]);
+  });
+
+  it("puts a driver who applied again where the newest application says", () => {
+    const old = new Date("2026-08-20T15:00:00Z"), again = new Date("2026-11-10T15:00:00Z");
+    const first = { phoneE164: "+1", tab: "Mona", status: "Not interested", appliedAt: old };
+    const second = { phoneE164: "+1", tab: "Camila", status: "Application", appliedAt: again };
+    // Whichever tab the sheet lists first.
+    for (const rows of [[first, second], [second, first]]) expect(onePerPhone(rows)).toEqual([{ ...second, name: null, experience: null }]);
+    // Two rows nobody has worked: the newest one too.
+    expect(onePerPhone([{ ...first, status: "No answer" }, { ...second, status: "New" }])[0]).toMatchObject({ tab: "Camila", status: "New", appliedAt: again });
+    // As before: a worked row wins over a newer one nobody has worked, and of two copies of one application the first tab read stays.
+    expect(onePerPhone([first, { ...second, status: "No answer" }])[0]).toMatchObject({ tab: "Mona", status: "Not interested", appliedAt: old });
+    expect(onePerPhone([{ ...second, tab: "Mona" }, second])[0]).toMatchObject({ tab: "Mona" });
+    // A row without an Applied time does not replace one that has it.
+    expect(onePerPhone([second, { ...first, appliedAt: null }])[0]).toMatchObject({ tab: "Camila", appliedAt: again });
+  });
+
+  it("counts a driver who applied again the same on the Application card and in the Teams table", async () => {
+    const { sheetDrivers } = await import("@/lib/board");
+    const base = await seedBase();
+    const old = new Date("2026-08-20T15:00:00Z"), again = new Date("2026-11-10T15:00:00Z");
+    const range = { gte: new Date("2026-11-08T06:00:00Z"), lt: new Date("2026-11-15T06:00:00Z") };
+    // Alex's tab comes first in the sheet and holds the old "Not interested"; Molly has the new application.
+    await saveSheetRows(base.org.id, [
+      { phoneE164: "+12145550101", tab: "Alex", status: "Not interested", appliedAt: old },
+      { phoneE164: "+12145550101", tab: "Molly", status: "Application", appliedAt: again },
+    ]);
+    await saveSheetApplications(base.org.id, [
+      { key: "S-1", phoneE164: "+12145550101", name: null, tab: "Alex", status: "Not interested", appliedAt: old },
+      { key: "S-9", phoneE164: "+12145550101", name: null, tab: "Molly", status: "Application", appliedAt: again },
+    ], true);
+    const table = (await tabStats([base.org.id], range)).reduce((n, t) => n + countOf(t, "Application"), 0);
+    const card = await sheetDrivers([base.org.id], ["Application"], range);
+    expect([table, card.length]).toEqual([1, 1]);
+    expect(card[0]).toMatchObject({ status: "Application", tab: "Molly", recruiterId: base.molly.id });
   });
 
   it("counts every recruiter's tab by status for the period and names the recruiter", async () => {

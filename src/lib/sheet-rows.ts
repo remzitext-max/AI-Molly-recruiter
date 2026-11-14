@@ -37,12 +37,19 @@ export function sheetRowsOf(tab: string, headers: string[], rows: string[][], ph
   return out;
 }
 
-/** One row per phone: a recruiter's tab wins over the Pool, a worked status over New / No answer. */
+/**
+ * One row per phone: a recruiter's tab wins over the Pool, a worked status over New / No answer.
+ * Between two rows equal in both, the driver's newest application wins: a driver who applied
+ * again is where the new row says (last summer's "Not interested" must not hide this week's
+ * "Application"), whichever tab the sheet lists first.
+ */
 export function onePerPhone(rows: SheetRowIn[]) {
+  const rank = (r: SheetRowIn) => (isPool(r.tab) ? 0 : 2) + (UNWORKED.has(r.status) ? 0 : 1);
+  const applied = (r: SheetRowIn) => r.appliedAt?.getTime() ?? 0;
   const by = new Map<string, SheetRowIn>();
   for (const r of rows) {
     const o = by.get(r.phoneE164);
-    const better = !o || (isPool(o.tab) && !isPool(r.tab)) || (isPool(o.tab) === isPool(r.tab) && UNWORKED.has(o.status) && !UNWORKED.has(r.status));
+    const better = !o || rank(r) > rank(o) || (rank(r) === rank(o) && applied(r) > applied(o));
     if (better) by.set(r.phoneE164, { ...r, appliedAt: r.appliedAt ?? o?.appliedAt ?? null, name: r.name || o?.name || null, experience: r.experience || o?.experience || null });
   }
   return [...by.values()];
