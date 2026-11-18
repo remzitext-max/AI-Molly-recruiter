@@ -33,7 +33,7 @@ describe("referrals", () => {
     expect(await referrerOf(friend.id)).toMatchObject({ leadId: lead.id, name: "Ray Cole" });
 
     await db.screeningField.create({ data: { leadId: lead.id, key: "experience_years", reportedValue: "5 years", rawUtterance: "5", status: "CAPTURED", callAttemptId: attempt.id } });
-    expect(await buildCallReport(attempt.id)).toContain("🤝 Referral: Mike Stone +13125550199");
+    expect(await buildCallReport(attempt.id)).toContain("🤝 Referral: Mike Stone (312) 555-0199");
   });
 
   it("asks for referrals with the company's bonus", async () => {

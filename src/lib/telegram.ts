@@ -1,6 +1,7 @@
 // Posts a driver card to the owner's Telegram group after each AI call (a one-line note when nobody answered),
 // and forwards each CDL / medical card file a driver uploads.
 // Off unless TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set.
+import { displayPhone } from "./phone";
 import { config } from "./config";
 import { referralsOf, referrerOf } from "./referral";
 import { db } from "./db";
@@ -164,7 +165,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
   if (!a.startedAt || a.status === "VOICEMAIL") {
     // Nobody picked up: still tell the group the call was made, so a missing card is never a mystery.
     const why = MISSED[a.status] ?? a.status.toLowerCase().replace(/_/g, " ");
-    return [...tags, `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}: ${why}`, `☎️ ${v(l.phoneE164)}`, retryLine].join("\n");
+    return [...tags, `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}: ${why}`, `☎️ ${v(displayPhone(l.phoneE164))}`, retryLine].join("\n");
   }
   const secs = a.startedAt && a.endedAt ? Math.round((a.endedAt.getTime() - a.startedAt.getTime()) / 1000) : null;
   const ended = endedByText(whoEnded(a), config.agentPersona.name);
@@ -183,7 +184,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
       a.direction === "INBOUND"
         ? `📲 ${name || "A driver"} called ${v(config.agentPersona.name)} AI himself${secs !== null ? ` (${secs} sec)` : ""}: ${transferred ? "asked for a person" : "no answers collected"}`
         : `📞 ${v(config.agentPersona.name)} AI called ${name || "a driver"}${secs !== null ? ` (${secs} sec)` : ""}: ${transferred ? "driver asked for a person" : "no answers collected"}`,
-      `☎️ ${v(l.phoneE164)}`,
+      `☎️ ${v(displayPhone(l.phoneE164))}`,
       ...reviveLine(l),
       ...(await referralLines(l.id)),
       ...(endLine ? [endLine] : []),
@@ -211,7 +212,7 @@ export async function buildCallReport(attemptId: string): Promise<string | null>
     `🚛can drive: ${v(slot("weekly_miles"))}`,
     `🗣 English: ${v(slot("english_level"))}`,
     `✅ Ready date: ${v(slot("start_date"))}`,
-    `☎️Phone number : ${v(l.phoneE164)}`,
+    `☎️Phone number : ${v(displayPhone(l.phoneE164))}`,
     `⭐ Fit: ${v(fitText(fit))}`,
     ...(await referralLines(l.id)),
     ...recruiterCallLine(l),
@@ -257,7 +258,7 @@ export async function sendNewAdLeadToTelegram(leadId: string) {
     ...(await recruiterTags(l.id)),
     `🆕 New ${src} lead`,
     `🗒 ${esc([l.firstName, l.lastName].filter(Boolean).join(" ") || "Driver")}`,
-    `☎️ ${esc(l.phoneE164)}`,
+    `☎️ ${esc(displayPhone(l.phoneE164))}`,
     ...(l.state ? [`📍 ${esc(l.state)}`] : []),
     ...(ans(/^position$|solo|team/) ? [`🚛 ${esc(ans(/^position$|solo|team/)!)}`] : []),
     ...(ans(/experience|years/) ? [`🪪 CDL-A: ${esc(ans(/experience|years/)!)}`] : []),
@@ -294,7 +295,7 @@ export async function sendSmsReplyToTelegram(leadId: string, text: string) {
   const l = await db.lead.findUnique({ where: { id: leadId } });
   if (!l || l.isDemo) return { sent: false };
   const name = esc([l.firstName, l.lastName].filter(Boolean).join(" ") || "A driver");
-  await sendTelegram([...(await recruiterTags(l.id)), `💬 ${name} replied by text:`, `"${esc(text)}"`, `☎️ ${esc(l.phoneE164)}`].join("\n"), l.id);
+  await sendTelegram([...(await recruiterTags(l.id)), `💬 ${name} replied by text:`, `"${esc(text)}"`, `☎️ ${esc(displayPhone(l.phoneE164))}`].join("\n"), l.id);
   return { sent: true };
 }
 
@@ -319,7 +320,7 @@ export async function sendRecruiterCallReminder(leadId: string, at: Date) {
     ...(tags.length ? tags : [l.assignedTo ? `👤 ${esc(l.assignedTo.name)}` : "👤 No recruiter tab yet"]),
     `⏰ You have a scheduled call to this driver at ${esc(formatLocal(at, l.timezone))} driver time (${officeClock(at)} Tashkent)`,
     `🗒 ${name}`,
-    `☎️ ${esc(l.phoneE164)}`,
+    `☎️ ${esc(displayPhone(l.phoneE164))}`,
   ].join("\n"), l.id);
   return { sent: true };
 }
@@ -343,7 +344,7 @@ export async function sendConsentToTelegram(consentId: string) {
     ...(await recruiterTags(c.leadId)),
     `✅ Record check consent: AGREED`,
     `🗒 ${esc(name)}`,
-    `☎️ ${esc(c.lead.phoneE164)}`,
+    `☎️ ${esc(displayPhone(c.lead.phoneE164))}`,
     `✍️ Signed as: ${esc(c.fullName)}`,
     `🕒 ${c.createdAt.toISOString().replace("T", " ").slice(0, 16)} UTC`,
   ].join("\n"), c.leadId);
@@ -359,7 +360,7 @@ export async function sendDocumentToTelegram(documentId: string) {
   if (!d || d.deletedAt || d.lead.isDemo) return { sent: false, reason: "nothing to send" };
   const data = await getAdapters().storage.get(d.storageKey);
   const name = [d.lead.firstName, d.lead.lastName].filter(Boolean).join(" ");
-  const caption = [...(await recruiterTags(d.leadId)), `📎 CDL / medical card`, `🗒 ${name}`, `☎️ ${d.lead.phoneE164}`].join("\n");
+  const caption = [...(await recruiterTags(d.leadId)), `📎 CDL / medical card`, `🗒 ${name}`, `☎️ ${displayPhone(d.lead.phoneE164)}`].join("\n");
   const document = new File([new Uint8Array(data)], `${(name || "driver").replace(/[^A-Za-z0-9]+/g, "_")}.${d.storageKey.split(".").pop()}`, { type: d.mimeType });
   await postToGroup("sendDocument", { caption, document }, d.leadId, 60_000);
   return { sent: true };
@@ -374,7 +375,7 @@ function reviveLine(l: { reviveFrom?: string | null; reviveTab?: string | null }
 async function referralLines(leadId: string) {
   const [friends, by] = await Promise.all([referralsOf(leadId), referrerOf(leadId)]);
   return [
-    ...friends.map((f) => `🤝 Referral: ${esc([f.firstName, f.lastName].filter(Boolean).join(" ") || "no name")} ${esc(f.phoneE164)} (recruiter calls)`),
+    ...friends.map((f) => `🤝 Referral: ${esc([f.firstName, f.lastName].filter(Boolean).join(" ") || "no name")} ${esc(displayPhone(f.phoneE164))} (recruiter calls)`),
     ...(by ? [`🤝 Referred by ${esc(by.name)} ${esc(by.phone)}`] : []),
   ];
 }

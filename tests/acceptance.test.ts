@@ -609,7 +609,7 @@ describe("Telegram driver card", () => {
       "🚛can drive: 600 a day",
       "🗣 English: Good",
       "✅ Ready date: Next Monday",
-      "☎️Phone number : +12145550111",
+      "☎️Phone number : (214) 555-0111",
       "⭐ Fit: 65/100 · Possible fit: At-fault accident: yes",
       "🟢 Interested",
     ].join("\n"));
@@ -632,7 +632,7 @@ describe("Telegram driver card", () => {
     await db.screeningField.create({ data: { leadId: quiet.id, key: "english_level", reportedValue: "Good", callAttemptId: short.id } });
     const note = await buildCallReport(short.id);
     expect(note).toContain("called Frank D (26 sec): no answers collected");
-    expect(note).toContain("+18124065861");
+    expect(note).toContain("(812) 406-5861");
     expect(note).toMatch(/will try again \(attempt 1 of \d\)/);
 
     // Only real conversations of a minute or more (or a transfer) go to the group.
