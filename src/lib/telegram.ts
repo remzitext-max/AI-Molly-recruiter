@@ -83,12 +83,13 @@ export function telegramConfigured() {
  * reply to the first one, so the group can open one driver's whole history (calls,
  * texts, CDL photos) from a single message.
  */
-async function postToGroup(method: string, body: Record<string, string | Blob>, leadId?: string, timeoutMs?: number) {
+async function postToGroup(method: string, body: Record<string, string | Blob>, leadId?: string, timeoutMs?: number, orgId?: string) {
   const token = config.telegram.botToken;
   if (!token || !config.telegram.chatId) throw new Error("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not configured");
   const lead = leadId ? await db.lead.findUnique({ where: { id: leadId }, select: { telegramThread: true, org: { select: { isMain: true, telegramChatId: true } } } }) : null;
+  const org = lead?.org ?? (orgId ? await db.organization.findUnique({ where: { id: orgId }, select: { isMain: true, telegramChatId: true } }) : null);
   // A team's drivers go to the team's own group, never to the company's; no group, no message.
-  let configured = !lead || lead.org.isMain ? config.telegram.chatId : lead.org.telegramChatId;
+  let configured = !org || org.isMain ? config.telegram.chatId : org.telegramChatId;
   // YouTube / TikTok drivers have their own group.
   if (leadId && config.telegram.adLeadsChatId && (await isAdLead(leadId))) configured = config.telegram.adLeadsChatId;
   if (!configured) return;
@@ -124,6 +125,11 @@ const movedChats = new Map<string, string>();
 
 export async function sendTelegram(text: string, leadId?: string) {
   await postToGroup("sendMessage", { text, parse_mode: "HTML", disable_web_page_preview: "true" }, leadId);
+}
+
+/** A message about a whole team (not one driver) to that team's group. */
+export async function sendTeamTelegram(orgId: string, text: string) {
+  await postToGroup("sendMessage", { text, parse_mode: "HTML", disable_web_page_preview: "true" }, undefined, undefined, orgId);
 }
 
 /**

@@ -37,6 +37,7 @@ export type JobType =
   | "sheet.ad-lead"
   | "notify.telegram-ad-lead"
   | "learning.weekly"
+  | "notify.telegram-stuck"
   | "maintenance.backfill-applied";
 
 export async function enqueue(
