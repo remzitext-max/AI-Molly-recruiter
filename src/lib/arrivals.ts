@@ -133,6 +133,13 @@ const nameKey = (s: string) => s.toLowerCase().replace(/[^a-z ]/g, " ").replace(
  * recruiter probably forgot to mark them. Drivers who are not our leads are left out.
  */
 export async function arrivedNotHired(bookings: Booking[], from: string, to: string): Promise<ArrivedNotHired[]> {
+  return (await arrivedLeads(bookings, from, to)).filter((d) => !d.hired);
+}
+
+export interface ArrivedLead extends ArrivedNotHired { hired: boolean }
+
+/** Every driver the office marked ARRIVED on a day from..to who is our lead (same phone, else same full name), with whether the lead sheet says Hired. */
+export async function arrivedLeads(bookings: Booking[], from: string, to: string): Promise<ArrivedLead[]> {
   const arrived = bookings.filter((b) => /ARRIV/.test(b.status) && b.day >= from && b.day <= to);
   if (!arrived.length) return [];
   const phones = [...new Set(arrived.map((b) => b.phone).filter((p): p is string => !!p))];
@@ -144,7 +151,7 @@ export async function arrivedNotHired(bookings: Booking[], from: string, to: str
   const team = new Map(orgs.map((o) => [o.id, o.name]));
   const byName = new Map<string, typeof all>();
   for (const r of all) { const k = nameKey(r.name!); if (k.includes(" ")) byName.set(k, [...(byName.get(k) ?? []), r]); }
-  const out: ArrivedNotHired[] = [];
+  const out: ArrivedLead[] = [];
   const seen = new Set<string>();
   for (const b of arrived) {
     const rows = (b.phone ? byPhone.filter((r) => r.phoneE164 === b.phone) : []);
@@ -152,11 +159,26 @@ export async function arrivedNotHired(bookings: Booking[], from: string, to: str
     // One driver per phone; a name shared by two different phones is not guessed.
     const uniq = [...new Map(named.map((r) => [r.phoneE164, r])).values()];
     if (uniq.length !== 1 && !rows.length) continue;
-    if (named.some((r) => HIRED.test(r.status))) continue;
-    const r = named.find((x) => !/pool/i.test(x.tab)) ?? named[0];
+    const hired = named.some((r) => HIRED.test(r.status));
+    const r = named.find((x) => HIRED.test(x.status)) ?? named.find((x) => !/pool/i.test(x.tab)) ?? named[0];
     if (!r || seen.has(r.phoneE164)) continue;
     seen.add(r.phoneE164);
-    out.push({ name: b.name, day: b.day, recruiter: b.recruiter, team: team.get(r.orgId) ?? "", tab: r.tab, status: r.status });
+    out.push({ name: b.name, day: b.day, recruiter: b.recruiter, team: team.get(r.orgId) ?? "", tab: r.tab, status: r.status, hired });
   }
   return out.sort((a, b) => a.day.localeCompare(b.day));
+}
+
+export interface MonthArrivals { month: string; arrived: number; hired: number; notMarked: number; byTeam: Record<string, number> }
+
+/** Our leads who arrived at the office, per calendar month of the arrival day. */
+export function monthlyArrivals(list: ArrivedLead[]): MonthArrivals[] {
+  const by = new Map<string, MonthArrivals>();
+  for (const d of list) {
+    const m = d.day.slice(0, 7);
+    const x = by.get(m) ?? by.set(m, { month: m, arrived: 0, hired: 0, notMarked: 0, byTeam: {} }).get(m)!;
+    x.arrived++;
+    if (d.hired) x.hired++; else x.notMarked++;
+    x.byTeam[d.team] = (x.byTeam[d.team] ?? 0) + 1;
+  }
+  return [...by.values()].sort((a, b) => a.month.localeCompare(b.month));
 }

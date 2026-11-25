@@ -39,7 +39,7 @@ describe("office arrivals sheet", () => {
 
 import { beforeEach } from "vitest";
 import { db } from "@/lib/db";
-import { arrivedNotHired, type Booking } from "@/lib/arrivals";
+import { arrivedLeads, arrivedNotHired, monthlyArrivals, type Booking } from "@/lib/arrivals";
 import { resetDb, seedBase } from "./helpers";
 
 describe("arrived but not hired", () => {
@@ -60,5 +60,10 @@ describe("arrived but not hired", () => {
       b("Ann One", "+16825550101", "NO NEWS", "2026-11-21"), // not arrived
     ], "2026-11-01", "2026-11-25");
     expect(out.map((x) => [x.name, x.tab, x.status])).toEqual([["ANN ONE", "David", "Application"], ["cara three", "Molly", "Need approval"]]);
+    const all = await arrivedLeads([b("ANN ONE", "+16825550101"), b("BOB TWO", "+16825550102", "ARRIVED", "2026-10-03"), b("cara three", null)], "2026-09-01", "2026-11-25");
+    expect(monthlyArrivals(all)).toEqual([
+      { month: "2026-10", arrived: 1, hired: 1, notMarked: 0, byTeam: { "Demo Freight": 1 } },
+      { month: "2026-11", arrived: 2, hired: 0, notMarked: 2, byTeam: { "Demo Freight": 2 } },
+    ]);
   });
 });

@@ -20,7 +20,7 @@ import { appendAdLeadRow } from "../ad-leads-sheet";
 import { sendMetaStageEvent, syncMetaLeads, type MetaStage } from "../meta";
 import { runLearningReport } from "../learning";
 import { sendStuckReport } from "../stuck-report";
-import { sendArrivalsReport } from "../arrivals-report";
+import { sendArrivalsReport, sendMonthlyArrivals } from "../arrivals-report";
 import { backfillApplied } from "../applied-backfill";
 
 export const handlers: Record<string, JobHandler> = {
@@ -116,6 +116,7 @@ export const handlers: Record<string, JobHandler> = {
   },
   "learning.weekly": async (job) => { await runLearningReport((job.payload as { orgId: string }).orgId); },
   "notify.telegram-arrivals": async () => { await sendArrivalsReport(); },
+  "notify.telegram-arrivals-month": async () => { await sendMonthlyArrivals(); },
   "notify.telegram-stuck": async (job) => { await sendStuckReport((job.payload as { orgId: string }).orgId); },
   "notify.telegram-ad-lead": async (job) => {
     await sendNewAdLeadToTelegram((job.payload as { leadId: string }).leadId);

@@ -39,6 +39,7 @@ export type JobType =
   | "learning.weekly"
   | "notify.telegram-stuck"
   | "notify.telegram-arrivals"
+  | "notify.telegram-arrivals-month"
   | "maintenance.backfill-applied";
 
 export async function enqueue(

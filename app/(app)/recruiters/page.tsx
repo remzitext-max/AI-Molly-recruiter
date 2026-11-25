@@ -9,7 +9,8 @@ import { scheduledByRecruiter } from "@/lib/scheduled-calls";
 import { loadOnProcess } from "@/lib/on-process";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { Card, PageHead, initialsOf } from "@/components/ui";
-import { arrivalStats, arrivedNotHired, loadArrivals } from "@/lib/arrivals";
+import { arrivalStats, arrivedLeads, loadArrivals, monthlyArrivals } from "@/lib/arrivals";
+import { DateTime } from "luxon";
 
 /**
  * Every recruiter's numbers side by side for a manager: how many drivers they got, how
@@ -34,7 +35,9 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
   ]);
   const arrivals = await loadArrivals(p.now);
   const office = "error" in arrivals ? null : arrivalStats(arrivals.bookings, arrivals.office, p.from.toISODate()!, p.to.toISODate()!, p.now.toISODate()!);
-  const notHired = "error" in arrivals ? [] : await arrivedNotHired(arrivals.bookings, p.from.toISODate()!, p.to.toISODate()!);
+  const ourArrived = "error" in arrivals ? [] : await arrivedLeads(arrivals.bookings, p.from.toISODate()!, p.to.toISODate()!);
+  const notHired = ourArrived.filter((d) => !d.hired);
+  const months = monthlyArrivals(ourArrived);
   const appliedIn = new Set(appliedRows.map((r) => `${r.orgId}|${r.phoneE164}`));
   const process = processAll.filter((d) => appliedIn.has(`${d.orgId}|${d.phone}`));
   const teamName = new Map(view.orgs.map((o) => [o.id, o.name]));
@@ -155,6 +158,21 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
                   </tr>
                 ))}
                 {!office!.length && <tr><td colSpan={7} className="muted">Nobody was booked to come in this period.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {months.length > 0 && (
+          <div style={{ margin: "12px 14px 0" }}>
+            <strong>Our leads who arrived at the office, by month</strong>
+            <div className="small muted">Drivers the office marked ARRIVED who are our leads (same phone, or full name, in a lead sheet). Hired in sheet = their lead sheet status says Hired.</div>
+            <table style={{ marginTop: 6 }}>
+              <thead><tr><th>Month</th><th className="num">Arrived</th><th className="num">Hired in sheet</th><th className="num">Not marked Hired</th><th>By team</th></tr></thead>
+              <tbody>
+                {months.map((m) => (
+                  <tr key={m.month}><td><strong>{DateTime.fromISO(`${m.month}-01`).toFormat("MMMM yyyy")}</strong></td><td className="num"><strong>{m.arrived}</strong></td><td className="num">{m.hired}</td><td className="num">{m.notMarked}</td>
+                    <td className="small">{Object.entries(m.byTeam).map(([t, n]) => `${t} ${n}`).join(" · ")}</td></tr>
+                ))}
               </tbody>
             </table>
           </div>

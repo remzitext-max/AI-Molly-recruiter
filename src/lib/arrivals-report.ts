@@ -3,7 +3,7 @@
 import { DateTime } from "luxon";
 import { config } from "./config";
 import { enqueue } from "./jobs/queue";
-import { arrivedNotHired, loadArrivals } from "./arrivals";
+import { arrivedLeads, arrivedNotHired, loadArrivals, monthlyArrivals } from "./arrivals";
 import { sendTelegram, telegramConfigured } from "./telegram";
 
 const ZONE = "America/Chicago";
@@ -43,3 +43,30 @@ export async function scheduleArrivalsReport(now = new Date()) {
 }
 
 
+
+/** Last month's arrivals of our leads (the office's ARRIVED), for the 1st of the month. */
+export async function buildMonthlyArrivals(now = DateTime.now().setZone(ZONE)): Promise<string> {
+  const a = await loadArrivals(now);
+  if ("error" in a) throw new Error(`Arrivals sheet: ${a.error}`);
+  const m = now.minus({ months: 1 }).startOf("month");
+  const list = await arrivedLeads(a.bookings, m.toISODate()!, m.endOf("month").toISODate()!);
+  const [x] = monthlyArrivals(list);
+  const head = `📅 ${m.toFormat("MMMM yyyy")}: our leads who arrived at the office`;
+  if (!x) return `${head}\n\nNone.`;
+  return [head, "", `Arrived: <b>${x.arrived}</b>`, `Marked Hired in the lead sheet: ${x.hired}`, `Not marked Hired: ${x.notMarked}`,
+    ...Object.entries(x.byTeam).map(([t, n]) => `• ${esc(t)}: ${n}`)].join("\n");
+}
+
+export async function sendMonthlyArrivals() {
+  if (!telegramConfigured()) return { sent: false };
+  await sendTelegram(await buildMonthlyArrivals());
+  return { sent: true };
+}
+
+/** Called by the worker every minute: queues last month's report on the 1st, 9 AM US Central. */
+export async function scheduleMonthlyArrivals(now = new Date()) {
+  if (config.mode !== "live") return;
+  const t = DateTime.fromJSDate(now, { zone: ZONE });
+  if (t.day !== 1 || t.hour !== 9) return;
+  await enqueue("notify.telegram-arrivals-month", {}, { idempotencyKey: `arrivals-month:${t.toISODate()}`, maxAttempts: 3 });
+}
