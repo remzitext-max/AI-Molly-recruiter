@@ -36,3 +36,29 @@ describe("office arrivals sheet", () => {
     ]);
   });
 });
+
+import { beforeEach } from "vitest";
+import { db } from "@/lib/db";
+import { arrivedNotHired, type Booking } from "@/lib/arrivals";
+import { resetDb, seedBase } from "./helpers";
+
+describe("arrived but not hired", () => {
+  beforeEach(async () => { await resetDb(); });
+  it("lists our leads the office marked ARRIVED whose sheet status is not Hired", async () => {
+    const { org } = await seedBase();
+    await db.sheetRow.createMany({ data: [
+      { orgId: org.id, phoneE164: "+16825550101", tab: "David", status: "Application", name: "Ann One" },
+      { orgId: org.id, phoneE164: "+16825550102", tab: "David", status: "Hired", name: "Bob Two" },
+      { orgId: org.id, phoneE164: "+16825550103", tab: "Molly", status: "Need approval", name: "Cara Three" },
+    ] });
+    const b = (name: string, phone: string | null, status = "ARRIVED", day = "2026-11-20"): Booking => ({ day, name, status, recruiter: "David", phone });
+    const out = await arrivedNotHired([
+      b("ANN ONE", "+16825550101"), // by phone, Application -> listed
+      b("BOB TWO", "+16825550102"), // Hired -> not listed
+      b("cara three", null), // no phone, by full name -> listed
+      b("Dan Four", "+16825550104"), // not our lead
+      b("Ann One", "+16825550101", "NO NEWS", "2026-11-21"), // not arrived
+    ], "2026-11-01", "2026-11-25");
+    expect(out.map((x) => [x.name, x.tab, x.status])).toEqual([["ANN ONE", "David", "Application"], ["cara three", "Molly", "Need approval"]]);
+  });
+});

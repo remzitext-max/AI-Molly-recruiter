@@ -9,7 +9,7 @@ import { scheduledByRecruiter } from "@/lib/scheduled-calls";
 import { loadOnProcess } from "@/lib/on-process";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { Card, PageHead, initialsOf } from "@/components/ui";
-import { arrivalStats, loadArrivals } from "@/lib/arrivals";
+import { arrivalStats, arrivedNotHired, loadArrivals } from "@/lib/arrivals";
 
 /**
  * Every recruiter's numbers side by side for a manager: how many drivers they got, how
@@ -34,6 +34,7 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
   ]);
   const arrivals = await loadArrivals(p.now);
   const office = "error" in arrivals ? null : arrivalStats(arrivals.bookings, arrivals.office, p.from.toISODate()!, p.to.toISODate()!, p.now.toISODate()!);
+  const notHired = "error" in arrivals ? [] : await arrivedNotHired(arrivals.bookings, p.from.toISODate()!, p.to.toISODate()!);
   const appliedIn = new Set(appliedRows.map((r) => `${r.orgId}|${r.phoneE164}`));
   const process = processAll.filter((d) => appliedIn.has(`${d.orgId}|${d.phone}`));
   const teamName = new Map(view.orgs.map((o) => [o.id, o.name]));
@@ -154,6 +155,20 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
                   </tr>
                 ))}
                 {!office!.length && <tr><td colSpan={7} className="muted">Nobody was booked to come in this period.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {notHired.length > 0 && (
+          <div style={{ margin: "12px 14px 0" }}>
+            <strong>Arrived but not Hired in the lead sheet ({notHired.length})</strong>
+            <div className="small muted">Our leads (same phone or full name) the office marked ARRIVED in this period; their lead sheet status is still not Hired.</div>
+            <table style={{ marginTop: 6 }}>
+              <thead><tr><th>Driver</th><th>Arrived</th><th>Recruiter (arrivals sheet)</th><th>Lead sheet</th><th>Status now</th></tr></thead>
+              <tbody>
+                {notHired.map((d) => (
+                  <tr key={`${d.name}-${d.day}`}><td>{d.name}</td><td className="small">{d.day}</td><td>{d.recruiter}</td><td className="small">{d.team}, {d.tab} tab</td><td><strong>{d.status}</strong></td></tr>
+                ))}
               </tbody>
             </table>
           </div>

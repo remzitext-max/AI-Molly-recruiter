@@ -6,13 +6,15 @@ import { DateTime } from "luxon";
 import { config } from "./config";
 import { buildAssertion } from "../adapters/live/google-sheets";
 import { providerFetch } from "../adapters/live/http";
+import { normalizePhone } from "./phone";
+import { db } from "./db";
 
 const ZONE = "America/Chicago";
 const DAILY_TAB = "DAILY DRIVERS UPDATE";
 const OFFICE_TAB = "OFFICE MONITORING";
 const CACHE_MS = 15 * 60_000;
 
-export interface Booking { day: string; name: string; status: string; recruiter: string }
+export interface Booking { day: string; name: string; status: string; recruiter: string; phone: string | null }
 export interface OfficeRow { day: string; status: string; recruiter: string }
 export interface ArrivalStats { recruiter: string; booked: number; arrived: number; noShow: number; coming: number; hitRoad: number; left: number; declined: number }
 
@@ -45,7 +47,7 @@ export function parseDaily(values: unknown[][], now: DateTime): Booking[] {
     if (head && !/\d{3}\D*\d{4}/.test(cell(r, phoneI)) && (!cell(r, nameI) || head[0] === cell(r, nameI))) { day = dayOf(Number(head[2]), Number(head[3]), now, head[1]); continue; }
     const name = cell(r, nameI), recruiter = cell(r, recI);
     if (!day || !name || !recruiter) continue;
-    out.push({ day, name, status: cell(r, statusI).toUpperCase(), recruiter: recruiterName(recruiter) });
+    out.push({ day, name, status: cell(r, statusI).toUpperCase(), recruiter: recruiterName(recruiter), phone: normalizePhone(cell(r, phoneI).split(/[\/,]/)[0]) });
   }
   return out;
 }
@@ -119,4 +121,42 @@ export async function loadArrivals(now = DateTime.now().setZone(ZONE)): Promise<
     const msg = (e as Error).message;
     return { error: /403|PERMISSION|caller does not have/i.test(msg) ? "the sheet is not open to the site (share it with anyone with the link, or with the site's service account)" : msg.slice(0, 200) };
   }
+}
+
+export interface ArrivedNotHired { name: string; day: string; recruiter: string; team: string; tab: string; status: string }
+const HIRED = /^(hired|our driver)/i;
+const nameKey = (s: string) => s.toLowerCase().replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+
+/**
+ * Drivers the office marked ARRIVED on a day from..to (ISO) who are our leads (same phone, or
+ * else the same full name, in a lead sheet) but whose sheet status is still not Hired: the
+ * recruiter probably forgot to mark them. Drivers who are not our leads are left out.
+ */
+export async function arrivedNotHired(bookings: Booking[], from: string, to: string): Promise<ArrivedNotHired[]> {
+  const arrived = bookings.filter((b) => /ARRIV/.test(b.status) && b.day >= from && b.day <= to);
+  if (!arrived.length) return [];
+  const phones = [...new Set(arrived.map((b) => b.phone).filter((p): p is string => !!p))];
+  const [byPhone, all, orgs] = await Promise.all([
+    db.sheetRow.findMany({ where: { phoneE164: { in: phones } } }),
+    db.sheetRow.findMany({ where: { name: { not: null } }, select: { orgId: true, phoneE164: true, tab: true, status: true, name: true } }),
+    db.organization.findMany({ select: { id: true, name: true } }),
+  ]);
+  const team = new Map(orgs.map((o) => [o.id, o.name]));
+  const byName = new Map<string, typeof all>();
+  for (const r of all) { const k = nameKey(r.name!); if (k.includes(" ")) byName.set(k, [...(byName.get(k) ?? []), r]); }
+  const out: ArrivedNotHired[] = [];
+  const seen = new Set<string>();
+  for (const b of arrived) {
+    const rows = (b.phone ? byPhone.filter((r) => r.phoneE164 === b.phone) : []);
+    const named = rows.length ? rows : (byName.get(nameKey(b.name)) ?? []);
+    // One driver per phone; a name shared by two different phones is not guessed.
+    const uniq = [...new Map(named.map((r) => [r.phoneE164, r])).values()];
+    if (uniq.length !== 1 && !rows.length) continue;
+    if (named.some((r) => HIRED.test(r.status))) continue;
+    const r = named.find((x) => !/pool/i.test(x.tab)) ?? named[0];
+    if (!r || seen.has(r.phoneE164)) continue;
+    seen.add(r.phoneE164);
+    out.push({ name: b.name, day: b.day, recruiter: b.recruiter, team: team.get(r.orgId) ?? "", tab: r.tab, status: r.status });
+  }
+  return out.sort((a, b) => a.day.localeCompare(b.day));
 }
