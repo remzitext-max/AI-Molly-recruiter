@@ -147,6 +147,40 @@ function notesLines(a: { outcome: string | null; summary: string | null; metrics
 
 const NOTES_MARK = "📝 Notes:";
 
+const unesc = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+/** Visible length as Telegram counts it (entities count as one character). */
+const shown = (s: string) => unesc(s).length;
+const cutLine = (line: string, max: number) => (shown(line) > max ? esc(unesc(line).slice(0, max - 1)) + "…" : line);
+
+/**
+ * A recording's caption holds 1024 characters (an over-long one is refused and the whole card is
+ * lost). The card is cut at a line, before the notes when it is long, and never inside "&amp;";
+ * the rest follows as a reply message.
+ */
+export function splitCaption(text: string, max = 1024): { caption: string; rest: string | null } {
+  if (shown(text) <= max) return { caption: text, rest: null };
+  const lines = text.split("\n");
+  const notesAt = lines.indexOf(NOTES_MARK);
+  const head: string[] = [];
+  let n = 0;
+  for (const [i, raw] of lines.entries()) {
+    if (i === notesAt && head.length) break;
+    const line = cutLine(raw, max);
+    const add = shown(line) + (head.length ? 1 : 0);
+    if (n + add > max) break;
+    head.push(line);
+    n += add;
+  }
+  const tail = lines.slice(head.length);
+  let rest = "";
+  for (const raw of tail) {
+    const line = cutLine(raw, 4000);
+    if (shown(rest) + shown(line) + 1 > 4000) break;
+    rest += (rest ? "\n" : "") + line;
+  }
+  return { caption: head.join("\n"), rest: rest || null };
+}
+
 const MISSED: Record<string, string> = { NO_ANSWER: "no answer", BUSY: "line busy", VOICEMAIL: "voicemail, hung up", FAILED: "call did not go through", CANCELED: "call canceled" };
 
 /** The owner's driver card for one finished call: a full card when the driver talked, a one-line note otherwise, or null for demo records. */
@@ -280,10 +314,9 @@ export async function sendCallReport(attemptId: string) {
     const who = [a.lead.firstName, a.lead.lastName].filter(Boolean).join(" ") || "driver";
     const audio = new File([new Uint8Array(data)], `${who.replace(/[^A-Za-z0-9]+/g, "_")}_call.${a.recordingKey.split(".").pop()}`, { type: recordingMime(a.recordingKey) });
     // A caption holds 1024 characters: a long card's notes follow as a reply.
-    const cut = text.length > 1024 ? text.indexOf(NOTES_MARK) : -1;
-    const caption = cut > 0 ? text.slice(0, cut).trimEnd() : text.slice(0, 1024);
+    const { caption, rest } = splitCaption(text);
     await postToGroup("sendAudio", { caption, parse_mode: "HTML", audio }, a.leadId, 120_000);
-    if (cut > 0) await sendTelegram(text.slice(cut).slice(0, 4000), a.leadId);
+    if (rest) await sendTelegram(rest, a.leadId);
     return { sent: true, withRecording: true };
   }
   await sendTelegram(text, a?.leadId);
