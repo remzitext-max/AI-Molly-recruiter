@@ -62,8 +62,10 @@ const squeeze = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "").replace(/(
 export function tabForUser(u: { name: string; sheetTab: string | null }, tabs: string[]): string | null {
   if (u.sheetTab?.trim()) return u.sheetTab.trim();
   if (/demo/i.test(u.name)) return null;
+  // Whole name first ("Alex P" login ↔ "Alex P" tab), then the first name ("Denis Smith" ↔ "Dennis").
+  const full = squeeze(u.name);
   const first = squeeze(u.name.trim().split(/\s+/)[0] ?? "");
-  return (first.length >= 3 && tabs.find((t) => squeeze(t) === first)) || null;
+  return (full.length >= 3 && tabs.find((t) => squeeze(t) === full)) || (first.length >= 3 && tabs.find((t) => squeeze(t) === first)) || null;
 }
 
 /**

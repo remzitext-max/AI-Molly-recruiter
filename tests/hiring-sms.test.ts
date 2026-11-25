@@ -450,6 +450,10 @@ describe("leads moved to a recruiter's tab in the lead sheet", () => {
     expect(tabForUser({ name: "Molly (demo recruiter)", sheetTab: null }, tabs)).toBeNull();
     expect(tabForUser({ name: "Bob", sheetTab: null }, tabs)).toBeNull();
     expect(tabForUser({ name: "Bob", sheetTab: "Ben" }, tabs)).toBe("Ben");
+    // A tab with a last initial: the whole login name matches it.
+    expect(tabForUser({ name: "Alex P", sheetTab: null }, ["Pool", "Alex P"])).toBe("Alex P");
+    expect(tabForUser({ name: "Alex P", sheetTab: null }, ["Alex", "Alex P"])).toBe("Alex P");
+    expect(tabForUser({ name: "Alex", sheetTab: null }, ["Alex", "Alex P"])).toBe("Alex");
   });
 
   it("are assigned to that recruiter, and a later transfer on the site stays", async () => {
