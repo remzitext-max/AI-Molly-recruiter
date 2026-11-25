@@ -82,4 +82,14 @@ describe("statistics-only board (Third team)", () => {
     const out = await arrivedLeads([b("JERON JORDAN", "+13125550111"), b("KAY ZEE", "+13125550112")], "2026-09-01", "2026-09-30", rows);
     expect(out.map((x) => [x.name, x.team, x.tab, x.hired])).toEqual([["JERON JORDAN", "Third team", "Martin", true], ["KAY ZEE", "Third team", "Martin", false]]);
   });
+
+  it("matches a team-pair arrival row by either name", async () => {
+    await seedBase();
+    const rows = parseBoardTab([
+      ["LeadID", "Applied", "Name", "Phone", "Alt phone", "Status"],
+      ["S-9", "2026-10-01 10:00", "Brianna Langan", "(312) 555-0199", "", "Need to talk"],
+    ], "Third team", "David");
+    const out = await arrivedLeads([{ day: "2026-10-05", name: "BRIANNA LANGAN and RAPHY HILARIO", status: "ARRIVED", recruiter: "David", phone: "+13125550000" }], "2026-10-01", "2026-10-31", rows);
+    expect(out.map((x) => [x.tab, x.status])).toEqual([["David", "Need to talk"]]);
+  });
 });

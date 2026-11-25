@@ -191,7 +191,10 @@ export async function arrivedLeads(bookings: Booking[], from: string, to: string
   const seen = new Set<string>();
   for (const b of arrived) {
     const rows = (b.phone ? byPhone.filter((r) => r.phoneE164 === b.phone) : []);
-    const named = rows.length ? rows : (byName.get(nameKey(b.name)) ?? []);
+    // A team pair is one arrival row ("Brianna Langan and Raphy Hilario"): try each name.
+    const unique = (k: string) => { const m = byName.get(k) ?? []; return new Set(m.map((r) => r.phoneE164)).size === 1 ? m : []; };
+    const parts = b.name.split(/\s+and\s+|\/|&/i).map(nameKey).filter((k) => k.includes(" "));
+    const named = rows.length ? rows : (byName.get(nameKey(b.name)) ?? parts.map(unique).find((m) => m.length) ?? []);
     // One driver per phone; a name shared by two different phones is not guessed.
     const uniq = [...new Map(named.map((r) => [r.phoneE164, r])).values()];
     if (uniq.length !== 1 && !rows.length) continue;
