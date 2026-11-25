@@ -39,7 +39,7 @@ describe("office arrivals sheet", () => {
 
 import { beforeEach } from "vitest";
 import { db } from "@/lib/db";
-import { arrivedLeads, arrivedNotHired, monthlyArrivals, type Booking } from "@/lib/arrivals";
+import { arrivedLeads, arrivedNotHired, monthlyArrivals, parseBoardTab, type Booking } from "@/lib/arrivals";
 import { resetDb, seedBase } from "./helpers";
 
 describe("arrived but not hired", () => {
@@ -65,5 +65,21 @@ describe("arrived but not hired", () => {
       { month: "2026-10", arrived: 1, hired: 1, notMarked: 0, byTeam: { "Demo Freight": 1 } },
       { month: "2026-11", arrived: 2, hired: 0, notMarked: 2, byTeam: { "Demo Freight": 2 } },
     ]);
+  });
+});
+
+describe("statistics-only board (Third team)", () => {
+  beforeEach(async () => { await resetDb(); });
+  it("reads lead rows and matches arrived drivers to it", async () => {
+    await seedBase();
+    const rows = parseBoardTab([
+      ["LeadID", "Applied", "Name", "Phone", "Alt phone", "Status"],
+      ["S-1", "2026-09-01 10:00", "Jeron Jordan", "(312) 555-0111", "", "Hired"],
+      ["S-2", "2026-09-01 10:00", "Kay Zee", "(312) 555-0112", "", "No answer"],
+    ], "Third team", "Martin");
+    expect(rows).toHaveLength(2);
+    const b = (name: string, phone: string): Booking => ({ day: "2026-09-15", name, status: "ARRIVED", recruiter: "Martin", phone });
+    const out = await arrivedLeads([b("JERON JORDAN", "+13125550111"), b("KAY ZEE", "+13125550112")], "2026-09-01", "2026-09-30", rows);
+    expect(out.map((x) => [x.name, x.team, x.tab, x.hired])).toEqual([["JERON JORDAN", "Third team", "Martin", true], ["KAY ZEE", "Third team", "Martin", false]]);
   });
 });

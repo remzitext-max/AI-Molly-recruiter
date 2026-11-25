@@ -35,7 +35,7 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
   ]);
   const arrivals = await loadArrivals(p.now);
   const office = "error" in arrivals ? null : arrivalStats(arrivals.bookings, arrivals.office, p.from.toISODate()!, p.to.toISODate()!, p.now.toISODate()!);
-  const ourArrived = "error" in arrivals ? [] : await arrivedLeads(arrivals.bookings, p.from.toISODate()!, p.to.toISODate()!);
+  const ourArrived = "error" in arrivals ? [] : await arrivedLeads(arrivals.bookings, p.from.toISODate()!, p.to.toISODate()!, arrivals.extra);
   const notHired = ourArrived.filter((d) => !d.hired);
   const months = monthlyArrivals(ourArrived);
   const appliedIn = new Set(appliedRows.map((r) => `${r.orgId}|${r.phoneE164}`));
@@ -165,9 +165,9 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
         {months.length > 0 && (
           <div style={{ margin: "12px 14px 0" }}>
             <strong>Our leads who arrived at the office, by month</strong>
-            <div className="small muted">Drivers the office marked ARRIVED who are our leads (same phone, or full name, in a lead sheet). Hired in sheet = their lead sheet status says Hired.</div>
+            <div className="small muted">Drivers the office marked ARRIVED who are our leads (same phone, or full name, in a lead sheet). Arrived and Hired = their lead sheet status says Hired. The Third team&apos;s board is read only for these numbers.{!("error" in arrivals) && arrivals.extraError && <> <span className="bad-text">{arrivals.extraError}.</span></>}</div>
             <table style={{ marginTop: 6 }}>
-              <thead><tr><th>Month</th><th className="num">Arrived</th><th className="num">Hired in sheet</th><th className="num">Not marked Hired</th><th>By team</th></tr></thead>
+              <thead><tr><th>Month</th><th className="num">Arrived</th><th className="num" title="Arrived and their lead sheet status says Hired">Arrived and Hired</th><th className="num">Not marked Hired</th><th>By team</th></tr></thead>
               <tbody>
                 {months.map((m) => (
                   <tr key={m.month}><td><strong>{DateTime.fromISO(`${m.month}-01`).toFormat("MMMM yyyy")}</strong></td><td className="num"><strong>{m.arrived}</strong></td><td className="num">{m.hired}</td><td className="num">{m.notMarked}</td>

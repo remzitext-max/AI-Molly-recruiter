@@ -15,7 +15,7 @@ export async function buildArrivalsReport(now = DateTime.now().setZone(ZONE)): P
   const a = await loadArrivals(now);
   if ("error" in a) throw new Error(`Arrivals sheet: ${a.error}`);
   const from = now.minus({ days: BACK_DAYS }).toISODate()!, to = now.minus({ days: GRACE_DAYS }).toISODate()!;
-  const list = await arrivedNotHired(a.bookings, from, to);
+  const list = await arrivedNotHired(a.bookings, from, to, a.extra);
   const head = `📋 Arrived at the office but not Hired in the lead sheet\n<i>Arrived ${DateTime.fromISO(from).toFormat("MMM d")} – ${DateTime.fromISO(to).toFormat("MMM d")}; please set Hired (or the real status) in the sheet</i>`;
   if (!list.length) return `${head}\n\n✅ None: every arrived driver of ours is marked.`;
   const lines = list.map((d) => `• ${esc(d.name)} · arrived ${DateTime.fromISO(d.day).toFormat("MMM d")} · ${esc(d.recruiter)} · ${esc(d.team)}, ${esc(d.tab)} tab: <b>${esc(d.status)}</b>`);
@@ -49,11 +49,11 @@ export async function buildMonthlyArrivals(now = DateTime.now().setZone(ZONE)): 
   const a = await loadArrivals(now);
   if ("error" in a) throw new Error(`Arrivals sheet: ${a.error}`);
   const m = now.minus({ months: 1 }).startOf("month");
-  const list = await arrivedLeads(a.bookings, m.toISODate()!, m.endOf("month").toISODate()!);
+  const list = await arrivedLeads(a.bookings, m.toISODate()!, m.endOf("month").toISODate()!, a.extra);
   const [x] = monthlyArrivals(list);
   const head = `📅 ${m.toFormat("MMMM yyyy")}: our leads who arrived at the office`;
   if (!x) return `${head}\n\nNone.`;
-  return [head, "", `Arrived: <b>${x.arrived}</b>`, `Marked Hired in the lead sheet: ${x.hired}`, `Not marked Hired: ${x.notMarked}`,
+  return [head, "", `Arrived: <b>${x.arrived}</b>`, `Arrived and Hired (lead sheet): ${x.hired}`, `Not marked Hired: ${x.notMarked}`,
     ...Object.entries(x.byTeam).map(([t, n]) => `• ${esc(t)}: ${n}`)].join("\n");
 }
 

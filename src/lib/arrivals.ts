@@ -90,7 +90,28 @@ export function arrivalStats(bookings: Booking[], office: OfficeRow[], from: str
   return [...by.values()].sort((a, b) => b.arrived - a.arrived || b.booked - a.booked || a.recruiter.localeCompare(b.recruiter));
 }
 
-let cache: { at: number; bookings: Booking[]; office: OfficeRow[] } | null = null;
+/** A lead row of a board that is read only for statistics (no team on the site, nobody called). */
+export interface BoardRow { orgId: string; phoneE164: string; tab: string; status: string; name: string | null }
+/** Lead boards read only for these numbers: the Third team's (Remzi, 2026-11-25). */
+export const STATS_BOARDS = [{ id: "1rCCQcpcpCNYHniI5EmPVkQD_wGtQR2c3WiTBcHLEalQ", team: "Third team" }];
+
+/** One board's lead rows from every tab with a Phone header (Pool rows have no Status: "New"). */
+export function parseBoardTab(values: unknown[][], team: string, tab: string): BoardRow[] {
+  const hi = values.findIndex((r) => r.some((c) => /^phone$/i.test(String(c ?? "").trim())));
+  if (hi < 0) return [];
+  const h = values[hi].map((c) => String(c ?? "").trim().toLowerCase());
+  const ni = h.indexOf("name"), pi = h.indexOf("phone"), ai = h.findIndex((x) => /^alt/.test(x)), si = h.indexOf("status");
+  const out: BoardRow[] = [];
+  for (const r of values.slice(hi + 1)) {
+    for (const raw of [cell(r, pi), cell(r, ai)]) {
+      const phone = normalizePhone(raw);
+      if (phone) out.push({ orgId: `board:${team}`, phoneE164: phone, tab, status: cell(r, si) || "New", name: cell(r, ni) || null });
+    }
+  }
+  return out;
+}
+
+let cache: { at: number; bookings: Booking[]; office: OfficeRow[]; extra: BoardRow[]; extraError: string | null } | null = null;
 
 async function token() {
   const a = config.arrivals;
@@ -105,7 +126,7 @@ async function token() {
 }
 
 /** The sheet's bookings and office rows (cached 15 minutes), or why they can't be read. */
-export async function loadArrivals(now = DateTime.now().setZone(ZONE)): Promise<{ bookings: Booking[]; office: OfficeRow[] } | { error: string }> {
+export async function loadArrivals(now = DateTime.now().setZone(ZONE)): Promise<{ bookings: Booking[]; office: OfficeRow[]; extra: BoardRow[]; extraError: string | null } | { error: string }> {
   const a = config.arrivals;
   if (!a.serviceAccountEmail || !a.privateKey) return { error: "no Google service account in .env" };
   if (cache && Date.now() - cache.at < CACHE_MS) return cache;
@@ -115,7 +136,20 @@ export async function loadArrivals(now = DateTime.now().setZone(ZONE)): Promise<
     const res = await providerFetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(a.spreadsheetId)}/values:batchGet?${ranges}&majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`, { headers: { authorization: `Bearer ${t}` } });
     const j = (await res.json()) as { valueRanges?: { values?: unknown[][] }[] };
     const [daily, office] = j.valueRanges ?? [];
-    cache = { at: Date.now(), bookings: parseDaily(daily?.values ?? [], now), office: parseOffice(office?.values ?? [], now) };
+    // The statistics-only boards: a failure there (not shared yet) must not hide the arrivals.
+    let extra: BoardRow[] = [], extraError: string | null = null;
+    for (const b of STATS_BOARDS) {
+      try {
+        const meta = await providerFetch(`https://sheets.googleapis.com/v4/spreadsheets/${b.id}?fields=sheets.properties.title`, { headers: { authorization: `Bearer ${t}` } });
+        const tabs = (((await meta.json()) as { sheets?: { properties: { title: string } }[] }).sheets ?? []).map((x) => x.properties.title).filter((x) => !/how to use|teammates/i.test(x));
+        const q = tabs.map((x) => `ranges=${encodeURIComponent(`'${x.replace(/'/g, "''")}'!A:Z`)}`).join("&");
+        const v = (await (await providerFetch(`https://sheets.googleapis.com/v4/spreadsheets/${b.id}/values:batchGet?${q}&majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`, { headers: { authorization: `Bearer ${t}` } })).json()) as { valueRanges?: { values?: unknown[][] }[] };
+        (v.valueRanges ?? []).forEach((r, i) => { extra.push(...parseBoardTab(r.values ?? [], b.team, tabs[i].replace(/^\W+\s*/, ""))); });
+      } catch (e) {
+        extraError = `${b.team} board can't be read (${/403|PERMISSION/i.test((e as Error).message) ? "not shared with the site's service account" : (e as Error).message.slice(0, 120)})`;
+      }
+    }
+    cache = { at: Date.now(), bookings: parseDaily(daily?.values ?? [], now), office: parseOffice(office?.values ?? [], now), extra, extraError };
     return cache;
   } catch (e) {
     const msg = (e as Error).message;
@@ -132,23 +166,25 @@ const nameKey = (s: string) => s.toLowerCase().replace(/[^a-z ]/g, " ").replace(
  * else the same full name, in a lead sheet) but whose sheet status is still not Hired: the
  * recruiter probably forgot to mark them. Drivers who are not our leads are left out.
  */
-export async function arrivedNotHired(bookings: Booking[], from: string, to: string): Promise<ArrivedNotHired[]> {
-  return (await arrivedLeads(bookings, from, to)).filter((d) => !d.hired);
+export async function arrivedNotHired(bookings: Booking[], from: string, to: string, extra: BoardRow[] = []): Promise<ArrivedNotHired[]> {
+  return (await arrivedLeads(bookings, from, to, extra)).filter((d) => !d.hired);
 }
 
 export interface ArrivedLead extends ArrivedNotHired { hired: boolean }
 
 /** Every driver the office marked ARRIVED on a day from..to who is our lead (same phone, else same full name), with whether the lead sheet says Hired. */
-export async function arrivedLeads(bookings: Booking[], from: string, to: string): Promise<ArrivedLead[]> {
+export async function arrivedLeads(bookings: Booking[], from: string, to: string, extra: BoardRow[] = []): Promise<ArrivedLead[]> {
   const arrived = bookings.filter((b) => /ARRIV/.test(b.status) && b.day >= from && b.day <= to);
   if (!arrived.length) return [];
   const phones = [...new Set(arrived.map((b) => b.phone).filter((p): p is string => !!p))];
-  const [byPhone, all, orgs] = await Promise.all([
-    db.sheetRow.findMany({ where: { phoneE164: { in: phones } } }),
+  const [dbByPhone, dbAll, orgs] = await Promise.all([
+    db.sheetRow.findMany({ where: { phoneE164: { in: phones } }, select: { orgId: true, phoneE164: true, tab: true, status: true, name: true } }),
     db.sheetRow.findMany({ where: { name: { not: null } }, select: { orgId: true, phoneE164: true, tab: true, status: true, name: true } }),
     db.organization.findMany({ select: { id: true, name: true } }),
   ]);
-  const team = new Map(orgs.map((o) => [o.id, o.name]));
+  const byPhone: BoardRow[] = [...dbByPhone, ...extra.filter((r) => phones.includes(r.phoneE164))];
+  const all: BoardRow[] = [...dbAll, ...extra.filter((r) => r.name)];
+  const team = new Map([...orgs.map((o) => [o.id, o.name] as const), ...STATS_BOARDS.map((b) => [`board:${b.team}`, b.team] as const)]);
   const byName = new Map<string, typeof all>();
   for (const r of all) { const k = nameKey(r.name!); if (k.includes(" ")) byName.set(k, [...(byName.get(k) ?? []), r]); }
   const out: ArrivedLead[] = [];
