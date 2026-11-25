@@ -9,6 +9,7 @@ import { scheduledByRecruiter } from "@/lib/scheduled-calls";
 import { loadOnProcess } from "@/lib/on-process";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { Card, PageHead, initialsOf } from "@/components/ui";
+import { arrivalStats, loadArrivals } from "@/lib/arrivals";
 
 /**
  * Every recruiter's numbers side by side for a manager: how many drivers they got, how
@@ -31,6 +32,8 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
     Promise.all(view.orgIds.map((orgId) => loadOnProcess({ id: user.id, role: "ADMIN", orgId }).then((x) => x.map((d) => ({ ...d, orgId }))))).then((x) => x.flat()),
     db.sheetRow.findMany({ where: { orgId: { in: view.orgIds }, appliedAt: p.range }, select: { orgId: true, phoneE164: true } }),
   ]);
+  const arrivals = await loadArrivals(p.now);
+  const office = "error" in arrivals ? null : arrivalStats(arrivals.bookings, arrivals.office, p.from.toISODate()!, p.to.toISODate()!, p.now.toISODate()!);
   const appliedIn = new Set(appliedRows.map((r) => `${r.orgId}|${r.phoneE164}`));
   const process = processAll.filter((d) => appliedIn.has(`${d.orgId}|${d.phone}`));
   const teamName = new Map(view.orgs.map((o) => [o.id, o.name]));
@@ -119,6 +122,44 @@ export default async function Recruiters({ searchParams }: { searchParams: Promi
         <p className="small muted" style={{ margin: "8px 14px 12px" }}>
           Sheet columns are the recruiter&apos;s own tab in the lead sheet (read every 15 minutes), counting drivers who applied in this period by their status now. Click a recruiter of your team for their leads.
           {unowned.length > 0 && <> Recruiters marked &quot;no login&quot; have a tab in the sheet but no login here, so Crystal&apos;s numbers and booked calls can&apos;t be counted for them; add them on the Users page.</>}
+        </p>
+      </Card>
+      <Card flush title="Office arrivals (HIREX daily drivers sheet)">
+        {"error" in arrivals ? (
+          <p className="small muted" style={{ margin: "8px 14px 12px" }}>The arrivals sheet can&apos;t be read yet: {arrivals.error}.</p>
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Recruiter (as written in the sheet)</th>
+                  <th className="num" title="Drivers booked to come to the office on a day of this period">Booked</th>
+                  <th className="num" title="Status ARRIVED">Arrived</th>
+                  <th className="num" title="Booked for a past day and not ARRIVED">Did not come</th>
+                  <th className="num" title="Booked for today, not arrived yet">Coming today</th>
+                  <th className="num" title="OFFICE MONITORING: arrived in this period and got a truck and a load">Hit the road</th>
+                  <th className="num" title="OFFICE MONITORING: left or declined at the office">Left / declined</th>
+                </tr>
+              </thead>
+              <tbody>
+                {office!.map((r) => (
+                  <tr key={r.recruiter}>
+                    <td><strong>{r.recruiter}</strong></td>
+                    <td className="num">{r.booked}</td>
+                    <td className="num"><strong>{r.arrived}</strong> <span className="muted">{pct(r.arrived, r.booked)}%</span></td>
+                    <td className="num">{r.noShow}</td>
+                    <td className="num">{r.coming}</td>
+                    <td className="num">{r.hitRoad}</td>
+                    <td className="num">{r.left + r.declined}</td>
+                  </tr>
+                ))}
+                {!office!.length && <tr><td colSpan={7} className="muted">Nobody was booked to come in this period.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="small muted" style={{ margin: "8px 14px 12px" }}>
+          From the office&apos;s arrivals sheet (read every 15 minutes, all teams together: the sheet has no team column). Drivers recruiters brought themselves count too. Days are the booked day (Central time); Hit the road counts by arrival day.
         </p>
       </Card>
     </>
