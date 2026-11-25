@@ -160,8 +160,10 @@ export const config = {
   /** The office's arrivals sheet (HIREX DAILY DRIVERS UPDATE), read with its own service account. */
   arrivals: {
     get spreadsheetId() { return env("ARRIVALS_SHEET_ID") ?? "1hxuEg7qXyUEr86tnUslOHCl2_hDe8gF-yPcmeZ4Fv1Q"; },
-    get serviceAccountEmail() { return env("ARRIVALS_SERVICE_ACCOUNT_EMAIL"); },
-    get privateKey() { return env("ARRIVALS_SERVICE_ACCOUNT_PRIVATE_KEY")?.replace(/\\n/g, "\n"); },
+    // Own account when set; else the lead sheets' account (the sheet is open to anyone with the link,
+    // so it reads it without being added to the sheet's share list).
+    get serviceAccountEmail() { return env("ARRIVALS_SERVICE_ACCOUNT_EMAIL") ?? env("GOOGLE_SERVICE_ACCOUNT_EMAIL"); },
+    get privateKey() { return (env("ARRIVALS_SERVICE_ACCOUNT_PRIVATE_KEY") ?? env("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY"))?.replace(/\\n/g, "\n"); },
   },
   elevenlabs: {
     get apiKey() { return env("ELEVENLABS_API_KEY"); },

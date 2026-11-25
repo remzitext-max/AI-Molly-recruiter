@@ -105,7 +105,7 @@ async function token() {
 /** The sheet's bookings and office rows (cached 15 minutes), or why they can't be read. */
 export async function loadArrivals(now = DateTime.now().setZone(ZONE)): Promise<{ bookings: Booking[]; office: OfficeRow[] } | { error: string }> {
   const a = config.arrivals;
-  if (!a.serviceAccountEmail || !a.privateKey) return { error: "not set up (ARRIVALS_SERVICE_ACCOUNT_EMAIL / ARRIVALS_SERVICE_ACCOUNT_PRIVATE_KEY missing in .env)" };
+  if (!a.serviceAccountEmail || !a.privateKey) return { error: "no Google service account in .env" };
   if (cache && Date.now() - cache.at < CACHE_MS) return cache;
   try {
     const t = await token();
@@ -117,6 +117,6 @@ export async function loadArrivals(now = DateTime.now().setZone(ZONE)): Promise<
     return cache;
   } catch (e) {
     const msg = (e as Error).message;
-    return { error: /403|PERMISSION|caller does not have/i.test(msg) ? `the sheet is not shared with ${a.serviceAccountEmail}` : msg.slice(0, 200) };
+    return { error: /403|PERMISSION|caller does not have/i.test(msg) ? "the sheet is not open to the site (share it with anyone with the link, or with the site's service account)" : msg.slice(0, 200) };
   }
 }
